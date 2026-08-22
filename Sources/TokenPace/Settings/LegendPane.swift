@@ -3,40 +3,22 @@ import TokenPaceKit
 
 // MARK: - LegendPane (#261)
 
-/// Appearance › Legend — the visual language, explained.
+/// Appearance › Legend — the visual language, explained. The one page in Settings that **sets
+/// nothing**; explains what the widget's colors/styles/glyphs mean.
 ///
-/// The one page in Settings that **sets nothing**. Everything the widget encodes into very little
-/// pixel area — five pacing colours, three bar styles, a handful of glyphs — was until now explained
-/// only in `USER-GUIDE.md`, in issue threads and in the maintainer's head. A reader who saw a blue
-/// bar or a raised hand had no way, inside the app, to find out what it meant.
-///
-/// Three rules shaped the content, each of which corrected a real line while it was being drafted:
-///
-/// 1. **No word from the code.** `surface`, `window`, `gap`, `pacing`, `calm` are this project's
-///    vocabulary, not the reader's. They see *Menu bar* and *Dropdown* (as Appearance names them) and
-///    think "between resets", not "the window".
-/// 2. **A term lives where it was introduced.** `now-marker` is captioned on the diagram before the
-///    rules below it use the word. An earlier draft dropped the caption that introduced *gap* and left
-///    three rules referring to something no longer named anywhere on screen.
-/// 3. **Mute what is not the subject; full ink for what is.** The explanation lines *are* the content
-///    here — the bar beside them is the illustration, not the other way round. They are drawn in
-///    `.primary`, not the `.secondary` a settings row's subtitle would use.
+/// Content rules: no word from the code (`surface`, `pacing`, `calm`) — use the reader's vocabulary;
+/// a term is captioned before rules below it use it; explanation lines are drawn `.primary` since
+/// they are the content here, not a subtitle.
 struct LegendPane: View {
 
-    /// Read purely to force a rebuild when the theme flips.
-    ///
-    /// The dropdown specimens are non-template `NSImage`s, so their semantic colours are resolved at
-    /// bake time and do **not** re-resolve on a theme change. Without this dependency the bars would
-    /// stay frozen in whichever theme the page was first opened under — the same reason
-    /// `BarStylePicker` reads it. The menu-bar specimens are immune (pinned `.vibrantDark`).
+    /// Forces a rebuild on theme flip: the dropdown specimens are non-template `NSImage`s baked once,
+    /// so they don't re-resolve on their own (same reason `BarStylePicker` reads this). Menu-bar
+    /// specimens are immune (pinned `.vibrantDark`).
     @Environment(\.colorScheme) private var colorScheme
 
-    /// The vibrant appearance the popup bars are baked under.
-    ///
-    /// Vibrant rather than plain: the live bars are drawn inside an `NSMenu`, where the palette
-    /// resolves differently — measured, the track comes back opaque there instead of translucent, and
-    /// the greens differ outright. Passed explicitly rather than read from `NSApp` inside the
-    /// renderer, because this view can be hosted under a forced appearance.
+    /// Vibrant, not plain: the live bars draw inside an `NSMenu`, where the palette resolves
+    /// differently (opaque track, different greens) from a plain window. Passed explicitly since
+    /// this view can be hosted under a forced appearance.
     private var barAppearance: NSAppearance? {
         NSAppearance(named: colorScheme == .dark ? .vibrantDark : .vibrantLight)
     }
@@ -54,12 +36,9 @@ struct LegendPane: View {
 
     // MARK: 1 · Colours
 
-    /// The five tiers, plus the muted white that is not a sixth.
-    ///
-    /// The subtitle carries this section's real work. It names the **purpose** — pace, not level — and
-    /// its second half pre-empts the misreading #254 documented as near-universal: a horizontal bar
-    /// beside a percentage reads as a progress bar, and the colour then looks like "how full", which
-    /// is the one thing it never means.
+    /// The five tiers, plus the muted white that is not a sixth. The subtitle's second half pre-empts
+    /// the near-universal misreading (#254): a horizontal bar beside a percentage reads as "how full",
+    /// which the color never means — it means pace.
     private var colorSection: some View {
         Section(header: heading("What a bar’s color says",
                                 detail: "how fast you’re spending, not how much")) {
@@ -75,10 +54,8 @@ struct LegendPane: View {
         }
     }
 
-    /// What each tier means, keyed by the status word the dropdown prints for it.
-    ///
-    /// Kept beside the words rather than in `LegendCatalog`: the kit type carries the *states*, which
-    /// are testable, while these are presentation copy that belongs with the view drawing them.
+    /// Kept here rather than in `LegendCatalog`: the kit type carries the testable *states*, this is
+    /// presentation copy.
     private static let tierDetail: [String: String] = [
         "far behind pace": "big surplus · spend freely · 5-hour & 7-day bars only",
         "on pace": "all good · keep going",
@@ -89,22 +66,9 @@ struct LegendPane: View {
 
     // MARK: 2 · Menu bar
 
-    /// Two renders of the widget: both bars, then only the seven-day one.
-    ///
-    /// **One story, not two illustrations.** The seven-day bar is identical in both and the five-hour
-    /// bar — the calm one — is what disappears, which is exactly what `TopBarHiding` does in the live
-    /// widget. A pair of unrelated states would have left the reader hunting for which of several
-    /// differences the section was about.
-    ///
-    /// **Two equal halves, each centred within its own.** The row splits the width evenly rather than
-    /// packing both cases against the leading edge, and nothing divides them: a rule between two
-    /// pictures of the same widget would say they are separate subjects, when the whole point is that
-    /// one is the other a moment later.
-    ///
-    /// Centring is what makes the halves comparable despite differing widths — `snapshotImage()` sizes
-    /// each render from its own layout, so the one-bar image is genuinely narrower. Left-aligned, that
-    /// difference reads as the widget having moved; centred, each specimen sits in the middle of the
-    /// space it is being compared in.
+    /// Two renders of the same widget: both bars, then only the seven-day one — showing what
+    /// `TopBarHiding` does live. Two equal, centred halves rather than left-aligned: centring keeps
+    /// the differently-sized specimens comparable instead of reading as the widget having moved.
     private var menuBarSection: some View {
         Section(header: heading("Menu bar", detail: nil)) {
             HStack(alignment: .top, spacing: 0) {
@@ -124,8 +88,7 @@ struct LegendPane: View {
                              caption: String) -> some View {
         VStack(alignment: .center, spacing: 7) {
             Image(nsImage: LegendRenderer.menuBarImage(fiveHour: fiveHour, sevenDay: sevenDay))
-                // The menu bar is dark under either theme, so the specimen needs a dark plate to sit
-                // on — the same argument `BarStylePicker`'s black tile makes.
+                // The menu bar is dark under either theme, so the specimen needs a dark plate.
                 .padding(.horizontal, 5).padding(.vertical, 3)
                 .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(Color.black.opacity(colorScheme == .dark ? 0.35 : 0.8)))
@@ -139,21 +102,13 @@ struct LegendPane: View {
 
     // MARK: 3 · Balance & Pressure
 
-    /// Both marker-less styles, drawn from **one** state so the reader can see they measure the same
-    /// quantity from different zeros (`pressureLength ≡ max(0, balanceOffset)`, ADR-0101).
-    ///
-    /// Balance first: it shows the whole scale, and Pressure is its right half. Naming the derived one
-    /// second is what makes the sentence under them read as a fact rather than a coincidence.
+    /// Both marker-less styles, drawn from **one** state: `pressureLength ≡ max(0, balanceOffset)`
+    /// (ADR-0101). Balance first (shows the whole scale), Pressure is captioned as its right half.
     private var markerlessSection: some View {
         Section(header: heading("Balance & Pressure bar styles",
                                 detail: "how far you’ve drifted from steady spending")) {
             anatomy(LegendCatalog.markerlessSpecimen, style: .balance,
                     caption: "zero in the middle · grows both ways", name: "Balance")
-            // "Balance's right half" rides in the caption rather than standing as its own line below
-            // the pair. As a separate sentence it read as a further fact about two things already
-            // described; inside the caption it is the first thing said about Pressure, which is what
-            // it actually is — the identity `pressureLength ≡ max(0, balanceOffset)` (ADR-0101), not
-            // a resemblance noticed afterwards.
             anatomy(LegendCatalog.markerlessSpecimen, style: .pressure,
                     caption: "*Balance*’s right half · zero at the left · grows right only",
                     name: "Pressure")
@@ -189,11 +144,9 @@ struct LegendPane: View {
 
     /// The three parts of a Progress bar, each pointing at the x it names.
     ///
-    /// **The x values are constants**, worked out once for the geometry below and written down rather
-    /// than derived at runtime. Deriving them looked tidier and was worse: it made the callouts depend
-    /// on `PopupBarView`'s internals, which meant a page that silently mispointed if the renderer's
-    /// inset ever changed shape rather than value. Fixed numbers with the arithmetic recorded beside
-    /// them fail visibly instead — the label lands off its mark and a screenshot shows it.
+    /// **The x values are constants**, worked out once and written down rather than derived at
+    /// runtime — a fixed number that drifts fails visibly (label off its mark), while deriving from
+    /// `PopupBarView`'s internals would fail silently if the renderer's inset ever changed shape.
     ///
     ///     scaleX(f)  = inset + f · (width − 2·inset)
     ///     inset      = minStripWidth / 2 = (0.75 · trackHeight − 1) / 2 = 1.75   (trackHeight 6)
@@ -204,76 +157,35 @@ struct LegendPane: View {
     ///     tick 4 f = 4/5           0.80  →  255.0
     ///
     /// **Recompute these if `anatomyWidth`, `PopupBarView.trackHeight`, `minStripWidth` or the
-    /// specimen's fractions change.** Any of the four moves every mark on this diagram.
+    /// specimen's fractions change** — any of the four moves every mark on this diagram.
     ///
-    /// The marker sits at 0.71 rather than half: at `t = 0.50` it stood 47.5 pt from the capsule's
-    /// edge, closer than either of their captions is wide, so the labels had to be spread by hand and
-    /// each then read as pointing between the two marks rather than at one of them. The wider specimen
-    /// lets every caption sit centred on its own leader, while staying clear of the fourth tooth at
-    /// 0.80 that the ruler's caption points at.
-    ///
-    /// The fourth tooth rather than the first: it is the one with room for a label under it without
-    /// colliding with the capsule's own.
-    /// Leader lengths are measured to the mark each one names, from the bottom of the track:
-    ///
-    /// Both start `calloutGap` below the image and run to their own mark. The image now includes the
-    /// ruler, so its bottom edge *is* the teeth's foot:
-    ///
-    /// Leader lengths are no longer stated here — ``Geometry`` measures them from the mark each
-    /// caption names. Only the horizontal positions are constants, and only because they come from the
-    /// renderer's `scaleX` (see the note above).
+    /// Leader lengths are not stated here — ``Geometry`` measures them from the mark each caption
+    /// names. Only the horizontal positions are constants (from the renderer's `scaleX`).
     private static let progressCallouts: [Callout] = [
         Callout(x: 112.5, text: "tokens/credits spent"),
-        // `hour/day ticks`, not `ticks — hours/days`: the name and what it measures fold into one
-        // phrase, which drops a word and the page's only em dash (every other caption separates with
-        // `·`). Plural, because the leader points into a row of teeth — the singular would name one
-        // tooth while the reader is looking at six. `hour/day` unspaced, matching `tokens/credits` on
-        // the other caption: one page should not punctuate the same "either of these" two ways.
-        // 254.5, not 255: the tooth is a 1 pt stroke centred on its coordinate, and so is the leader.
-        // At an integer x the two land on opposite halves of the same device pixel under the 2× scale
-        // and the line reads as sitting just right of the tick it names.
+        // 254.5, not 255: the tooth is a 1 pt stroke centred on its coordinate, and so is the leader —
+        // an integer x lands the two on opposite halves of the same device pixel at 2×.
         Callout(x: 254.5, text: "hour/day ticks", namesTheRuler: true),
     ]
 
-    /// The marker's own callout, which sits **above** the bar.
+    /// Sits **above** the bar (the other two are below): the marker stands proud of the track on both
+    /// sides, so a label under it would collide with the ruler captions.
     ///
-    /// Alone up there, and for the reason the other two are below: the marker stands proud of the
-    /// track on both sides, so a label under it would have to clear the ruler as well, and the three
-    /// captions would then be competing for one strip of space — which is exactly how they ended up
-    /// overlapping. Splitting them across the bar gives each room, and puts the marker's name on the
-    /// side the marker is read from.
-    ///
-    /// 226, half a point left of the 226.5 the arithmetic gives. The ruler's callout takes the
-    /// opposite correction for the opposite reason: it points at a 1 pt tooth, where landing on the
-    /// half-pixel is what keeps leader and tooth on the same device pixel at 2×. The marker is a 7 pt
-    /// wide mark, so the leader is read against its **centre** rather than against a hairline, and the
-    /// half-point that squares a hairline reads here as the line standing right of what it names.
+    /// 226, not the arithmetic's 226.5: the marker is a 7 pt wide mark read against its **centre**, so
+    /// the half-point correction that squares a 1 pt hairline reads as standing right of the mark here.
     private static let markerCallout = Callout(x: 226, text: "now-marker")
 
     /// One label beside an anatomy bar, pointing at `x`.
     private struct Callout {
         let x: CGFloat
         let text: String
-        /// Whether this callout names the ruler rather than something on the track.
-        ///
-        /// The two sit at different depths, and this is the whole difference between their leaders —
-        /// which `Geometry` then measures. Stating *which mark* rather than *how long* is what stopped
-        /// the lengths drifting: a number here is a claim about layout that nothing checks, while a
-        /// mark is a fact the geometry can look up.
+        /// The ruler and the track sit at different depths; `Geometry` measures each leader from
+        /// whichever mark this names, rather than storing an unchecked length here.
         var namesTheRuler = false
     }
 
-    /// How to read a Progress bar, one rule per specimen.
-    ///
-    /// Worded in **`pace`**, the same word ``LegendCatalog/tiers`` uses for the verdicts in the Colors
-    /// section above. These two read the same picture — where the marker sits relative to the capsule
-    /// *is* what makes a bar behind or ahead — so naming it twice, once as "pace" and once as "the
-    /// clock", left one page describing one thing in two vocabularies. The clock wording also leaned
-    /// on a phrase English does not actually have: it is `behind schedule`, never `behind the clock`.
-    ///
-    /// `you're`, not the bare adjective. Without a subject the phrase floats free of who is behind —
-    /// and the answer is neither the bar nor the marker but the reader's own spending, which is the
-    /// one thing on this page they can act on.
+    /// How to read a Progress bar. Worded in **`pace`**, the same word ``LegendCatalog/tiers`` uses,
+    /// since where the marker sits relative to the capsule is the same fact as the color tiers.
     private static var progressRules: [(layout: BarLayout, text: String)] {
         [(LegendCatalog.progressSpecimen, "now-marker on the right — you're behind pace"),
          (LegendCatalog.markerlessSpecimen, "now-marker on the left — you're ahead of pace"),
@@ -293,15 +205,9 @@ struct LegendPane: View {
         }
     }
 
-    /// The reset countdown — the one mark in the widget that is a number rather than a symbol.
-    ///
     /// `25m` is the shape `ResetClock.timeToReset` produces: **one unit at any distance** (`45m`,
-    /// `5h`, `4d`), never a wall clock and never a combined `1h30m` (ADR-0074). Set in the same
-    /// monospaced digits the widget uses, so the specimen matches the thing it names.
-    ///
-    /// The detail line leads with the condition rather than the value, because the countdown does not
-    /// appear until a limit is spent — a row saying only "time left" would describe a number the
-    /// reader may never have seen.
+    /// `5h`, `4d`), never a combined `1h30m` (ADR-0074). Detail line leads with the condition, since
+    /// the countdown doesn't appear until a limit is spent.
     private var countdownRow: some View {
         legendRow(swatch: {
             Text("25m")
@@ -312,17 +218,9 @@ struct LegendPane: View {
                   detail: "limit reached · time left until its reset")
     }
 
-    /// The service dot, and the six states it can be in.
-    ///
-    /// A row of its own rather than one more entry in ``icons``, because the dot is not a symbol: it is
-    /// a filled circle the widget draws, and its whole vocabulary is colour. Listing the six states
-    /// under it is the only way this row says anything — a single orange dot beside "service status"
-    /// would name the element without explaining it.
-    ///
-    /// **Grey covers two states**, and that is worth the reader's attention rather than a footnote:
-    /// `unknown` means "we could not find out", which is not the same as `operational` even though the
-    /// dot is only ever drawn for a problem — so the pairing shows a colour that says less than the
-    /// others, not a duplicate.
+    /// A row of its own rather than an ``icons`` entry: the dot is a filled circle, not a symbol, and
+    /// its whole vocabulary is color, so the six states must be listed to say anything. Grey covers
+    /// two states worth calling out: `unknown` ("we could not find out") is not `operational`.
     private var statusDotRow: some View {
         legendRow(swatch: { dot(ColorRole.orange.defaultColor) },
                   name: "service status",
@@ -339,13 +237,8 @@ struct LegendPane: View {
         }
     }
 
-    /// The six service states in the order they escalate.
-    ///
-    /// **`degraded` is yellow**, which is what the escalation reads as: grey, yellow, orange, red is a
-    /// scale a reader can follow without being told. The menu bar muted this one state to the neutral
-    /// from #381 until #410 — this page, which has to name what each colour means, is what made the
-    /// split visible; it showed the scale rather than the exception, and the widget then followed
-    /// (ADR-0111). All three surfaces now draw the same six tones.
+    /// In escalation order: grey, yellow, orange, red — a scale a reader can follow without being
+    /// told. All three surfaces draw the same six tones (ADR-0111).
     @MainActor
     private static var serviceStates: [(name: String, colour: NSColor)] {
         [("operational", ColorRole.green.defaultColor),
@@ -356,13 +249,9 @@ struct LegendPane: View {
          ("unknown", ColorRole.gray.defaultColor)]
     }
 
-    /// The dot at the size the widget draws it (`StatusItemView.Metrics.statusDotDiameter`), with the
-    /// dropdown's own halo around it.
-    ///
-    /// The glow is `GlowDotView`'s: a shadow in the dot's own colour, radius 5 at 0.75 alpha
-    /// (`PopupViewController.dotGlowRadius`/`dotGlowStrength`, #188). Six pixels of colour is very
-    /// little to identify a hue by, and the halo is most of what makes these legible at this size — a
-    /// legend that dropped it would show a duller mark than the one it is explaining.
+    /// At the widget's own size — mirrors `StatusItemView.Metrics.statusDotDiameter` (6, not the
+    /// popup's same-named 9) — with the dropdown's own halo (`GlowDotView`: radius 5, 0.75 alpha,
+    /// #188) — six pixels of color needs the glow to read at this size.
     private func dot(_ colour: NSColor) -> some View {
         Circle()
             .fill(Color(nsColor: colour))
@@ -377,8 +266,7 @@ struct LegendPane: View {
         let detail: String
     }
 
-    /// Each glyph beside the state it means — names from ``WidgetGlyph``, so this cannot advertise one
-    /// the widget has stopped drawing.
+    /// Names from ``WidgetGlyph``, so this cannot advertise a glyph the widget has stopped drawing.
     @MainActor
     private static var icons: [Icon] {
         [Icon(symbol: WidgetGlyph.awaitingInput, tint: ColorRole.label.defaultColor,
@@ -398,23 +286,10 @@ struct LegendPane: View {
 
     // MARK: Row building blocks
 
-    /// A section's heading — its name, and the line that says what the section is for.
-    ///
-    /// Passed as the section's `header:`, so it sits **outside** the grouped box rather than as its
-    /// first row. That is where a `Form` puts a section name, and it is also what keeps the box a list
-    /// of like things: a heading inside it reads as an entry in that list, which is what the first
-    /// draft looked like.
-    ///
-    /// Two lines rather than the single line of small caps a plain `Section("…")` gives, because half
-    /// of each heading is explanation — "how fast you're spending, not how much" does more work here
-    /// than the name above it. `.headline` on the name keeps the pair reading as one heading; the form
-    /// styles a bare `Text` header down to a caption, which would bury it.
+    /// Passed as the section's `header:`, so it sits **outside** the grouped box like a `Form`'s
+    /// section name, rather than reading as a list entry. `.headline` on the name keeps the
+    /// name+detail pair reading as one heading — a bare `Text` header would style down to a caption.
     private func heading(_ title: String, detail: String?) -> some View {
-        // One line, name and explanation separated by the same `·` the style captions use — rather
-        // than the two-line block this started as. The second line read as a subtitle *belonging* to
-        // the heading, which put three ranks of text above every section (name, subtitle, then the
-        // rows' own pairs) and pushed the diagrams down. Inline, the two halves are one sentence and
-        // the page keeps two ranks: heading, then content.
         Group {
             if let detail {
                 Text(title).font(.headline).foregroundStyle(.primary)
@@ -429,12 +304,9 @@ struct LegendPane: View {
         .padding(.bottom, 2)
     }
 
-    /// The two-line row every list section uses: name over explanation, with a specimen leading.
-    ///
-    /// The pair of tones is the popup's own (`label` over `dimmedLabel`), so the page reproduces the
-    /// hierarchy the reader will meet in the app rather than inventing one.
-    /// `extra` hangs under the detail line for a row that needs more than two lines — currently only
-    /// the service dot, whose six states are the row's actual content.
+    /// Name over explanation, with a specimen leading — the popup's own tone pair (`label` over
+    /// `dimmedLabel`). `extra` hangs under the detail line for a row needing more than two lines
+    /// (currently only the service dot).
     private func legendRow<Swatch: View, Extra: View>(
         @ViewBuilder swatch: () -> Swatch,
         name: String, detail: String,
@@ -444,9 +316,8 @@ struct LegendPane: View {
             swatch().frame(width: 34, alignment: .center)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.callout)
-                // Same size as the name above it, not the smaller caption a settings subtitle takes.
-                // On this page the explanation *is* the content — the name is a label for it — so
-                // shrinking it would rank the two the wrong way round. Tone still separates them.
+                // Same size as the name, not a smaller subtitle caption: here the explanation is the
+                // content, so shrinking it would rank the two the wrong way round.
                 Text(.init(detail)).font(.callout).foregroundStyle(.secondary)
                 extra()
             }
@@ -454,10 +325,8 @@ struct LegendPane: View {
         }
     }
 
-    /// A tier swatch: a stroke at the menu bar's own bar size, so the eye looks for that shape.
-    ///
     /// 34 × 5 is `StatusItemView.Metrics.barWidth` × `barHeight` — the real strip, not the popup's
-    /// 6 pt one. An abstract square would have been a colour chip; this is the thing itself.
+    /// 6 pt one, so the eye looks for the actual shape rather than an abstract color chip.
     private func stroke(colour: Color, outlined: Bool = false) -> some View {
         RoundedRectangle(cornerRadius: 1.5, style: .continuous)
             .fill(colour)
@@ -466,11 +335,8 @@ struct LegendPane: View {
                 .strokeBorder(Color.primary.opacity(outlined ? 0.28 : 0), lineWidth: 0.5))
     }
 
-    /// A widget glyph, tinted **in SwiftUI** rather than baked.
-    ///
-    /// `.foregroundStyle` on a template image re-resolves whenever the theme changes, which is what
-    /// keeps a `label`-coloured glyph readable on both grounds. Baking the colour into the bitmap —
-    /// the first attempt — left it frozen at whatever the theme was when the page first drew.
+    /// Tinted **in SwiftUI** rather than baked: `.foregroundStyle` on a template image re-resolves on
+    /// theme change, keeping a `label`-colored glyph readable on both grounds.
     private func glyph(_ symbol: String, tint: NSColor) -> some View {
         Group {
             if let image = LegendRenderer.glyphImage(symbol) {
@@ -480,19 +346,14 @@ struct LegendPane: View {
         }
     }
 
-    /// A wide specimen with the style's name and its one-line description above it, and optionally a
-    /// row of callouts naming the parts it is made of.
-    ///
-    /// `callouts` is empty for the two marker-less styles: their whole anatomy is one ribbon and its
-    /// zero, both already named in the caption. Progress is the style with parts — a capsule whose far
-    /// end is one reading, a marker that is another, and a ruler — so it is the one that needs them.
+    /// `callouts` is empty for the two marker-less styles — their whole anatomy is one ribbon and its
+    /// zero, already named in the caption. Progress has parts (capsule end, marker, ruler), so it's
+    /// the one that needs them.
     private func anatomy(_ layout: BarLayout, style: BarStyle, subdivisions: Int = 0,
                          caption: String, name: String,
                          callouts: [Callout] = [], marker: Callout? = nil) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            // The name in full ink, the rest dimmed — the same split the row pairs use, and for the
-            // same reason: what the thing is called ranks above what it does here, because the caption
-            // is read once and the name is what the reader carries to the Style control.
+            // The name in full ink, the rest dimmed — the reader carries the name to the Style control.
             (Text(name).font(.callout).bold()
              + Text(" · ").font(.callout).foregroundColor(.secondary)
              + Text(.init(caption)).font(.callout).foregroundColor(.secondary))
@@ -504,25 +365,17 @@ struct LegendPane: View {
         .padding(.vertical, 2)
     }
 
-    /// The bar and everything pointing at it, laid out in **one coordinate space**.
-    ///
-    /// Rewritten from three stacked rows — caption, image, captions — each with paddings of its own.
-    /// That arrangement could not be made to work, and the reason is structural rather than a matter
-    /// of finding better numbers: a leader drawn in one row has no way to know where the bar sits in
-    /// another, so every length was a guess compensating for stack spacing, row heights and the
-    /// canvas's own empty margins. Each correction moved the error somewhere else — lines short of
-    /// their marks, then lines through their captions, then captions off their level.
-    ///
-    /// Here everything is placed by `offset` from the figure's top edge against ``Geometry``. A
-    /// leader's length is then the distance between two known values, and the code says exactly that:
-    /// `captionTop − trackBottom`, not a number arrived at by subtraction somewhere else.
+    /// The bar and everything pointing at it, laid out in **one coordinate space**: everything placed
+    /// by `offset` from the figure's top edge against ``Geometry``, so a leader's length is the
+    /// distance between two known values (`captionTop − trackBottom`) rather than a guess compensating
+    /// for stack spacing across separate rows.
     private func figure(_ layout: BarLayout, style: BarStyle, subdivisions: Int,
                         callouts: [Callout], marker: Callout?) -> some View {
         let showsRuler = !callouts.isEmpty || marker != nil
         let imageTop = marker == nil ? 0 : Geometry.imageTop
         return ZStack(alignment: .topLeading) {
-            // The bar, at the width it was baked at. Without the explicit frame the form stretches it
-            // and every mark below points at a place the mark has left.
+            // Explicit frame at the baked width — without it the form stretches the bar and every
+            // mark below points at a place the mark has left.
             Image(nsImage: LegendRenderer.dropdownBarImage(
                 layout, style: style, width: Self.anatomyWidth,
                 subdivisions: subdivisions, showsRuler: showsRuler,
@@ -531,13 +384,10 @@ struct LegendPane: View {
                 .offset(y: imageTop)
 
             if let marker {
-                // Above the bar: the caption sits at the top and its leader runs from the caption's
-                // foot down to the marker's tip — which is the image's own top edge, the marker being
-                // the tallest thing the bar draws.
-                // Centred on its own leader, the same way the below-bar captions are — not centred in
-                // the figure. The two coincided only while the specimen's marker stood at the halfway
-                // point; once it moved along the bar the caption stayed in the middle and read as
-                // naming whatever happened to be under it.
+                // Above the bar: caption at the top, leader runs down to the marker's tip (the
+                // image's own top edge, the marker being the tallest thing the bar draws). Centred on
+                // its own leader, not on the figure — the two only coincide when the marker is at the
+                // halfway point.
                 Text(marker.text)
                     .font(.callout).foregroundStyle(.secondary).fixedSize()
                     .position(x: marker.x, y: Geometry.captionHeight / 2)
@@ -554,15 +404,9 @@ struct LegendPane: View {
                     .offset(x: callout.x, y: markTop(callout, imageTop: imageTop))
             }
             ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
-                // Centred on the leader, not pushed to an edge of the bar. `position` places a view's
-                // **centre** at a coordinate, which is exactly the claim being made — "this label
-                // belongs under that line". The earlier version stretched each caption across the
-                // full width and anchored it leading/trailing, which put the text near its mark only
-                // by luck of how long the words happened to be: rename either caption and it drifted.
-                //
-                // `position` needs a container to resolve against, so the frame stays full-width;
-                // what changed is that the text no longer fills it. Its y is the caption line's
-                // centre, since `position` measures from the middle rather than the top.
+                // Centred on the leader via `position`, which places the view's **centre** at a
+                // coordinate — "this label belongs under that line" — rather than anchored to an edge.
+                // The frame stays full-width only so `position` has a container to resolve against.
                 Text(callout.text)
                     .font(.callout).foregroundStyle(.secondary).fixedSize()
                     .position(x: callout.x,
@@ -576,40 +420,27 @@ struct LegendPane: View {
                alignment: .topLeading)
     }
 
-    /// Where a below-bar leader begins: at the foot of the mark it names.
-    ///
-    /// The ruler's leader starts a hair below where the teeth actually end. Butted straight onto a
-    /// tooth, it read as that tooth grown long rather than as a line pointing at it — both are 1 pt
-    /// of the same ink, so nothing marked where one stopped and the other began. A small break
-    /// restores the distinction. The track's edge needs none: the capsule is a filled shape, not a
-    /// hairline, so a line leaving it is already legible as a separate mark.
+    /// Where a below-bar leader begins: at the foot of the mark it names. The ruler's leader starts a
+    /// hair below the teeth (both are 1 pt of the same ink; butted together they'd read as one line).
+    /// The track's edge needs no gap — it's a filled shape, already legible as a separate mark.
     private func markTop(_ callout: Callout, imageTop: CGFloat) -> CGFloat {
         callout.namesTheRuler
             ? Geometry.rulerBottom(imageTop: imageTop) + Geometry.rulerLeaderGap
             : Geometry.trackBottom(imageTop: imageTop)
     }
 
-    /// The figure's vertical arithmetic, in one place, measured from its top edge.
-    ///
-    /// Derived from `PopupBarView`'s own metrics rather than written down, so a change there moves the
-    /// captions with it instead of leaving them pointing at nothing.
+    /// The figure's vertical arithmetic, measured from its top edge and derived from `PopupBarView`'s
+    /// own metrics, so a change there moves the captions with it.
     @MainActor
     private enum Geometry {
         /// One line of `.callout` text, plus its leading.
         static let captionHeight: CGFloat = 17
-        /// Clear space between a caption and the bar, the same above and below.
-        ///
-        /// One constant feeds both sides — `imageTop` above, `captionTop` below — so the figure cannot
-        /// drift out of symmetry when this is tuned. At 7 the captions crowded the marks they name;
-        /// the leaders were long enough to read, but the text sat close enough to the bar to look like
-        /// part of it rather than a label on it.
+        /// Clear space between a caption and the bar, the same above and below (one constant feeds
+        /// both `imageTop` and `captionTop`, so the figure can't drift out of symmetry when tuned).
         static let gap: CGFloat = 10
 
-        /// The break between the ruler's teeth and the leader that points at them.
-        ///
-        /// Only the ruler's leader takes it — see ``LegendPane/markTop(_:imageTop:)``. It shortens
-        /// that leader without moving the caption line, which stays where ``captionTop(imageTop:)``
-        /// puts it for every callout, so the captions stay level with each other.
+        /// The break between the ruler's teeth and the leader pointing at them (only the ruler's
+        /// leader takes it — see ``LegendPane/markTop(_:imageTop:)``).
         static let rulerLeaderGap: CGFloat = 1
 
         /// Where the bar's image starts when a caption sits above it.
@@ -625,15 +456,8 @@ struct LegendPane: View {
         static func rulerBottom(imageTop: CGFloat) -> CGFloat {
             trackBottom(imageTop: imageTop) + PopupBarView.rulerDepth
         }
-        /// The line the below-bar captions share: clear of the **teeth**, minus the gap they already
-        /// hang across.
-        ///
-        /// Neither end of the obvious range is right. Measured from the image's foot the caption sat
-        /// ~14 pt below the track and the figure read bottom-heavy; measured from the track's foot it
-        /// came within a couple of points of the teeth. The reason is that `rulerDepth` is not solid
-        /// mark — `tickGap` of it is already blank, the same blank the caption's own gap would add. So
-        /// the teeth's length is cleared and the gap counted once, which puts the same clear space
-        /// under the lowest mark as `imageTop` puts over the highest one.
+        /// The line the below-bar captions share: clear of the **teeth**, minus `tickGap` (already
+        /// blank space within `rulerDepth`) so the gap isn't counted twice.
         static func captionTop(imageTop: CGFloat) -> CGFloat {
             rulerBottom(imageTop: imageTop) + gap - PopupBarView.tickGap
         }
@@ -645,12 +469,8 @@ struct LegendPane: View {
         }
     }
 
-    /// The hairline joining a caption to the mark it names.
-    ///
-    /// Each length is measured to reach its own target rather than shared, because the three marks sit
-    /// at three different depths: the marker stands proud above the track, the ruler's teeth hang below
-    /// it, and the capsule's edge is on the track itself. A single length would leave two of the three
-    /// lines stopping in mid-air.
+    /// Each length is measured to reach its own target: the marker stands proud above the track, the
+    /// ruler's teeth hang below it, the capsule's edge is on the track — three different depths.
     private func leaderLine(_ length: CGFloat) -> some View {
         Rectangle()
             .fill(Color.secondary.opacity(0.35))
@@ -658,11 +478,8 @@ struct LegendPane: View {
     }
 
 
-    /// A short specimen beside the rule it demonstrates.
-    ///
     /// **Indented**, so the rules read as belonging to the anatomy above them rather than as further
-    /// entries in the section's list. The anatomy is the subject; these are the ways of reading it,
-    /// and a flush-left row would give them the same standing as the diagram they explain.
+    /// entries in the section's list.
     private func ruleRow(style: BarStyle, layout: BarLayout, text: String) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(nsImage: LegendRenderer.dropdownBarImage(

@@ -93,14 +93,13 @@ public enum FailureReason: Sendable, Equatable {
 // MARK: - UsageHealth
 
 /// The polling layer's health at instant `now` — the **second input** (besides `UsageSnapshot`)
-/// that the error-state UI of issue #12 consumes.
+/// that the error-state UI consumes.
 ///
 /// A pure value type with **no clock of its own**: `now` is injected by the caller, exactly like
-/// `PacingModel`/`MenuBarLayout` (ADR-0009). The live polling loop (#13) builds this from real
-/// poll results; #12 only defines it, the thresholds, and the rendering. `AppDelegate` builds a
-/// mock to exercise the states under `swift run`.
+/// `PacingModel`/`MenuBarLayout` (ADR-0009). The live polling loop builds this from real poll
+/// results. `AppDelegate` builds a mock to exercise the states under `swift run`.
 ///
-/// ## Menu-bar phases (SPEC "Error states"; two phases since ADR-0091)
+/// ## Menu-bar phases (SPEC "Error states"; two phases, ADR-0091)
 /// The widget reacts to the **duration** of an unbroken failure run, `now - failingSince`:
 /// | Phase | Condition | Menu bar |
 /// |---|---|---|
@@ -114,7 +113,7 @@ public enum FailureReason: Sendable, Equatable {
 /// drives `PopupLayout.warning`. The phase logic itself lives in `MenuBarLayout.make`; this type
 /// owns only the inputs and the threshold.
 ///
-/// ## The third state: `notPolling` (#341)
+/// ## The third state: `notPolling`
 /// "We are deliberately not asking" is neither healthy nor failing, and both attempts to encode it
 /// with the two existing states break something. Reporting it as failing makes the popup show a red
 /// error banner instantly and the menu bar decay to ⚠️ after 30 minutes — the user switched the poll
@@ -134,7 +133,7 @@ public struct UsageHealth: Sendable, Equatable {
     public let failingSince: Date?
     /// The most recent failure's user-facing cause, or `nil` when healthy. Drives the popup warning.
     public let reason: FailureReason?
-    /// Whether the usage API is deliberately not being polled (#341) — the user switched it off.
+    /// Whether the usage API is deliberately not being polled — the user switched it off.
     ///
     /// Orthogonal to the failure fields on purpose: entering this state does not invent a failure,
     /// and leaving it does not clear one. While it is `true`, `failingSince` is `nil` and
@@ -163,7 +162,7 @@ public struct UsageHealth: Sendable, Equatable {
         UsageHealth(lastSuccess: at, failingSince: nil, reason: nil)
     }
 
-    /// The usage poll is off (#341). No failure, and no fresh success to report either — whatever
+    /// The usage poll is off. No failure, and no fresh success to report either — whatever
     /// `lastSuccess` held is left behind as the stale value it is.
     public static func notPollingUsage(lastSuccess: Date? = nil) -> UsageHealth {
         UsageHealth(lastSuccess: lastSuccess, failingSince: nil, reason: nil, notPolling: true)
@@ -204,7 +203,7 @@ public struct UsageHealth: Sendable, Equatable {
     public var isFailing: Bool { failingSince != nil }
 
     /// Whether usage data is being collected at all — the guard for every consumer that treats
-    /// "not failing" as "we have fresh data" (#341).
+    /// "not failing" as "we have fresh data".
     ///
     /// The pair `!isFailing && notPolling` is a state that did not exist before this flag, and it is
     /// what silently breaks the naive `guard !isFailing` sites: they read "healthy" and act on a

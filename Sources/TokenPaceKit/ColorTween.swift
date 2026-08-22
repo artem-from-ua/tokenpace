@@ -80,13 +80,11 @@ public struct ColorTween: Sendable, Equatable {
     /// glitch, short enough that a colour change still feels immediate. Not user-configurable —
     /// there is no Settings option for it by design.
     ///
-    /// Tuned live: 0.45 s → 0.7 s → 1.0 s → 0.8 s. At the shortest lengths the adjacent pacing hues
-    /// (green→yellow especially) are close enough that the fade was over before the eye registered
-    /// it had started — which reads as the very snap this exists to remove. The bar is ambient,
-    /// glanced at rather than watched, so it can afford a transition long enough to be unmistakably
-    /// *a transition*; there is no interaction waiting on it to finish. 1.0 s proved slightly
-    /// languid once the high-contrast blue→`calmWhite` mute became easy to trigger from Settings, so
-    /// it settled back to 0.8 s — still unmistakably a fade, with less lag on a deliberate toggle.
+    /// At shorter lengths the adjacent pacing hues (green→yellow especially) are close enough that
+    /// the fade is over before the eye registers it had started — reading as the very snap this
+    /// exists to remove. The bar is ambient, glanced at rather than watched, so it can afford a
+    /// transition long enough to be unmistakably *a transition*; there is no interaction waiting on
+    /// it to finish. Longer lengths feel languid on the high-contrast blue→`calmWhite` mute.
     public static let defaultDuration: TimeInterval = 0.8
 
     public init(from: RGBA, to: RGBA, startedAt: Date,
@@ -260,10 +258,9 @@ public struct ColorTweenSet: Sendable, Equatable {
     /// **The default must exceed the app's slowest redraw cadence.** "Untouched" only stands in for
     /// "absent" if a *present* element is guaranteed to have drawn recently — and the widget
     /// deliberately does not repaint on a tick, so between polls its floor is the 30 s age timer
-    /// (`AppDelegate`). The old 5 s default therefore emptied the registry for 25 s out of every 30:
-    /// a still-visible bar was pruned, and the next colour change hit the "first sight of this key"
-    /// branch above and adopted its target outright (`duration: 0`) instead of fading. That is why
-    /// the *first* calm-mode toggle after a pause snapped while rapid repeats animated. 45 s clears
+    /// (`AppDelegate`). A default shorter than that would empty the registry between ticks: a
+    /// still-visible bar gets pruned, and the next colour change hits the "first sight of this key"
+    /// branch above and adopts its target outright (`duration: 0`) instead of fading. 45 s clears
     /// the 30 s tick with margin and still bounds the registry.
     public mutating func pruneStale(at now: Date, staleAfter: TimeInterval = 45) {
         tweens = tweens.filter { now.timeIntervalSince($0.value.touchedAt) <= staleAfter }

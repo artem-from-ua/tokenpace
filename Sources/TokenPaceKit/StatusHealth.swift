@@ -62,13 +62,13 @@ public enum ServiceStatus: Sendable, Equatable {
 
 // MARK: - ServiceID
 
-/// A stable, rename-agnostic identifier for one logical service (#89). Its components carry the
+/// A stable, rename-agnostic identifier for one logical service. Its components carry the
 /// matching names; the popup maps each component to a short display label in the view
 /// (ADR-0009/0013: display text lives in the view, semantics in the kit), so the labels can change
 /// without touching the persisted config or this enum.
 public enum ServiceID: Sendable, Equatable {
     /// "Claude API" — the `Claude API (api.anthropic.com)` component. Present whenever anything at
-    /// all is monitored, and locked on in the UI while it is (#341): the usage poll talks to this
+    /// all is monitored, and locked on in the UI while it is: the usage poll talks to this
     /// endpoint, and the other services are unreadable without knowing whether the API is up. It goes
     /// away only in the state where the user has turned everything off.
     case claudeAPI
@@ -78,7 +78,7 @@ public enum ServiceID: Sendable, Equatable {
     /// "Claude WEB/Desktop" — `claude.ai`, plus `Claude Cowork` in the cowork mode.
     case webDesktop
     /// "Development services" — GitHub's `Git Operations`, `API Requests`, `Issues`, `Pull Requests`
-    /// and `Actions` under one switch (#454). The first service of a **second provider**, which is
+    /// and `Actions` under one switch. The first service of a **second provider**, which is
     /// why ``StatusHealth/pageURL(for:)`` exists: its rows link to `githubstatus.com`.
     case githubDevelopment
 
@@ -94,7 +94,7 @@ public enum ServiceID: Sendable, Equatable {
 
 // MARK: - ProviderID
 
-/// Which upstream a logical service belongs to (#454).
+/// Which upstream a logical service belongs to.
 ///
 /// A provider is "one status page plus, optionally, a usage API": Claude has both, GitHub has only
 /// the status page. The distinction matters wherever a value that used to be global becomes
@@ -131,7 +131,7 @@ public struct ResolvedComponent: Sendable, Equatable {
     /// The semantic status of this component.
     public let status: ServiceStatus
     /// When this component last changed status, from `components[].updated_at` — so the popup can
-    /// show how long it has been degraded, or how recently it recovered (#279).
+    /// show how long it has been degraded, or how recently it recovered.
     ///
     /// `nil` when the API omitted it or it would not parse; the row then shows no age rather than a
     /// made-up one. Taken from the API rather than measured locally on purpose: a self-measured clock
@@ -181,14 +181,14 @@ public struct ServiceCheck: Sendable, Equatable {
 // MARK: - StatusHealth
 
 /// The state of every **enabled** Claude logical service — the pure result of mapping a
-/// ``StatusSummary`` (or a failed fetch) against a ``MonitoredServices`` config (#89).
+/// ``StatusSummary`` (or a failed fetch) against a ``MonitoredServices`` config.
 ///
-/// Was: two fixed component dots. Now: a collection of resolved services. Each carries its named
-/// constituents (plus an aggregated worst-of-N), so the popup draws one row per component, while the
-/// menu bar shows one dot that is the worst across all enabled services (ADR-0024).
+/// A collection of resolved services, each carrying its named constituents (plus an aggregated
+/// worst-of-N), so the popup draws one row per component while the menu bar shows one dot that is
+/// the worst across all enabled services (ADR-0024).
 ///
 /// `Claude API` is present as the first check whenever anything is monitored — the usage poll or
-/// either toggleable service (#341). It has no switch of its own: enabling anything implies it, and
+/// either toggleable service. It has no switch of its own: enabling anything implies it, and
 /// the only configuration without it is "monitor nothing", which yields an empty `checks`.
 ///
 /// A failed status poll does not produce a distinct value: the shell maps any ``StatusFetchError``
@@ -198,7 +198,7 @@ public struct ServiceCheck: Sendable, Equatable {
 public struct StatusHealth: Sendable, Equatable {
     /// The resolved logical services in display order (`Claude API`, then `Claude Code`, then
     /// `Claude WEB/Desktop` — the enabled ones). Contains the `Claude API` check whenever anything is
-    /// monitored, and is empty only when the user has turned monitoring off entirely (#341).
+    /// monitored, and is empty only when the user has turned monitoring off entirely.
     public let checks: [ServiceCheck]
 
     public init(checks: [ServiceCheck]) {
@@ -231,7 +231,7 @@ public struct StatusHealth: Sendable, Equatable {
     }
 
     /// The worst state across one provider's components, **including `operational`** — the value the
-    /// popup's section-header dot draws (#454).
+    /// popup's section-header dot draws.
     ///
     /// Deliberately **not** `worstProblem`'s shape. That one returns `nil` when everything is fine,
     /// because the menu-bar dot disappears on a calm state (ADR-0013 §8) — silence is the answer
@@ -249,16 +249,13 @@ public struct StatusHealth: Sendable, Equatable {
     /// This is what a per-provider poll cadence must read: `StatusCadence`'s problem floor drops the
     /// interval to 60 s, and feeding it the app-wide ``worstProblem`` would let a Claude incident
     /// accelerate polling against GitHub's third-party page — the exact impoliteness the floor exists
-    /// to prevent (#454, #455).
+    /// to prevent.
     public func worstProblem(of provider: ProviderID) -> ServiceStatus? {
         aggregate(of: provider).flatMap { $0.isProblem ? $0 : nil }
     }
 
-    /// The per-provider worst-of under the name the journal layer uses (#456).
-    ///
-    /// A thin alias for ``worstProblem(of:)``, kept because `JournalRecordDomain` already calls it
-    /// and the two arrived from different tickets on the same day. Same semantics, same result — the
-    /// spelling difference is historical, not meaningful.
+    /// The per-provider worst-of under the name the journal layer uses — a thin alias for
+    /// ``worstProblem(of:)`` (`JournalRecordDomain` calls it under this spelling).
     public func worstProblem(for provider: ProviderID) -> ServiceStatus? {
         worstProblem(of: provider)
     }
@@ -273,7 +270,7 @@ public struct StatusHealth: Sendable, Equatable {
     public static let claudeWebComponentName = "claude.ai"
     public static let claudeCoworkComponentName = "Claude Cowork"
 
-    /// The five GitHub components behind the single `Development services` logical service (#454),
+    /// The five GitHub components behind the single `Development services` logical service,
     /// verbatim against `components[].name` on `githubstatus.com`.
     ///
     /// They are **one** service rather than five switches because they answer one question — "is my
@@ -303,7 +300,7 @@ public struct StatusHealth: Sendable, Equatable {
     /// constant whose failure would be a programmer error, not a runtime condition.
     ///
     /// Kept under its original name and value so every existing call site reads unchanged;
-    /// ``pageURL(for:)`` is the one that knows there is more than one page (#454).
+    /// ``pageURL(for:)`` is the one that knows there is more than one page.
     public static let pageURL = URL(string: "https://status.claude.com")!
 
     /// GitHub's status page — the link target for `Development services` rows.
@@ -312,8 +309,8 @@ public struct StatusHealth: Sendable, Equatable {
     /// GitHub's summary endpoint — the same Statuspage v2 shape Claude's page serves, which is what
     /// lets `StatusSummary` decode both without a second decoder.
     ///
-    /// Declared here beside the page it belongs to rather than in `StatusClient`: the client is being
-    /// made endpoint-agnostic in #455, so the URL is a property of the *provider*, not of the client.
+    /// Declared here beside the page it belongs to rather than in `StatusClient`: the URL is a
+    /// property of the *provider*, not of the client.
     public static let githubEndpoint = URL(string: "https://www.githubstatus.com/api/v2/summary.json")!
 
     /// The status page a logical service belongs to. Per **provider**, not per app: the popup turns
@@ -352,7 +349,7 @@ public struct StatusHealth: Sendable, Equatable {
     }
 
     /// The component names a config resolves to — the join key ``IncidentVisibility`` intersects an
-    /// incident's `components[]` against to decide "is this incident mine" (#279).
+    /// incident's `components[]` against to decide "is this incident mine".
     ///
     /// Derived from ``checks(for:statusOf:)``, the same single source of truth that builds the popup
     /// rows, rather than re-listing the names: a service added there must never silently fail to
@@ -371,7 +368,7 @@ public struct StatusHealth: Sendable, Equatable {
                 .flatMap(\.components).map(\.name))
     }
 
-    // MARK: - GitHub (#454)
+    // MARK: - GitHub
 
     /// Map GitHub's status summary to its logical services. The GitHub twin of ``from(_:config:)``,
     /// and a **separate** function on purpose: the two providers publish two different pages, so a
@@ -416,7 +413,7 @@ public struct StatusHealth: Sendable, Equatable {
     // MARK: - merging
 
     /// This health with `other`'s checks appended — how two providers, polled independently on two
-    /// cadences, become the one value the menu bar and popup read (#454).
+    /// cadences, become the one value the menu bar and popup read.
     ///
     /// Checks of the providers present in `other` are **replaced**, not accumulated: a fresh GitHub
     /// poll supersedes the previous GitHub checks and leaves Claude's alone. That is what lets one
@@ -439,7 +436,7 @@ public struct StatusHealth: Sendable, Equatable {
     /// component's status is obtained (`statusOf`: from a summary, vs the constant `.unknown`).
     ///
     /// `Claude API` is emitted as the first check whenever **anything** is monitored — the usage poll
-    /// (`usageApiEnabled`) or either toggleable service (#341); `Claude Code` and `Claude WEB/Desktop`
+    /// (`usageApiEnabled`) or either toggleable service; `Claude Code` and `Claude WEB/Desktop`
     /// follow when their flags are set, WEB/Desktop adding `Claude Cowork` in the cowork mode. With
     /// everything off the result is empty, which is what makes "monitor nothing" representable.
     ///

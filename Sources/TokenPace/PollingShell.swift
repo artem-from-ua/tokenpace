@@ -755,11 +755,9 @@ actor StubUsageTransport: UsageTransport {
         /// **Stand-by floor** frame: the 7-day window is orange with only a **16-minute** wait to
         /// green, so the ⌥ stand-by line is suppressed by `PacingModel.standByFloorSeconds`.
         ///
-        /// Rebuilt on a **whole** `utilization` of 99 (#386). It used to carry a fractional 99.5536 %,
-        /// which the API never emits for token windows — the frame was arithmetically possible but
-        /// unreachable from real data. The reconstruction now places the value anywhere inside the
-        /// observed bucket, so the state is reachable, and this stub reproduces it honestly: a raw 99
-        /// rendered at ≈99.30 % against ~99.14 % elapsed.
+        /// Built on a **whole** `utilization` of 99 (#386) — the API never emits a fractional value for
+        /// token windows, so this stub reproduces the reachable state honestly: a raw 99 rendered at
+        /// ≈99.30 % against ~99.14 % elapsed.
         ///
         /// The band is genuinely narrow, which is why it needed measuring rather than guessing.
         /// Scanning the whole `(u, reset)` space finds a suppressed stand-by in **18 of 10 064**
@@ -1041,21 +1039,13 @@ actor StubUsageTransport: UsageTransport {
         let coworkStatus = failing ? "degraded_performance" : "operational"
 
         // How long ago the WEB/Desktop components last changed state — the same long-settled stamp
-        // `Claude Code` and the API carry.
-        //
-        // It used to be 12 minutes, inside the recently-recovered window
-        // (`PopupViewController.recoveryWindow`, 15). That put `claude.ai` and `Cowork` permanently in
-        // the "just recovered" bucket, so **every** stub — including the ones whose subject is
-        // something else entirely — rendered a green "Web/Desktop · operational" row, since a
-        // recently-recovered component is shown alongside the problem rows by design. Where other
-        // rows surround it that is merely noise; in the services-only popup (#341) it was the only
-        // row, and read as though Web/Desktop were the only thing monitored.
-        //
-        // No scenario wants it on WEB/Desktop. The one frame that *is* about recovery —
-        // `.incident(.recovery)` — demonstrates it on `Claude Code` and the API, which go green from
-        // the third poll and are the only components the incident names; `claude.ai` is `operational`
-        // throughout and takes no part in it. A recovery stamp here would decorate a component that
-        // never fell over. Those two get their own stamp below, when they actually recover.
+        // `Claude Code` and the API carry. Kept outside `PopupViewController.recoveryWindow` (15 min)
+        // on purpose: no scenario wants `claude.ai`/`Cowork` reading as "just recovered", since a
+        // recently-recovered component is shown alongside the problem rows by design and in the
+        // services-only popup (#341) it can be the only row on screen. The one frame that *is* about
+        // recovery — `.incident(.recovery)` — demonstrates it on `Claude Code` and the API instead,
+        // which go green from the third poll; `claude.ai` takes no part in it and gets its own stamp
+        // below only when it actually recovers.
         let settledMinutesAgo = 127
 
         var incidents: [String] = []
@@ -1281,10 +1271,8 @@ actor StubUsageTransport: UsageTransport {
         // Idle + hot week frame: the same idle 5h shape as `.idle`, but `seven_day` is **ahead of
         // pace** (70 % used with ~5 days of the week left, i.e. t ≈ 29 %) while still far from
         // exhausted — so this is NOT `idleBlocked`. The idle pill reads **green**, as every ready idle
-        // pill does since #381 (ADR-0105 dropped the "ready to start" blue — it made the same mark carry
-        // a second claim, "there is room to burn"). So the pill now has **two** states, not three:
-        // green (ready, this and `idle`) and grey (`idle-blocked`). This stub no longer differs from
-        // `idle` in the menu bar — only the popup wording tells them apart.
+        // pill does (ADR-0105) — only green (ready) and grey (`idle-blocked`) exist. This stub does not
+        // differ from `idle` in the menu bar — only the popup wording tells them apart.
         if mode == .idleWeekHot {
             let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)   // ≥ 24 h → "5d"
             let body = """

@@ -4,24 +4,20 @@ import TokenPaceKit
 // MARK: - TroubleshootWindowController
 
 /// The hidden Troubleshoot window (ADR-0020), reached from the popup menu via ⌥ Option on
-/// "Settings…". A large, resizable, full-screen-capable window that surfaces the **raw** diagnostics
-/// the popup aggregates away: the last usage-API response verbatim, its timestamp, the next-update
-/// estimate, and the auth token's read/expiry dates — so a bug can be diagnosed from the widget
-/// alone, without a `log stream` session.
+/// "Settings…". Surfaces the **raw** diagnostics the popup aggregates away: the last usage-API
+/// response verbatim, its timestamp, the next-update estimate, and the auth token's read/expiry
+/// dates.
 ///
-/// Unlike `SettingsWindowController` (a small, fixed, `.floating` panel), this window uses the
-/// **normal** level and a resizable, full-screen style: `.floating` fights a full-screen Space, and
-/// a large always-on-top window is hostile to the user. `NSApp.activate(ignoringOtherApps:)` in
-/// `show()` is enough to raise it from an accessory app — a deliberate departure from ADR-0012 §6.
+/// Unlike `SettingsWindowController` (a small, fixed, `.floating` panel), this uses the **normal**
+/// level and a resizable, full-screen style: `.floating` fights a full-screen Space, and a large
+/// always-on-top window is hostile — a deliberate departure from ADR-0012 §6.
 ///
-/// Single-instance like `SettingsWindowController` (`isReleasedWhenClosed = false`), and its content
-/// **updates live**: `render(_:)` is called from `AppDelegate.apply(_:)` on every poll, so an open
-/// window refreshes both sections in place (ADR-0020).
+/// Single-instance (`isReleasedWhenClosed = false`); its content **updates live**: `render(_:)` is
+/// called from `AppDelegate.apply(_:)` on every poll (ADR-0020).
 @MainActor
 final class TroubleshootWindowController: NSWindowController {
 
-    /// Called when the user clicks "Refresh now" — wired by `AppDelegate` to force an immediate poll
-    /// of both data streams and reset any 429 backoff (ADR-0020).
+    /// Wired by `AppDelegate` to force an immediate poll and reset any 429 backoff (ADR-0020).
     var onForceRefresh: (() -> Void)?
 
     private enum Metrics {
@@ -29,15 +25,12 @@ final class TroubleshootWindowController: NSWindowController {
         static let startSize = NSSize(width: 840, height: 720)
         static let padding: CGFloat = 20
         static let rowSpacing: CGFloat = 4
-        /// Gap between a section header and its first info row — wider than `rowSpacing` so the
-        /// bold header reads as a title above its rows rather than as just another line, without
-        /// opening up as much air as `sectionSpacing` (which separates whole groups).
+        /// Wider than `rowSpacing` so the bold header reads as a title, narrower than
+        /// `sectionSpacing` (which separates whole groups).
         static let headerSpacing: CGFloat = 8
         static let sectionSpacing: CGFloat = 12
-        /// Gap between the "Auth token" and "Usage API" sections — wider than `sectionSpacing` so
-        /// the two read as distinct groups by whitespace alone (no rule; matches the popup's
-        /// no-interior-lines style — HIG treats negative space and separator lines as equally valid
-        /// grouping cues, so this is a stylistic choice, not a compliance one).
+        /// Wider than `sectionSpacing` so "Auth token" and "Usage API" read as distinct groups by
+        /// whitespace alone (matches the popup's no-interior-lines style).
         static let interSectionSpacing: CGFloat = 24
     }
 
@@ -49,12 +42,9 @@ final class TroubleshootWindowController: NSWindowController {
     // Rows of the "Update interval" section (the refresh cadence + next-update estimate).
     private var intervalLabel: NSTextField!
     private var nextUpdateLabel: NSTextField!
-    /// The weekly reconstruction disclosure (#386) — raw vs reconstructed, side by side. Hidden when
-    /// the two agree, so it appears only when there is something to explain.
+    /// The weekly reconstruction disclosure (#386) — raw vs reconstructed. Hidden when the two agree.
     private var weeklyLabel: NSTextField!
-    /// The weekly reset instant and the mode it was computed in (ADR-0107) — sits directly under
-    /// ``weeklyLabel`` because the two answer the same kind of question about the same window: one
-    /// about its number, one about its clock.
+    /// The weekly reset instant and the mode it was computed in (ADR-0107).
     private var weeklyResetLabel: NSTextField!
     // Rows of the "Auth token" section.
     private var tokenStatusLabel: NSTextField!
@@ -71,27 +61,23 @@ final class TroubleshootWindowController: NSWindowController {
             backing: .buffered,
             defer: false)
         window.title = "TokenPace — Troubleshoot"
-        // Normal level (not .floating) + native full-screen in its own Space (green button):
-        // a large diagnostic window must not float above everything or fight a full-screen Space
-        // (ADR-0020, departing from ADR-0012 §6).
+        // Normal level (not .floating) + native full-screen in its own Space (ADR-0020, departing
+        // from ADR-0012 §6).
         window.collectionBehavior = [.fullScreenPrimary]
         window.contentMinSize = Metrics.minSize
         window.isReleasedWhenClosed = false     // keep the controller alive so re-opening reuses it
-        // No `setFrameAutosaveName`: the window opens at `startSize`, centred, every time (see `show()`)
-        // rather than restoring a saved frame. A restored frame can outlive its display layout
-        // (disconnected monitor, changed resolution/scale) and reopen off-screen; centring is always
-        // on-screen. The window stays user-resizable within the session.
+        // No `setFrameAutosaveName`: a restored frame can outlive its display layout (disconnected
+        // monitor, changed resolution) and reopen off-screen; centring is always on-screen.
         self.init(window: window)
         buildContent()
     }
 
-    /// Show or re-focus the window, rendering the latest poll output. Bringing an accessory app's
-    /// window forward needs `NSApp.activate`; `makeKeyAndOrderFront` focuses the single instance.
+    /// Bringing an accessory app's window forward needs `NSApp.activate`; `makeKeyAndOrderFront`
+    /// focuses the single instance.
     func show(_ output: PollOutput?) {
         render(output)
         NSApp.activate(ignoringOtherApps: true)
-        // Each fresh open resets to the default size and re-centres — the frame isn't persisted, so a
-        // previous in-session resize doesn't carry over, and the window is always fully on-screen.
+        // Each fresh open resets to the default size and re-centres — the frame isn't persisted.
         if !(window?.isVisible ?? false) {
             window?.setContentSize(Metrics.startSize)
             window?.center()
@@ -116,10 +102,8 @@ final class TroubleshootWindowController: NSWindowController {
         tokenStack.setCustomSpacing(Metrics.headerSpacing, after: tokenHeader)
         tokenStack.translatesAutoresizingMaskIntoConstraints = false
 
-        // "Update interval" — the first section: the refresh cadence (a duration) + the next-update
-        // estimate (a timestamp), plus a button that forces an immediate poll of both streams and
-        // clears any 429 backoff (ADR-0020). The interval (the rate) sits above the next-update (the
-        // when).
+        // "Update interval" — refresh cadence + next-update estimate, plus a button that forces an
+        // immediate poll and clears any 429 backoff (ADR-0020).
         let intervalHeader = Self.sectionHeader("Update interval")
         intervalLabel = Self.infoLabel()
         nextUpdateLabel = Self.infoLabel()
@@ -139,10 +123,8 @@ final class TroubleshootWindowController: NSWindowController {
         timestampLabel = Self.infoLabel()
         statusLabel = Self.infoLabel()
 
-        // Header row: the section title on the left, a borderless "copy JSON" icon button on the
-        // right (pinned there by a low-hugging spacer). The button copies the body verbatim — the
-        // same text ⌘C copies from a selection — so a payload can be lifted into a bug report with
-        // one click. The row spans the section's full width so the button sits at the right edge.
+        // Section title on the left, a borderless "copy JSON" icon button on the right (pinned there
+        // by a low-hugging spacer). Copies the body verbatim so it can be lifted into a bug report.
         let copyButton = NSButton(
             image: NSImage(
                 systemSymbolName: CopyFeedback.restingSymbol,
@@ -150,7 +132,7 @@ final class TroubleshootWindowController: NSWindowController {
             target: self, action: #selector(copyBodyClicked))
         copyButton.isBordered = false
         copyButton.bezelStyle = .inline
-        // `.momentaryChange` would swap the image back on mouse-up, fighting the checkmark that
+        // `.momentaryChange` would swap the image back on mouse-up, fighting the checkmark
         // `showCopiedFeedback()` sets — `.momentaryPushIn` leaves the image under our control.
         copyButton.setButtonType(.momentaryPushIn)
         copyButton.toolTip = "Copy \(Self.copyTarget) to the clipboard"
@@ -164,8 +146,6 @@ final class TroubleshootWindowController: NSWindowController {
         headerRow.spacing = Metrics.rowSpacing
         headerRow.translatesAutoresizingMaskIntoConstraints = false
 
-        // Vertical stack for the API section's info rows (intrinsic height). The header row sits
-        // above it as a separate, full-width subview so the copy button can reach the right edge.
         weeklyLabel = Self.infoLabel()
         weeklyResetLabel = Self.infoLabel()
         let apiStack = NSStackView(views: [timestampLabel, statusLabel, weeklyLabel, weeklyResetLabel])
@@ -174,16 +154,11 @@ final class TroubleshootWindowController: NSWindowController {
         apiStack.spacing = Metrics.rowSpacing
         apiStack.translatesAutoresizingMaskIntoConstraints = false
 
-        // The scrollable raw body — takes the remaining vertical space, so it must stretch.
-        //
-        // It is **editable, but every mutation is vetoed** by the delegate (see
-        // `textView(_:shouldChangeTextIn:)`), rather than `isEditable = false`. Editable is what gives
-        // a blinking insertion-point caret and full arrow-key caret navigation (word/line jumps,
-        // shift-selection); a read-only view has neither. The veto keeps the content immutable.
-        // Clipboard shortcuts do NOT ride the native path here: an accessory app has no Edit menu, so
-        // the ⌘C/⌘A key-equivalent pass finds no handler, falls through to `noResponderFor:` → `NSBeep`
-        // (and never copies). `ReadOnlyTextView.performKeyEquivalent(_:)` claims ⌘C/⌘A/⌘X itself,
-        // which both copies and suppresses the beep — see that type.
+        // **Editable, but every mutation is vetoed** by the delegate (`textView(_:shouldChangeTextIn:)`)
+        // rather than `isEditable = false`: editable is what supplies the blinking caret and full
+        // arrow-key navigation, which a read-only view lacks. Clipboard shortcuts do NOT ride the
+        // native path — an accessory app has no Edit menu, so ⌘C/⌘A finds no handler and falls
+        // through to `NSBeep`. `ReadOnlyTextView.performKeyEquivalent(_:)` claims them itself.
         let scroll = ReadOnlyTextView.scrollableTextView()
         bodyTextView = (scroll.documentView as! ReadOnlyTextView)
         bodyTextView.isEditable = true
@@ -233,9 +208,7 @@ final class TroubleshootWindowController: NSWindowController {
         window?.contentView = content
     }
 
-    /// A section header label — the `.headline` dynamic text style (bold, `labelColor`) so it
-    /// scales with the user's system text-size setting like a native control, instead of a fixed
-    /// point size (HIG: prefer the system's dynamic text styles over hard-coded sizes).
+    /// `.headline` dynamic text style so it scales with the user's system text-size setting.
     private static func sectionHeader(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = .preferredFont(forTextStyle: .headline, options: [:])
@@ -243,8 +216,6 @@ final class TroubleshootWindowController: NSWindowController {
         return label
     }
 
-    /// A secondary info-row label — the `.body` dynamic text style in `secondaryLabelColor`, so
-    /// diagnostic rows read at the same size as the rest of the system and scale together.
     private static func infoLabel() -> NSTextField {
         let label = NSTextField(labelWithString: "")
         label.font = .preferredFont(forTextStyle: .body, options: [:])
@@ -252,19 +223,12 @@ final class TroubleshootWindowController: NSWindowController {
         return label
     }
 
-    /// The "Refresh now" button — hand off to `AppDelegate.forceRefresh()` via `onForceRefresh`.
-    /// The live `render(_:)` on the resulting poll updates the interval / next-update rows in place.
     @objc private func refreshNowClicked() {
         onForceRefresh?()
     }
 
-    /// Copy the response body verbatim to the clipboard for a bug report. Reads `bodyTextView.string`
-    /// — exactly what is displayed (`TroubleshootLayout.bodyText`), the pretty-printed JSON or error
-    /// payload.
-    ///
-    /// Flips the glyph to a checkmark per ``CopyFeedback``, the same feedback the Appearance pane's
-    /// copy button gives (#257) — the clipboard is invisible, so the swap is the only sign the click
-    /// landed, and both copy buttons in the app behave identically.
+    /// Flips the glyph to a checkmark per ``CopyFeedback`` (#257) — the clipboard is invisible, so
+    /// the swap is the only sign the click landed.
     @objc private func copyBodyClicked() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -272,9 +236,8 @@ final class TroubleshootWindowController: NSWindowController {
         showCopiedFeedback()
     }
 
-    /// Swap the copy button's glyph to a checkmark, then back. The pending revert is cancelled and
-    /// re-armed on each click (`copyFeedbackWorkItem`), so clicking again mid-flash restarts the full
-    /// duration rather than letting the earlier timer clear it early.
+    /// The pending revert is cancelled and re-armed on each click, so clicking again mid-flash
+    /// restarts the full duration rather than letting the earlier timer clear it early.
     private func showCopiedFeedback() {
         copyFeedbackWorkItem?.cancel()
         copyButton?.image = NSImage(
@@ -291,15 +254,12 @@ final class TroubleshootWindowController: NSWindowController {
             deadline: .now() + CopyFeedback.duration, execute: revert)
     }
 
-    /// What this window's copy button copies — used in the accessibility label and tooltip.
     private static let copyTarget = "the response body"
 
     // MARK: Live render
 
-    /// Map the pure ``TroubleshootLayout`` onto the views. Called from `show(_:)` and — for live
-    /// updates — from `AppDelegate.apply(_:)` on every poll (ADR-0020). To keep the user's text
-    /// selection and scroll position across a live update, the body is only reassigned when it
-    /// actually changed.
+    /// Called from `show(_:)` and — for live updates — from `AppDelegate.apply(_:)` on every poll
+    /// (ADR-0020).
     func render(_ output: PollOutput?) {
         let layout = TroubleshootLayout.make(from: output)
         timestampLabel.stringValue = layout.timestampLine
@@ -319,8 +279,7 @@ final class TroubleshootWindowController: NSWindowController {
         tokenExpiryLabel.isHidden = layout.tokenExpiryLine == nil
 
         // Only rebuild the body when the text actually changed — reassigning it would drop the
-        // user's selection and scroll position on every live poll (ADR-0020). When the body is JSON
-        // (`bodyIsJSON`) it is syntax-highlighted; otherwise it is monolithic monospace.
+        // user's selection and scroll position on every live poll (ADR-0020).
         if bodyTextView.string != layout.bodyText {
             bodyTextView.textStorage?.setAttributedString(
                 Self.bodyAttributedString(layout.bodyText, isJSON: layout.bodyIsJSON))
@@ -329,9 +288,8 @@ final class TroubleshootWindowController: NSWindowController {
 
     // MARK: JSON syntax highlighting
 
-    /// Build the attributed body: the base monospace font in `labelColor`, then — for a JSON body —
-    /// a foreground colour per token from the pure ``JSONHighlighter``. Non-JSON bodies (error
-    /// payloads, placeholders) get the base attributes only, reading as plain monospace as before.
+    /// Base monospace font in `labelColor`, then — for a JSON body — a foreground colour per token
+    /// from ``JSONHighlighter``. Non-JSON bodies get the base attributes only.
     private static func bodyAttributedString(_ text: String, isJSON: Bool) -> NSAttributedString {
         let base: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
@@ -342,8 +300,7 @@ final class TroubleshootWindowController: NSWindowController {
 
         let full = attributed.length
         for token in JSONHighlighter.tokens(in: text) {
-            // Guard against any range drift (the tokenizer works on the same string, so this is
-            // belt-and-suspenders) before touching the storage.
+            // Belt-and-suspenders guard against range drift before touching the storage.
             guard token.range.location >= 0,
                   token.range.location + token.range.length <= full else { continue }
             attributed.addAttribute(
@@ -352,11 +309,8 @@ final class TroubleshootWindowController: NSWindowController {
         return attributed
     }
 
-    /// Map a JSON token kind to its highlight colour. The base is a system semantic colour; in the
-    /// **light** appearance it is darkened a touch so the tokens read with more contrast against the
-    /// white background (the bright system tints are tuned for dark mode). The **dark** appearance
-    /// keeps the system colours as-is. `punctuation` stays `tertiaryLabelColor` (already adaptive and
-    /// intentionally muted) in both.
+    /// In the **light** appearance the base system colour is darkened a touch (the bright system
+    /// tints are tuned for dark mode); dark keeps them as-is.
     private static func color(for kind: JSONHighlighter.JSONTokenKind) -> NSColor {
         switch kind {
         case .key: return Self.dynamic(light: Self.darkened(.systemBlue), dark: .systemBlue)
@@ -368,16 +322,14 @@ final class TroubleshootWindowController: NSWindowController {
         }
     }
 
-    /// Darken a system colour for the light appearance — blend a fraction of black into it, in the
-    /// sRGB space (system colours resolve cleanly there). ~28 % reads noticeably deeper without going
-    /// muddy.
+    /// Blend a fraction of black into it, in sRGB (system colours resolve cleanly there). ~28% reads
+    /// noticeably deeper without going muddy.
     private static func darkened(_ color: NSColor) -> NSColor {
         (color.usingColorSpace(.sRGB) ?? color).blended(withFraction: 0.28, of: .black) ?? color
     }
 
-    /// An appearance-aware colour: resolves to `light` under Aqua and `dark` under Dark Aqua. Uses
-    /// `NSColor(name:dynamicProvider:)` so the `NSTextView` re-resolves it if the system theme flips
-    /// while the window is open.
+    /// `NSColor(name:dynamicProvider:)` so the `NSTextView` re-resolves it if the theme flips while
+    /// the window is open.
     private static func dynamic(light: NSColor, dark: NSColor) -> NSColor {
         NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
@@ -390,10 +342,8 @@ final class TroubleshootWindowController: NSWindowController {
 
 extension TroubleshootWindowController: NSTextViewDelegate {
     /// Veto every user-driven text change so the body stays read-only while the view is technically
-    /// editable (which is what supplies the caret, arrow navigation, and beep-free ⌘C/⌘A — see the
-    /// body-setup comment). This is the single choke point for typing, paste (⌘V), delete, and
-    /// drag-drop insertion — all funnel through here before mutating storage. Programmatic
-    /// `bodyTextView.string = …` in `render(_:)` bypasses this path, so live updates still apply.
+    /// editable. The single choke point for typing, paste, delete, and drag-drop insertion.
+    /// Programmatic `bodyTextView.string = …` in `render(_:)` bypasses this path.
     func textView(
         _ textView: NSTextView,
         shouldChangeTextIn affectedCharRange: NSRange,
@@ -405,18 +355,15 @@ extension TroubleshootWindowController: NSTextViewDelegate {
 
 // MARK: - ReadOnlyTextView
 
-/// An `NSTextView` for a read-only body in an accessory app that has **no Edit menu**.
+/// An `NSTextView` for a read-only body in an accessory app that has **no Edit menu**, so no menu
+/// carries the standard clipboard key equivalents.
 ///
-/// Two custom behaviours, both needed because there is no menu to carry the standard clipboard key
-/// equivalents:
-/// - `performKeyEquivalent(_:)` handles ⌘C / ⌘A / ⌘X itself. In Cocoa a Command chord is first
-///   offered as a key equivalent down the responder chain; with no Edit menu nothing claims ⌘C/⌘A,
-///   the pass returns `false`, and the event falls through to `noResponderFor:` → `NSBeep` (and copy
-///   never happens). Claiming them here calls the action and returns `true`, so copy/select-all work
-///   **and** the beep is suppressed. Matched by `keyCode` (layout-independent — on a non-Latin layout
-///   the C key reports a non-"c" character, so a character match would miss).
-/// - `cut(_:)` is a plain copy: the view is editable-but-edit-vetoed (that supplies the caret + arrow
-///   navigation), so a real cut would copy then have its delete rejected — this makes ⌘X explicit.
+/// - `performKeyEquivalent(_:)` handles ⌘C / ⌘A / ⌘X itself. With no Edit menu, nothing claims
+///   ⌘C/⌘A down the responder chain and the event falls through to `NSBeep` without copying.
+///   Claiming them here calls the action and returns `true`. Matched by `keyCode`
+///   (layout-independent — on a non-Latin layout the C key reports a non-"c" character).
+/// - `cut(_:)` is a plain copy: the view is editable-but-edit-vetoed, so a real cut would copy then
+///   have its delete rejected.
 final class ReadOnlyTextView: NSTextView {
     /// ANSI virtual key codes (Carbon `kVK_ANSI_*`) — layout-independent physical keys.
     private enum KeyCode {

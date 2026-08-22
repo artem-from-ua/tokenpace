@@ -48,9 +48,8 @@ stub name from the table below, and `summary` is its description.
 > not the live API: `swift run` **without** `TOKENPACE_STUB` gives you a frozen frame. To get real
 > data in a dev build, ask for it by name — **`TOKENPACE_STUB=real`** (or switch to "Real network (no
 > stub)" in dev-tools). An unknown value (`TOKENPACE_STUB=healthy` — there is no such scenario) also
-> yields `screenshot` **and** logs a `.notice` listing the valid ids; it used to silently fall through
-> to the live network, so a run that looked stubbed was actually hitting production. An installed
-> `.app` with no env var is live, as before — nothing changed for the end user.
+> yields `screenshot` **and** logs a `.notice` listing the valid ids. An installed
+> `.app` with no env var is live.
 
 > **Live switching without a restart (#187, ADR-0047).** With dev-tools enabled
 > (`defaults write com.artem-n.tokenpace devToolsEnabled -bool true` on the **installed `.app`** —
@@ -60,8 +59,7 @@ stub name from the table below, and `summary` is its description.
 > live (the menu-bar icon and the popup refresh within one polling cycle), and the current scenario's
 > description shows below the dropdown. `TOKENPACE_STUB=…` at launch still works and **sets the
 > dropdown's initial selection**; "Real network (no stub)" returns the app to the live API. For
-> scripting, `TOKENPACE_OPEN_DEVTOOLS=1` still auto-opens the window (the dev-tools gate itself is
-> `devToolsEnabled` now, so `.app` only).
+> scripting, `TOKENPACE_OPEN_DEVTOOLS=1` still auto-opens the window.
 > Sequence stubs (`stale-error`, `reset-grace`, `optimistic-reset`, `just-unblocked`,
 > `subscription-reset-on-credits`)
 > replay from poll #1 when reselected (a fresh `StubUsageTransport` resets the poll counter).
@@ -93,71 +91,67 @@ stub name from the table below, and `summary` is its description.
 | Stub | What it shows |
 |---|---|
 | `1` | climbing — usage creeps upward |
-| `screenshot` | a stable frame for screenshots (fixed time 2026-01-31 22:00 UTC): 5h **green** (10 % vs ≈65 % — well behind), 7d **yellow** (36 % vs ≈29 % — mild ahead, under the dynamic threshold `0.16·(1−time)`, deliberately off the amber/orange boundary where the old 40 % used to sit), Fable **orange** / Mythos **red**. **Extra usage** — $1088.00 / $5000.00 (USD, ~22 %) with ≈99 % of the month elapsed → a **long green** "on pace" bar, reset "<1d". There is no "active" badge (no **base** 5h/7d limit is exhausted — only Mythos, and it does not gate work) |
+| `screenshot` | a stable frame for screenshots (fixed time 2026-01-31 22:00 UTC): 5h **green** (10 % vs ≈65 % — well behind), 7d **yellow** (36 % vs ≈29 % — mild ahead, under the dynamic threshold `0.16·(1−time)`), Fable **orange** / Mythos **red**. **Extra usage** — $1088.00 / $5000.00 (USD, ~22 %) with ≈99 % of the month elapsed → a **long green** "on pace" bar, reset "<1d". There is no "active" badge (no **base** 5h/7d limit is exhausted — only Mythos, and it does not gate work) |
 | `error` | an auth error (401) on a cold start → the menu bar shows a **struck-through antenna** (`antenna.radiowaves.left.and.right.slash`, [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)), **not ⚠️**: the triangle is reserved exclusively for "the data contradicts itself" (`broken-reset`). The popup shows only the banner, no limit lines |
-| `stale-error` | **stale-while-erroring** (the spacing bug): the first poll is valid (full bars: idle 5h "ready to start", 18 % 7d, a Fable line, "Extra usage" €11.7 of €15.0), then every poll times out → the banner "Claude API connectivity issue" / "Authentication API timeout" sits **above** all the bars. **The menu bar has two phases, not three** ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)): before the `max(15 min, 3 × pollInterval)` threshold — the stale bars **with no glyph**; after it — **the struck-through antenna alone**, with no bars. The intermediate "glyph next to stale bars" phase is gone; if you see it, that is a regression. (The transition itself cannot be reproduced with a stub — `failingSince` cannot be wound forward; it is covered by unit tests.) Check the **horizontal spacing between the error text and the "5-hour" line** (the same `sectionSpacing` used after the header) — without it the error block was glued to "5-hour". API + Code — major outage (red dots) |
-| `standby-floor` | **the stand-by floor**: 7d is orange, but green is only **≈16 min** away → the `stand by … for green` line under ⌥ **does not appear** (the floor is 20 min). The frame was rebuilt around an **integer** `utilization = 99` ([#386](https://github.com/artem-from-ua/tokenpace/issues/386)): it used to hold a fractional 99.5536 %, which the API never returns for token windows, so the state was arithmetically possible but unreachable. Now the reconstruction pushes the raw `99` deep into the bucket (≈99.30 % against ≈99.14 % elapsed), and the state becomes real. The band is narrow — scanning the whole `(u, reset)` space, the suppression happens in **18 out of 10,064** combinations, all with `u` between 99.15 % and 99.40 %; the culprit is not the quantization step but the 20-minute end-of-window override, which eats every frame with a small lead and a distant reset. The stub moves `h5` by 4 pp per poll so the reconstruction has time to accumulate the required 0.8 pp |
-| `weekly-interp` | **the 7d reconstruction** ([#386](https://github.com/artem-from-ua/tokenpace/issues/386)) — watch it as a **sequence**, not as a frame. The weekly counter sits on an integer the whole time (61, and 62 from poll 8) — which is exactly how the API behaves — while the five-hour one grows by 4 pp per poll. So any movement of the 7d bar is the reconstruction at work; there is no other source. Three acts (verified by running this same sequence through the interpolator): **polls 0–7** — the anchor is inherited, the value creeps from the center of the bucket (61.0) up to the ceiling and holds there from poll 6 (`clipped`); half a bucket is all an inherited anchor can honestly claim; **poll 8** — the counter ticks 61 → 62, the anchor hardens onto the lower bound of the new bucket (61.5), the first segment closes and `N` stops being the seed — note that the value **does not jump** at this transition, because the old bucket's ceiling and the new one's floor are the same point; **polls 9–19** — that same unchanging `62` walks the bar 61.5 → 62.5 in 0.1 pp steps, then clips. The key thing to check: the bar **does not jump backward** at either transition, and Troubleshoot shows both numbers the whole time |
-| `weekly-reset-blackout` ⏭ | **the weekly 7d blackout, reconstructed** ([ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)) — watch it as a **sequence**, stepping with the **Refresh now** button. The first two polls return a healthy body with a real `seven_day.resets_at` — that seeds the anchor; after that every poll returns what the server actually sends for 4–6 hours after each weekly reset: `seven_day: null` plus a `weekly_all` record **with no date of its own**, meaning both sources of the reset vanish at once. The key thing to check: **the 7-day countdown stops moving** from poll 2 onward. Before this change it stepped forward by ~10 minutes on every refresh, because the `now + 7d` estimate was recomputed each time, and the time marker sat near the left edge permanently. Now the date holds and the marker creeps, as it should |
+| `stale-error` | **stale-while-erroring** (the spacing bug): the first poll is valid (full bars: idle 5h "ready to start", 18 % 7d, a Fable line, "Extra usage" €11.7 of €15.0), then every poll times out → the banner "Claude API connectivity issue" / "Authentication API timeout" sits **above** all the bars. **The menu bar has two phases, not three** ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)): before the `max(15 min, 3 × pollInterval)` threshold — the stale bars **with no glyph**; after it — **the struck-through antenna alone**, with no bars. If you see a glyph next to stale bars, that is a regression. (The transition itself cannot be reproduced with a stub — `failingSince` cannot be wound forward; it is covered by unit tests.) Check the **horizontal spacing between the error text and the "5-hour" line** (the same `sectionSpacing` used after the header). API + Code — major outage (red dots) |
+| `standby-floor` | **the stand-by floor**: 7d is orange, but green is only **≈16 min** away → the `stand by … for green` line under ⌥ **does not appear** (the floor is 20 min). The band is narrow — 18 out of 10,064 `(u, reset)` combinations, all with `u` between 99.15 % and 99.40 %. The stub moves `h5` by 4 pp per poll so the reconstruction has time to accumulate the required 0.8 pp |
+| `weekly-interp` | **the 7d reconstruction** ([#386](https://github.com/artem-from-ua/tokenpace/issues/386)) — watch it as a **sequence**, not as a frame. The weekly counter sits on an integer the whole time (61, and 62 from poll 8) while the five-hour one grows by 4 pp per poll, so any movement of the 7d bar is the reconstruction at work. **Polls 0–7** — the value creeps from the center of the bucket (61.0) up to the ceiling and holds there from poll 6 (`clipped`). **Poll 8** — the counter ticks 61 → 62, the anchor hardens onto the lower bound of the new bucket (61.5); the value **does not jump** at this transition. **Polls 9–19** — `62` walks the bar 61.5 → 62.5 in 0.1 pp steps, then clips. The key thing to check: the bar **does not jump backward** at either transition, and Troubleshoot shows both numbers the whole time |
+| `weekly-reset-blackout` ⏭ | **the weekly 7d blackout, reconstructed** ([ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)) — watch it as a **sequence**, stepping with the **Refresh now** button. The first two polls return a healthy body with a real `seven_day.resets_at` — that seeds the anchor; after that every poll returns what the server actually sends for 4–6 hours after each weekly reset: `seven_day: null` plus a `weekly_all` record **with no date of its own**, meaning both sources of the reset vanish at once. The key thing to check: **the 7-day countdown stops moving** from poll 2 onward — the date holds and the marker creeps, as it should |
 | `weekly-reset-unknown` | **a cold start** ([ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)): the same blackout body on every poll, but **there is no anchor** — a fresh install that has not spent a single token yet. **Remove the stored anchor first**, otherwise the app reconstructs from it and you will see ordinary bars: `defaults delete TokenPace lastSevenDayReset` (the `swift run` domain). The key thing to check: the menu bar shows the "no data" symbol (**not** ⚠️: that is reserved for "the data contradicts itself", and there is no contradiction here), and the popup **shows no limit at all** — only "Weekly reset time unknown" and a line telling you how to fix it. No countdown anywhere: the whole point is that nothing gets invented |
-| `idle` | "no active 5h session" (#100): the 5h bar reads "ready to start" (**green** — there is no blue pill since [ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)), no phantom reset, and the time falls back to the 7d reset ("4d"). **With the default "Hide the top 5h bar" = `Until it needs attention`** ([ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md) → [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)), an idle 5h counts as calm and **gets hidden** → only the **7d bar** remains, centered; the green "ready to start" pill is visible only in `Never` mode. Switch it in Settings → Appearance › Menu bar (key `menuBar.hideTop5hBar`, values `untilItNeedsAttention`\|`never`). **The shape is identical in both styles** ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)): a gray track plus a minimum pill at zero; **Progress** adds the time marker at zero on top (it covers the pill), **Pressure** leaves the pill alone. A solid full-width fill must not appear in either style — it used to read as Pressure "at maximum". When muted, idle in the menu bar must be neither dimmer nor brighter than the calm bars beside it (the same `calmWhite` at the same alpha). **`ColorAdvice` check** ([#343](https://github.com/artem-from-ua/cc-timer/issues/343), [ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)): Settings → Appearance › Menu bar → "Colors tell me" — under **How it's going** the pill is **green**, under both muting modes (`Slow down`, `Slow down or speed up`) it is **white**. There is no longer any difference between those two here: `mutesBlue` distinguished the blue pill, and the blue one no longer exists. Under **Pressure** the pill is white **always**, and the "Colors tell me" row itself is disabled and shows `Slow down` |
+| `idle` | "no active 5h session" (#100): the 5h bar reads "ready to start" (**green** — there is no blue pill, [ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)), no phantom reset, and the time falls back to the 7d reset ("4d"). **With the default "Hide the top 5h bar" = `Until it needs attention`** ([ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md) → [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)), an idle 5h counts as calm and **gets hidden** → only the **7d bar** remains, centered; the green "ready to start" pill is visible only in `Never` mode (key `menuBar.hideTop5hBar`, values `untilItNeedsAttention`\|`never`). **The shape is identical in both styles** ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)): a gray track plus a minimum pill at zero; **Progress** adds the time marker at zero on top (it covers the pill), **Pressure** leaves the pill alone. A solid full-width fill must not appear in either style. When muted, idle in the menu bar must be neither dimmer nor brighter than the calm bars beside it (the same `calmWhite` at the same alpha). **`ColorAdvice` check** ([#343](https://github.com/artem-from-ua/cc-timer/issues/343)): Settings → Appearance › Menu bar → "Colors tell me" — under **How it's going** the pill is **green**, under both muting modes it is **white**. Under **Pressure** the pill is white **always**, and the "Colors tell me" row itself is disabled and shows `Slow down` |
 | `idle-blocked` | **blocked** idle (#158): idle 5h plus an exhausted 7d (100 %) with no credits → `isBlocked`. **The red pause glyph is always on the left** (#199/#227, ADR-0063) — it can no longer be turned off. There are **no bars at all** here ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)): the menu bar = **pause + countdown**. The "Pause icon hides bars" toggle no longer exists — the hiding is unconditional, so there is nothing left to switch. The gray idle bar survives only in the popup. The credits icon (€) sits **between** the pause and the bars (#227). The popup always shows the full picture: status "waiting for limit reset", and the 7d reset carries a **red badge** (a pill). Compare with `idle`: there you get a **green** "ready to start", which turns **white** (`calmWhite`) under both muting `Colors tell me` modes (and unconditionally under Pressure). Here the **gray** pill is muted in no mode and no style — gray carries "there is nowhere to work", not calm ([ADR-0038](../adr/0038-idle-blocked-status.md)) |
 | `active-blocked` | **active** blocked (#177): a live 5h session (48 %) with an exhausted 7d (100 %, `weekly_all` critical) and no credits → the weekly cap blocks despite the 5h quota (`isBlocked`). **The red pause glyph is always on the left** (#199/#227, ADR-0063). There are **no bars** ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)): pause + countdown, and there is no toggle for it anymore. The credits icon (€) sits **between** the pause and the bars (#227). The popup always shows the full picture: the 7d reset gets a **red badge** reading "Effective blocker" |
 | `optimistic-reset` ⏱ | the reset boundary (#36): 5h resets in ~20 s — the bar jumps 60 % → 0 % with no ⏰ plus a forced refresh. **Real clock** (⏱): the timer has to tick live, so this stub is not detached from time |
-| `color-cycle` ⏱ | **smooth color transitions** (ADR-0070) — **real clock** (⏱: the color sweep drives its own 5-second timer). The 5h bar and the service dot walk the entire pacing palette: blue → green → yellow → orange → red and back, 5 s per zone (a 0.8 s transition plus a pause). **The 5h geometry is frozen** — the strip is pinned at half the track and the time marker parks at its end, so **only the color** moves; 7d / per-model / credits keep their real geometry as a motionless reference alongside. Check that: (1) the color **blends** rather than jumping, both in the menu bar **and** in the dropdown (the dropdown also exercises `.common` run-loop mode under NSMenu tracking); (2) switching "Colors tell me" / Style mid-sweep animates too — check **both** Style rows separately (the menu-bar one and the dropdown one, #329). While you are there, catch **two effects from #381**: switching to **Pressure** disables the "Colors tell me" row (the label and segments gray out, the highlight moves to `Slow down`, and clicks do nothing), and at that same instant the entire calm side turns **white** — the blue/green/yellow stages of the sweep must not be colored under Pressure for any value of the setting. The service dot in the sweep is no longer muted along with the bars — it walks **its own** scale (yellow → orange → red → blue → gray), and **not one** step goes dim under any setting ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md), [ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md)); this doubles as the frame for the `yellow→orange` transition — adjacent tones, the shortest fade distance: it has to read as a blend, not a jump; (3) Progress keeps its slider (it does not collapse into Pressure); (4) between transitions the timer is idle — sitting still must not heat up the CPU. **Not** for checking the pacing thresholds themselves: the `utilization` values here are synthetic and tuned to hit each zone |
-| `reset-grace` ⏱ | the grace period at the reset boundary (ADR-0041, ADR-0045) — **real clock** (⏱: the "utilization rose recently" freshness window is measured in real time): an active 5h window (polls 0–1) → an **empty** post-reset body (polls 2–3: `five_hour.resets_at:null`, with no `session` limit — the decoder on its own would produce `sessionIdle`) → active again (polls 4+). In the "hole" the 5h line must show a calm **0 % "on pace" with a rolled-forward countdown** (`Nh at …`), and the menu bar must **not blink** — **never "resetting…" and never a full-width green bar** (ADR-0045). The grace period only arms while Claude Code is active (`claudeActive` — a journal written in the last 5 min, ADR-0118) — otherwise an honest idle "ready to start" shows immediately. Note this gate was silently dead until ADR-0118: the old process probe never matched, so the grace could not arm at all. Compare with `idle`: there the idle is **real** and is supposed to show |
-| `broken-reset` | a broken `resets_at` (#167, ADR-0043 → [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)): an **exhausted** 5h (100 %) with an **unparsable but non-empty** `resets_at` (`"not-a-date"`, NOT `null` — `null` or empty would give an honest `sessionIdle` rather than an error) → the menu bar draws **a lone ⚠️** (`MenuBarMode.exhaustedUnknownReset`): no bars, no countdown — and **no pause or currency sign beside it**, even though the window is ostensibly at 100 %. The pair "⏸ + ⚠️" would read as a broken widget rather than a state, so contradictory data gets a single signal. If you see a red bar, a pill, a pause, or a fake `<1m`, that is a regression. 7d is calm with a valid reset (not the source of the error) |
-| `calm-degraded` | calm bars plus a **`degraded`** service dot. Since [ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md) this is the frame about **three surfaces converging**: the menu bar, the popup, and the Legend page all draw this state in the **same yellow**. Check exactly that: open the popup over the bar and compare the two dots in a single capture — they must be **identical**; any difference is now a regression (before [#410](https://github.com/artem-from-ua/tokenpace/issues/410) they differed on purpose). Cycle "Colors tell me" through all three values and switch Style — **none** of them may shift that yellow: this is the check that [ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md) still stands (the tone changed, not who decides it). A white dot must not appear in **any** state. The louder states are unchanged on both surfaces (check them on `incident-*`: `partialOutage` orange, `majorOutage` red, `underMaintenance` blue, `unknown` gray). The screenshot **must be of the real menu bar**, and **separately on the light theme** — the question there is not "is it visible" but whether the yellow reads as an alarm next to the system icons |
+| `color-cycle` ⏱ | **smooth color transitions** (ADR-0070) — **real clock** (⏱: the color sweep drives its own 5-second timer). The 5h bar and the service dot walk the entire pacing palette: blue → green → yellow → orange → red and back, 5 s per zone (a 0.8 s transition plus a pause). **The 5h geometry is frozen** — the strip is pinned at half the track and the time marker parks at its end, so **only the color** moves; 7d / per-model / credits keep their real geometry as a motionless reference alongside. Check that: (1) the color **blends** rather than jumping, both in the menu bar **and** in the dropdown (the dropdown also exercises `.common` run-loop mode under NSMenu tracking); (2) switching "Colors tell me" / Style mid-sweep animates too — check **both** Style rows separately (the menu-bar one and the dropdown one, #329). While you are there: switching to **Pressure** disables the "Colors tell me" row (the label and segments gray out, the highlight moves to `Slow down`), and at that same instant the entire calm side turns **white** — the blue/green/yellow stages of the sweep must not be colored under Pressure for any value of the setting. The service dot walks **its own** scale (yellow → orange → red → blue → gray), and **not one** step goes dim under any setting ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md), [ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md)); this doubles as the frame for the `yellow→orange` transition — it has to read as a blend, not a jump; (3) Progress keeps its slider (it does not collapse into Pressure); (4) between transitions the timer is idle — sitting still must not heat up the CPU. **Not** for checking the pacing thresholds themselves: the `utilization` values here are synthetic |
+| `reset-grace` ⏱ | the grace period at the reset boundary (ADR-0041, ADR-0045) — **real clock** (⏱: the "utilization rose recently" freshness window is measured in real time): an active 5h window (polls 0–1) → an **empty** post-reset body (polls 2–3: `five_hour.resets_at:null`, with no `session` limit — the decoder on its own would produce `sessionIdle`) → active again (polls 4+). In the "hole" the 5h line must show a calm **0 % "on pace" with a rolled-forward countdown** (`Nh at …`), and the menu bar must **not blink** — **never "resetting…" and never a full-width green bar** (ADR-0045). The grace period only arms while Claude Code is active (`claudeActive` — a journal written in the last 5 min, ADR-0118) — otherwise an honest idle "ready to start" shows immediately. Compare with `idle`: there the idle is **real** and is supposed to show |
+| `broken-reset` | a broken `resets_at` (#167, ADR-0043 → [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)): an **exhausted** 5h (100 %) with an **unparsable but non-empty** `resets_at` (`"not-a-date"`, NOT `null` — `null` or empty would give an honest `sessionIdle` rather than an error) → the menu bar draws **a lone ⚠️** (`MenuBarMode.exhaustedUnknownReset`): no bars, no countdown — and **no pause or currency sign beside it**, even though the window is ostensibly at 100 %. Contradictory data gets a single signal. If you see a red bar, a pill, a pause, or a fake `<1m`, that is a regression. 7d is calm with a valid reset (not the source of the error) |
+| `calm-degraded` | calm bars plus a **`degraded`** service dot. This is the frame about **three surfaces converging** ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)): the menu bar, the popup, and the Legend page all draw this state in the **same yellow**. Check exactly that: open the popup over the bar and compare the two dots in a single capture — they must be **identical**; any difference is a regression. Cycle "Colors tell me" through all three values and switch Style — **none** of them may shift that yellow: this is the check that [ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md) still stands (the tone changed, not who decides it). A white dot must not appear in **any** state. The louder states are unchanged on both surfaces (check them on `incident-*`: `partialOutage` orange, `majorOutage` red, `underMaintenance` blue, `unknown` gray). The screenshot **must be of the real menu bar**, and **separately on the light theme** — the question there is not "is it visible" but whether the yellow reads as an alarm next to the system icons |
 | `all-green` | calm bars plus **all services operational** (green): `worstProblem == nil`, so the popup has **no status lines at all** — neither without ⌥ nor under it. Since #279, ⌥ switches the **dimension** (services → incidents) rather than "show more", so green lines no longer expand; with no incidents, the section under ⌥ is simply absent. This is the frame for checking that "nothing appears for nothing" (the remaining stubs are all-operational too — except `error`, `stale-error`, `calm-degraded`, and `incident-*`) |
-| `github-green` | **The state the header dot exists for** (#454, [ADR-0121](../adr/0121-github-as-a-status-only-provider.md)): GitHub monitored and every component `operational`. The provider is on by default; if you have turned it off, switch it back on for this frame (Settings → Providers → GitHub → `Development services`), since with it off this stub is indistinguishable from any other. The GitHub plate shows a **green dot before the word `GitHub`** and **no rows at all**; that dot is the plate's entire content, which is the whole argument. Check exactly four things: (1) the dot is a **glowing** `GlowDotView`, identical in diameter and halo to the dots on Claude's service rows — the first version was a flat text attachment and read as a different mark; (2) it sits on the **same vertical line** as those dots (capture both plates in one screenshot with a degraded Claude frame if you need the comparison); (3) hold **⌥** — the plate shows **nothing new**: no `No ongoing incidents` row (that answer belongs to Claude's plate, which is on screen only *because* something is wrong), only the `· updated …` tail appearing beside `GitHub`; (4) the **menu bar has no dot** — green never leaves the popup header |
-| `github-degraded` | GitHub with **Actions degraded**, Claude untouched. The inverse half of `github-green`, and the frame that pins the dot's disappearance: the moment the row appears, the **header dot is gone and `GitHub` sits flush left** — no reserved indent behind an invisible mark. A yellow dot next to the header here is a regression, and so is a title still indented as if a dot were there. One row (`Actions`, yellow, with its age) and **only** one — the other four components are operational and draw nothing. The menu-bar dot follows worst-of-all across both providers, so it is **yellow**. Under **⌥** the row is replaced by GitHub's own incident, and the subscribe control is visible **at rest as well as under ⌥** (it is an offer about the trouble, not a detail of the incident dimension — hidden behind ⌥ it would make the two plates behave differently for the same state). Claude's plate must be **absent**: nothing is wrong there |
-| `github-outage` | GitHub with **Git operations down** (`major_outage`) and **API requests degraded** — the worst-of-5 frame. Two rows, and the menu-bar dot **red** (worst-of-all). No header dot, again. This is also the frame for the component **display names**: the rows read `Git`, `API`, `Issues`, `Pull requests`, `Actions` — bare, exactly as Claude's read `API`, `Code`, `Web/Desktop`. Note `API` appears on **both** providers' plates and that is correct: the header above each row is what attributes it, which is the reason the rows may stay bare at all. Check the row's status word links to **`githubstatus.com`**, not to `status.claude.com` — a GitHub row pointing at Anthropic's page is a dead end |
-| `github-claude-down` | **The cross-provider frame** — the one that only exists because there are two providers, and where the interesting bugs live. **Both** sides carry trouble: Claude Code is `major_outage` with an identified incident, GitHub's Actions is degraded with its own. Check: (1) **each plate renders only its own incidents** — under ⌥ the Claude incident appears under `Claude` and the GitHub one under `GitHub`, never the same row twice and never one under the other's header (an incident row deliberately does not name its services, [ADR-0071](../adr/0071-incident-subscriptions.md) §3, so the header is the only attribution there is); (2) **a subscribe control on each plate**, since each has an incident of its own — clicking either toggles the **same** subscription, so the other must flip with it; (3) **neither** plate shows a header dot, both being non-operational; (4) the two plates are visibly **separate glass** — this is the capture that proves the second `CardBackdropView` exists rather than GitHub's rows having been appended to Claude's card |
-| `just-unblocked` | the "Back to work!" edge (#160): the first poll is blocked (7d=100 %, no credits), then workable (7d=40 %) → the notification fires once. Without credits the old and new semantics coincide, so this is the **regression** scenario. See its own section below |
-| `subscription-reset-on-credits` | the "Back to work!" edge **with credits active** (#161, [ADR-0113](../adr/0113-back-to-work-tracks-the-subscription-quota.md)): the first poll has 7d=100 % **with credits enabled** — work does not stop (`canWork` = `true`), but the subscription is exhausted — then 7d=40 % → the banner fires. This is exactly the edge the old signal could not see, so it is the **main** check of the change. See its own section below |
+| `github-green` | **The state the header dot exists for** (#454, [ADR-0121](../adr/0121-github-as-a-status-only-provider.md)): GitHub monitored and every component `operational`. The provider is on by default; if you have turned it off, switch it back on for this frame (Settings → Providers → GitHub → `Development services`). The GitHub plate shows a **green dot before the word `GitHub`** and **no rows at all**. Check exactly four things: (1) the dot is a **glowing** `GlowDotView`, identical in diameter and halo to the dots on Claude's service rows; (2) it sits on the **same vertical line** as those dots (capture both plates in one screenshot with a degraded Claude frame if you need the comparison); (3) hold **⌥** — the plate shows **nothing new**: no `No ongoing incidents` row, only the `· updated …` tail appearing beside `GitHub`; (4) the **menu bar has no dot** — green never leaves the popup header |
+| `github-degraded` | GitHub with **Actions degraded**, Claude untouched. The moment the row appears, the **header dot is gone and `GitHub` sits flush left** — no reserved indent behind an invisible mark. A yellow dot next to the header here is a regression, and so is a title still indented as if a dot were there. One row (`Actions`, yellow, with its age) and **only** one — the other four components are operational and draw nothing. The menu-bar dot follows worst-of-all across both providers, so it is **yellow**. Under **⌥** the row is replaced by GitHub's own incident, and the subscribe control is visible **at rest as well as under ⌥**. Claude's plate must be **absent** |
+| `github-outage` | GitHub with **Git operations down** (`major_outage`) and **API requests degraded** — the worst-of-5 frame. Two rows, and the menu-bar dot **red**. No header dot, again. This is also the frame for the component **display names**: the rows read `Git`, `API`, `Issues`, `Pull requests`, `Actions` — bare, exactly as Claude's read `API`, `Code`, `Web/Desktop`. `API` appears on **both** providers' plates — that's correct, the header above each row is what attributes it. Check the row's status word links to **`githubstatus.com`**, not to `status.claude.com` |
+| `github-claude-down` | **The cross-provider frame**, where the interesting bugs live. **Both** sides carry trouble: Claude Code is `major_outage` with an identified incident, GitHub's Actions is degraded with its own. Check: (1) **each plate renders only its own incidents** — under ⌥ the Claude incident appears under `Claude` and the GitHub one under `GitHub`, never the same row twice and never one under the other's header (an incident row does not name its services, [ADR-0071](../adr/0071-incident-subscriptions.md) §3, so the header is the only attribution there is); (2) **a subscribe control on each plate**, since each has an incident of its own — clicking either toggles the **same** subscription, so the other must flip with it; (3) **neither** plate shows a header dot, both being non-operational; (4) the two plates are visibly **separate glass** — proof the second `CardBackdropView` exists rather than GitHub's rows having been appended to Claude's card |
+| `just-unblocked` | the "Back to work!" edge (#160): the first poll is blocked (7d=100 %, no credits), then workable (7d=40 %) → the notification fires once. This is the **regression** scenario. See its own section below |
+| `subscription-reset-on-credits` | the "Back to work!" edge **with credits active** (#161, [ADR-0113](../adr/0113-back-to-work-tracks-the-subscription-quota.md)): the first poll has 7d=100 % **with credits enabled** — work does not stop (`canWork` = `true`), but the subscription is exhausted — then 7d=40 % → the banner fires. This is the **main** check of the change. See its own section below |
 | `credits-onset` | the "Now using Extra usage credits" edge: the first poll is **not** on credits (7d=40 %, credits enabled but the base limit not exhausted → `isOnCredits=false`), then 7d=100 % with the same enabled `spend`/`extra_usage` → work spills over onto paid credit → the notification fires once (€10.77 / €15.00). See its own section below |
 | `incident-active` | One active incident, Code + API `degraded`. Without ⌥ you get two service lines with ages (`2h7m · degraded`) and the subscribe line. Hold **⌥ Option** — the service lines are **replaced** by the incident line: the description wraps across several lines, and `2h7m · identified` sits on the right of the last description line; the stage word links to **that specific** incident |
 | `incident-green` | An incident that is formally **open** (`monitoring`) while every monitored component is already `operational` — a measured 66-minute gap. **Nothing** may render: no service lines, no incident line under ⌥, no subscribe button. The most valuable of the four — "nothing is shown" breaks without anyone noticing |
 | `incident-two` | Two simultaneous incidents over the same degraded components (the real shape from 2026-08-05 14:00). Under ⌥ you get two lines, each with its own dot, age, and link, and **one** subscribe line: you subscribe to the episode, not to the ticket |
-| `incident-wrapped` | Three incidents chosen **for the way their titles wrap** (#351) — all three chip placements in a single capture. Under ⌥: (1) the first ends its last line early → `2h7m · identified` **shares** that line with it; (2) the second wraps onto two lines and pushes `13m · investigating` onto a **third**; (3) the third fits on **one** line, but there is still no room for the chip → `6m · investigating` stands **alone on the second line**, leaving a wide gap after the title — the most illustrative shape. Every chip must sit **on the right**; before the fix, wrapped ones dropped to the left edge |
-| `incident-spacing` | Two degraded services and two **short, single-line** incidents — the frame for judging **vertical rhythm** (#351). Toggle ⌥ back and forth: two lines swap for two lines of the same height, so the gaps must not change. All four must match — incident↔incident, incident↔subscribe, service↔service, service↔subscribe. Before #351 the incident gaps were 8 pt against 3 pt for the service ones |
+| `incident-wrapped` | Three incidents chosen **for the way their titles wrap** (#351) — all three chip placements in a single capture. Under ⌥: (1) the first ends its last line early → `2h7m · identified` **shares** that line with it; (2) the second wraps onto two lines and pushes `13m · investigating` onto a **third**; (3) the third fits on **one** line, but there is still no room for the chip → `6m · investigating` stands **alone on the second line**, leaving a wide gap after the title. Every chip must sit **on the right** |
+| `incident-spacing` | Two degraded services and two **short, single-line** incidents — the frame for judging **vertical rhythm** (#351). Toggle ⌥ back and forth: two lines swap for two lines of the same height, so the gaps must not change. All four must match — incident↔incident, incident↔subscribe, service↔service, service↔subscribe |
 | `incident-recovery` ⏱ | A quiet recovery: the first two polls carry a degraded incident with an update, then the components turn green **with no new update at all** (the `mgp99sn4ynd4` case). The lines must disappear on their own; an update listener would have stayed silent for 43 minutes. See its own section below |
-| `pressure-sweep` | **The Pressure scale** ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md), [ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md), #307). 5h: three points from exhaustion with 7 % of the window left (`t≈93 %`, `u=97 %`) — on the window scale that is 4 % of the bar, i.e. **below** the minimum pill; on the remainder scale it is ≈ **57 %**. 7d: a moderate lead (`t=30 %`, `u=38 %`) → **11 %**, inside the yellow band (0–16 %) and just above the minimum pill (8.1 %) — this is the **tightest** pair in the app, so this is where you look at whether the yellow still reads as a short strip rather than a dot. Check that: (1) switching **both** Style rows to **Progress** makes the pacing bars look exactly as they did before #307 (marker in place, `subdivisions − 1` ticks); (2) under **Pressure** the 5h strip is five times wider than the 7d one, and there are no ticks in the popup at all — only the zero line, labeled `0` under ⌥; (3) switching **Menu bar** between **Pressure** and **Balance** must not move the 7d strip by a single pixel, because Pressure is exactly the ahead half of Balance; (4) set **Menu bar → Pressure** and **Dropdown → Progress** — that is the pair the "Mixed" case used to produce before #329, and it is where a stored `mixed` migrates ([ADR-0080](../adr/0080-per-surface-bar-style.md)) |
-| `balance-sweep` | **The Balance scale** ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md), #326). One line per side of center. 5h is deep behind (`t = 90 %, u = 70 %`): the headroom is twice the remaining time, so `r = −2` clamps to `−1` and **the left half is full**. This is precisely the state every other style draws as a minimum pill — Pressure collapses it to zero outright. 7d carries the same moderate lead as in `pressure-sweep` (`t = 30 %, u = 38 %`) → a short strip **to the right** of center (`+11.4 %` — **the same number** the Pressure bar draws: after [ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md) Pressure **is** that half, so switching styles does not move it). Check that: (1) the center line is present in **every** state, idle included, and only its tips stick out from under the track — it must not read as a Progress marker; (2) switching Pressure ↔ Balance does **not** change what the 7d line says; (3) on Balance the 5h line is the widest thing on screen, on Pressure the narrowest; (4) under a muting "Colors tell me" the direction is the only remaining cue — that is the case that decides whether the trade-off is acceptable. While you are there, compare against **Pressure**: the calm side there is white **unconditionally**, so Balance is where you can see that the "Colors tell me" choice still means something — and that is exactly why the row is disabled only under Pressure ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)); (5) both surfaces — in the popup there is a single tick, in the middle. Since #329 Balance is the **default** on both surfaces (the Work harder! preset), so on a fresh install it shows up right away, with no manual selection; while you are there, check that Balance leaves the preset on **Work harder!** rather than dropping it to `Custom`, as it did before [ADR-0080](../adr/0080-per-surface-bar-style.md) |
+| `pressure-sweep` | **The Pressure scale** ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md), [ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md), #307). 5h: `t≈93 %`, `u=97 %` → **below** the minimum pill on the window scale, ≈ **57 %** on the remainder scale. 7d: `t=30 %`, `u=38 %` → **11 %**, inside the yellow band (0–16 %) and just above the minimum pill (8.1 %) — the **tightest** pair in the app; check whether the yellow still reads as a short strip rather than a dot. Check that: (1) switching **both** Style rows to **Progress** shows the pacing bars with marker in place and `subdivisions − 1` ticks; (2) under **Pressure** the 5h strip is five times wider than the 7d one, and there are no ticks in the popup at all — only the zero line, labeled `0` under ⌥; (3) switching **Menu bar** between **Pressure** and **Balance** must not move the 7d strip by a single pixel; (4) set **Menu bar → Pressure** and **Dropdown → Progress** — that is where a stored `mixed` migrates ([ADR-0080](../adr/0080-per-surface-bar-style.md)) |
+| `balance-sweep` | **The Balance scale** ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md), #326). One line per side of center. 5h is deep behind (`t = 90 %, u = 70 %`): `r = −2` clamps to `−1` and **the left half is full** — the state every other style draws as a minimum pill; Pressure collapses it to zero outright. 7d carries the same moderate lead as in `pressure-sweep` (`t = 30 %, u = 38 %`) → a short strip **to the right** of center (`+11.4 %`, the same number the Pressure bar draws — switching styles does not move it). Check that: (1) the center line is present in **every** state, idle included, and only its tips stick out from under the track — it must not read as a Progress marker; (2) switching Pressure ↔ Balance does **not** change what the 7d line says; (3) on Balance the 5h line is the widest thing on screen, on Pressure the narrowest; (4) under a muting "Colors tell me" the direction is the only remaining cue. Compare against **Pressure**: the calm side there is white **unconditionally**, which is why the row is disabled only under Pressure ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)); (5) both surfaces — in the popup there is a single tick, in the middle. Balance is the **default** on both surfaces (the Work harder! preset); check that Balance leaves the preset on **Work harder!** rather than dropping it to `Custom` |
 
 ### The money credits icon (#144)
 
 The currency icon (`coloncurrencysign` ¤ / `eurosign` €, and so on) sits in the **leading** position:
 in the bar modes (`.expanded`/`.iconOnlyReset`) it leads; only in the diagnostic `.error` mode does it
-stay trailing (to the left of the service dot). All three frames pin 7d at 100 % (the base limit is
-exhausted → the display trigger fires) and differ in their `spend` block. Since credits cover the
-exhausted window (`subscriptionExhaustedWhileCovered`, not `isBlocked`), there is **no** pause glyph
-here — but since [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md) this is a separate state,
-"we're working on money": **there are no bars either**, and the widget = the currency sign + a
-countdown to the subscription quota coming back. There is no user gate on the icon anymore — the data
-decides it.
+stay trailing (to the left of the service dot). All three frames pin 7d at 100 % and differ in their
+`spend` block. Since credits cover the exhausted window (`subscriptionExhaustedWhileCovered`, not
+`isBlocked`), there is **no** pause glyph here ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)):
+**there are no bars either**, and the widget = the currency sign + a countdown to the subscription
+quota coming back.
 
 | Stub | Credits state | Icon color |
 |---|---|---|
 | `credits-active` | enabled, limit €15.00, spent €10.77 (~72 %) | usage-vs-time pacing (green when not ahead, amber/orange when ahead) |
 | `credits-limit-reached` | `spend_limit_reached` (a €5.00 limit below €10.77) | **red** (forced usage = 1) |
 | `credits-no-limit` | enabled, limit "unlimited" (`limit: null`) | **neutral** (foreground, no pacing) |
-| `credits-zero-spent` | "€0 of €15 ⟷ `<reset line>`" — both halves drop their zeros, each for its own reason: the spend because it is untouched (`amountMinor == 0`), the cap because it is a whole number. Under **⌥** it becomes "spent €0.00 of €15.00", and the reset **stays**: in a 320 pt column (#396) the pair takes 276 pt. The cap stays on the line even at zero: without it the line would read as unlimited, and that is a different billing configuration. The bar is at zero. There is **no badge at all**: credits are enabled, but nothing is spilling over — and the mere presence of the section already says so (ADR-0108) |
+| `credits-zero-spent` | "€0 of €15 ⟷ `<reset line>`" — both halves drop their zeros (spend: `amountMinor == 0`; cap: a whole number). Under **⌥** it becomes "spent €0.00 of €15.00", and the reset **stays**: in a 320 pt column (#396) the pair takes 276 pt. The cap stays on the line even at zero — without it the line would read as unlimited. The bar is at zero. There is **no badge at all** (ADR-0108) |
 | `credits-max-header` | **The widest first line** (#396), and the one that sets the popup's width: `Extra usage ･ progress ⟷ [$] well ahead of pace` = 307 pt against a 320 pt column. What to look at is that the two halves **do not touch** — a visible gap must remain between the badge and the status. The word `progress` (italic, after the `･`) appears only under **⌥**. The token limits here are deliberately **healthy** (7d at 42 %), otherwise the state "credits enabled but not in use" is unreachable |
 | `credits-max-detail` | **The widest second line**: a four-digit cap, spent down to the cent, so both halves carry thousands separators — `spent $5,000.00 of $5,000.00`. Together with the longest reset phrasing that comes to 376 pt, so the fit gate **drops the right half entirely** (rather than truncating it into an ellipsis). The heading above it reads `limit reached` in **plain text, with no badge**: the cap exists, so the red belongs to the reset badge below, not to the heading (one filled red per line) |
 | `credits-no-limit-spent` | **The only state where the red sits in the heading**: `limit: null` + `spend_limit_reached: true`. There is no reset (with no cap there is nothing to reset), so no carrier for the red exists below — and the `out of credits` badge settles into the heading. Compare with `credits-limit-reached`, which does have a cap: there the heading is plain text and the red capsule is on the reset |
-| `all-exhausted-credits-block` | **Everything is exhausted — 5h, 7d, and the €15 cap at 100 %** — but the token windows reset **later** than the month does (7d in 40 days). By the last-line-of-defense rule (`BlockingReset.select`), the credits reset is then the first way back, so the **red reset badge sits only on the Extra usage line**. Both token lines say `limit reached`, but their resets are in ordinary dim text. The Extra usage heading has **no** state badge: the cap is exhausted, so the red belongs to the reset below |
-| `all-exhausted-token-blocks` | **The same three limits are exhausted**, but the 7-day window resets **last** (in 24 days, past the end of the month). The red badge moves onto the **7-day** line, and the credits reset becomes ordinary. A pair with the previous one: identical percentages, identical amounts, one red badge each — on different lines. Run them back to back to see the rule itself rather than a coincidence |
+| `all-exhausted-credits-block` | **Everything is exhausted — 5h, 7d, and the €15 cap at 100 %** — but the token windows reset **later** than the month does (7d in 40 days). By the last-line-of-defense rule (`BlockingReset.select`), the credits reset is then the first way back, so the **red reset badge sits only on the Extra usage line**. Both token lines say `limit reached`, but their resets are in ordinary dim text |
+| `all-exhausted-token-blocks` | **The same three limits are exhausted**, but the 7-day window resets **last** (in 24 days, past the end of the month). The red badge moves onto the **7-day** line, and the credits reset becomes ordinary. Run both stubs back to back to see the rule itself rather than a coincidence |
 | `credits-month-end` | A check of the **tightest spot** on the monthly ruler (ADR-0092): the clock is at 90 % of the month, so the time marker gets as close as it ever does to the right-hand `Jan 31` label. What to look at is that the marker and the label **do not touch** and that the label stays readable despite the marker's glow. This doubles as the main check of the decision itself: switch Settings → Appearance › Dropdown → Style to **Pressure** and to **Balance**; the token bars become marker-less strips while this one stays Progress with its marker and labels — the question is whether it reads as *a different instrument* rather than as a glitch |
 
 > Check that the amounts carry the **€** currency (not `$`): the formatter takes the symbol from the
 > currency code (EUR→€). The section's bar is the same `PopupBarView` as the token bars, but with
 > **its own scale and ruler** ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)): always **Progress**
-> regardless of the dropdown's Style, and **without** ticks. The month-edge labels (`Jan 1` … `Jan 31`)
-> have been **removed** ([ADR-0108](../adr/0108-extra-usage-one-anatomy-and-per-bar-style-caption.md)):
-> they restated what already stands on the reset line directly above the bar, and added half a line of
-> text below it every time you pressed ⌥. Under ⌥ the scale is now named by the **style word** in the
-> heading — `Extra usage ･ progress`.
+> regardless of the dropdown's Style, and **without** ticks. There are no month-edge labels (`Jan 1` …
+> `Jan 31`, [ADR-0108](../adr/0108-extra-usage-one-anatomy-and-per-bar-style-caption.md)). Under ⌥ the
+> scale is named by the **style word** in the heading — `Extra usage ･ progress`.
 
 ### Dropdown section visibility: "Show per-model and per-service limits" and "Show *Extra usage*" (#211)
 
@@ -172,8 +166,7 @@ Show *Extra usage*                      [ Once used | Always ]
 ```
 
 **Segment order — quieter on the left** ([ADR-0104 §6](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)):
-the leftmost option leaves the least on screen. Before #381 both rows ran the other way (`Always` on
-the left) — if you see the old order, that is an old build, not a styling variant.
+the leftmost option leaves the least on screen.
 
 | Mode | Behavior |
 |---|---|
@@ -186,20 +179,17 @@ The first gates the per-model/per-service lines (`Opus`/`Sonnet` from the legacy
 `weekly_scoped` as `Fable`/`Mythos`), the second gates the **Extra usage** section. Blue `far behind`
 is **not** alarming (`.farBehind` is calmer than green), so it does not expand the group.
 
-> **The same words as in the menu bar — deliberately.** `When it needs attention` here and
-> `Until it needs attention` on the "Hide the top 5h bar" row are **one threshold** viewed from two
-> sides: the first decides when to **show** a section, the second when to **stop hiding** a bar
-> ([ADR-0104 §7](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). The predicates
-> differ, though: here it is `.ahead`/`.exhausted`, there it is `BarView.isCalm`, which counts a blue
-> `farBehind` as calm. The divergence shows on `far-behind`: a blue 5h does **not** expand the group
-> here, but it also does **not** stop being hidden there.
+> `When it needs attention` here and `Until it needs attention` on the "Hide the top 5h bar" row are
+> **one threshold** viewed from two sides ([ADR-0104 §7](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)).
+> The predicates differ, though: here it is `.ahead`/`.exhausted`, there it is `BarView.isCalm`, which
+> counts a blue `farBehind` as calm. The divergence shows on `far-behind`: a blue 5h does **not** expand
+> the group here, but it also does **not** stop being hidden there.
 
-**The two predicates measure different things and do not substitute for each other.** `Once used`
-reads the **value**, `When it needs attention` reads pacing's **verdict** about that value. That is
-why 2 % at the start of the week is both "used" and "needs attention" at once (pacing reads that
-small number as `.ahead`), while €10.80 spent against an **unlimited** cap is "used" but **never**
-"needs attention": with no cap there is no bar, and therefore no severity. That is exactly why the
-credits row does not offer `When it needs attention` at all.
+**The two predicates measure different things.** `Once used` reads the **value**, `When it needs
+attention` reads pacing's **verdict** about that value: 2 % at the start of the week is both "used" and
+"needs attention" at once, while €10.80 spent against an **unlimited** cap is "used" but **never**
+"needs attention" (no cap → no bar → no severity) — which is why the credits row does not offer
+`When it needs attention` at all.
 
 ```sh
 TOKENPACE_STUB=screenshot swift run          # Fable 70 % (orange) + Mythos 100 % (red)
@@ -231,9 +221,7 @@ TOKENPACE_STUB=all-exhausted-token-blocks swift run   # same thing, but red on 7
 - `When it needs attention` → hold **⌥ Option** with the menu open: the group appears **live** (the
   50 ms polling timer from ADR-0020) and the popup re-measures; release it → it disappears. Same for
   `Once used`.
-- **⌥ remains the escape hatch even though the segment is gone:** in **any** mode, holding ⌥ expands
-  the group. That was the reason to retire `With ⌥ Option` — that segment differed from the rest only
-  in that it hid the group precisely when its data got interesting.
+- **⌥ remains the escape hatch:** in **any** mode, holding ⌥ expands the group.
 - **Settings width:** the "Show per-model and per-service limits" row has **three** segments, "Show
   *Extra usage*" has **two**; check that they neither overlap the heading nor get truncated. The Extra
   usage row's label carries **italics** on the section name (`Text(.init("Show *Extra usage*"))`), so
@@ -258,10 +246,8 @@ defaults write TokenPace showModelSpecificLimits -bool false
 defaults read TokenPace | grep -i -e showPerModelLimits -e ModelSpecific
 ```
 
-**The old `nonCalm` / `aboveZero` / `optionOnly` values no longer have migrations of their own.** Both
-marker keys (`extraUsageVisibilityMigratedFromNonCalm`, `sectionVisibilityMigratedFromOptionOnly`)
-were retired: the value is carried **along the way**, while the key is moving to its new name, through
-`PopupSectionVisibility.legacyRawValues`
+**The old `nonCalm` / `aboveZero` / `optionOnly` values have no migration marker keys of their own** —
+the value is carried through `PopupSectionVisibility.legacyRawValues`
 ([ADR-0104 §4–§5](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). The full scenario is
 in the section [Migrating Appearance keys from the old config](#migrating-appearance-keys-from-the-old-config-381)
 below; briefly, for these two rows:
@@ -287,8 +273,7 @@ the old one, so completion is evident from the old key being gone. Check exactly
 writes nothing to the log; set `defaults write TokenPace dropdown.showExtraUsage -string always` by
 hand — the next start does **not** overwrite it back (the old key no longer exists).
 
-An explicit `true` → `always`, an explicit `false` → `whenItNeedsAttention` (before #374 it was
-`optionOnly`, which the control no longer offers), and a missing key → the preset default
+An explicit `true` → `always`, an explicit `false` → `whenItNeedsAttention`, and a missing key → the preset default
 (`whenItNeedsAttention`). Check all of this in the dev domain (`swift run` writes to `TokenPace`, the
 signed dev build to `com.artem-n.tokenpace.dev`), **not** in the real domain with your own settings,
 and do **not** run `defaults delete` on the domain — that wipes the real settings.
@@ -300,10 +285,10 @@ Two behaviors in the popup's header, both tied to ⌥ Option (`PopupViewControll
 
 - **The update time ("updated 2m ago" / "updated just now")** sits **on the left, right after the
   "Claude [plan]" brand** on the same line (the right edge of that line belongs to the awaiting-input
-  indicator alone, and stays empty when there is none). It is now shown **whenever the data is stale**
+  indicator alone, and stays empty when there is none). It is shown **whenever the data is stale**
   — that is, when its age exceeds `PopupViewController.staleAgeThreshold` (2× the base polling rate
   `PollingEngine.baseInterval` = 360 s / 6 min); below that threshold it appears **only while ⌥ Option
-  is held** (as before). The check: open the dropdown shortly after a poll (< 6 min) — no time is shown
+  is held**. The check: open the dropdown shortly after a poll (< 6 min) — no time is shown
   until you hold ⌥; leave the dropdown open for > 6 min (or kill the network with the `stale-error`
   stub) — the time appears on its own without ⌥.
 - **The service list** is shown when there is a problem (`serviceStatus.worstProblem != nil`, e.g. the
@@ -311,8 +296,8 @@ Two behaviors in the popup's header, both tied to ⌥ Option (`PopupViewControll
   fixed does not vanish instantly, leaving a popup indistinguishable from "nothing ever broke"), **or**
   while **⌥ Option** is held and there is something to show in the incident dimension.
 
-  Since #279, **⌥ switches the dimension, not the level of detail** (ADR-0071 §2): incident lines are
-  shown instead of service lines. Healthy green lines no longer expand under ⌥, and if there are no
+  **⌥ switches the dimension, not the level of detail** (ADR-0071 §2): incident lines are
+  shown instead of service lines. Healthy green lines do not expand under ⌥, and if there are no
   active incidents, the section under ⌥ is simply absent. Each service line carries the age of its own
   state (`2h7m · degraded`) from `components[].updated_at`.
   Three checks:
@@ -379,10 +364,7 @@ consistency matters more here than anything else.
 > with the full outline of every letter (measured: max difference 121, 77 columns out of 95) — which
 > means the text sits at different positions. Once the defect is fixed, that tail must be **black**.
 >
-> Twelve approaches (rounding the capsule and text widths, separate padding for symbols, compensating
-> for SF Symbol side bearings, `.required` hugging, an explicit width constraint, shifting
-> `drawingRect`, `titleRect`, trailing kern, manual drawing) were measured and rejected — the list and
-> the numbers are in
+> A dozen layout-level fixes were tried and rejected — the list is in
 > [agent-workflow.md § "Subpixel phase comes from the STRING"](agent-workflow.md#subpixel-phase-comes-from-the-string-not-from-layout--fix-the-text-not-the-geometry).
 > The next attempt has to start from **why** the 4 pt stretch happens despite `.required` hugging, not
 > from tuning a constant.
@@ -440,14 +422,12 @@ Steps:
 4. About one poll after launch a **"Back to work!"** banner must appear.
 
 **The main check for the new signal is `TOKENPACE_STUB=subscription-reset-on-credits`.** First poll:
-7d at 100% **with credits enabled** (work does not stop — `canWork` is `true` here, so the old
-"blocked" state signal never entered), then 7d at 40%. The banner **must** appear: this is exactly the reset
-the old signal did not see at all. That is the proof of the change — on `just-unblocked` (without credits) the old and new
-semantics coincide, so it stays a **regression** frame rather than a demonstrative one.
+7d at 100% **with credits enabled** (work does not stop — `canWork` is `true` here), then 7d at 40%. The
+banner **must** appear. On `just-unblocked` (without credits) this stays a **regression** frame rather
+than a demonstrative one.
 
 The mirror check (the banner must **not** appear): a reset of the credits themselves while 7d is still at 100% — on
-`credits-onset` after the credits come off the ceiling. This used to falsely produce "Back to work!" with the subscription
-exhausted.
+`credits-onset` after the credits come off the ceiling.
 
 **Quick check with the "Try" button (#193):** in Settings → **Notifications**, next to the toggle,
 there is a **Try** button that sends the banner **immediately**, bypassing the edge detection and the allowed-hours window —
@@ -559,38 +539,34 @@ must survive a restart: incidents run for hours (429 min measured).
 
 ### Severity frames, 5h × 7d
 
-> **What changed here.** This section used to be called "Frames for reset-time selection (#103, ADR-0029)" and
-> checked which reset the `selectReset` table would pick in each 5h × 7d cell. There is nothing left to
-> check: under [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) the countdown does not
-> exist next to the bars at all, and `selectReset` / `ResetSelection` / `ResetToShow` and the "Show reset
-> countdown" option are gone. The frames themselves stay — they cover the **color and the hiding** of the
-> bars, and those are live properties. **A check that runs through the whole table: in none of these frames may
-> there be a number next to the bars.** If there is one, it is a regression — exactly the one ADR-0091 removed the field from the type for.
+> Under [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) the countdown does not
+> exist next to the bars at all. The frames below cover the **color and the hiding** of the
+> bars. **A check that runs through the whole table: in none of these frames may
+> there be a number next to the bars.** If there is one, it is a regression.
 
 Fixed severity, 5h × 7d:
 
 | Stub | 5h | 7d | Note |
 |---|---|---|---|
-| `5h-orange` | orange | green | by default (`Until it needs attention`, [ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md) → [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)) 5h is **orange → not hidden**, 7d stays calm → **both bars, NO number**. The most visible ADR-0091 change for the default user: `.smart` used to show a countdown here, now it is silence. The key case that no mode hides a loud bar |
-| `both-orange` | orange | orange | both ahead by ~26 pt; **two bars with no number** — the very frame where you used to have to guess whose "21m" it was |
+| `5h-orange` | orange | green | by default (`Until it needs attention`, [ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md) → [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)) 5h is **orange → not hidden**, 7d stays calm → **both bars, NO number**. The key case that no mode hides a loud bar |
+| `both-orange` | orange | orange | both ahead by ~26 pt; **two bars with no number** |
 | `both-red` | red | red | both exhausted → this is already a **barless** state: ⏸ + `4d`, the **later** of the two resets (`BlockingReset.forBlocked`, "the last line of defense"). There are no bars at all ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)) |
 | `red-orange` | red | orange | 5h is exhausted but 7d is not yet → there is no block, and the frame keeps its bars: **red 5h + orange 7d, no number** |
 | `calm5-orange7` | calm | orange (days away) | **The key frame for the `Until it needs attention` mode** ([ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md)): the calm 5h hides, **the orange 7d is left alone**, and there is **no number** next to it — this is the very "a distant orange 7d loses its number" named as the price in [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md). Under `Never` — two bars, also with no number |
 | `calm-both` | green | green | both calm and **green** (a small margin: 5h ~10 pt < 0.20, 7d ~9 pt < 0.143 — under the fixed behind threshold, so NOT blue). The best stub for going through both "Hide the top 5h bar" modes ([ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md) → [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)): `Until it needs attention` (the default) → **a lone centered green 7d**; `Never` → two bars. They **never** both disappear together — that is an invariant, not a coincidence. No reset text in either. It is also the handiest frame for "Colors tell me": under `How it's going` both bars are green, under both muting modes they are white, and under **Pressure** they are white unconditionally and the row itself is not on the page ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)) |
 | `near-reset` | orange (override) | green | ADR-0044: 5h is only ~2 pt ahead (usage 98 vs elapsed ~96%), but the reset is **12 min** away → the override turns the bar **orange** (without the override it would be yellow/calm). A check of the dynamic threshold + the 20-min override. The countdown does **not** appear here — work is running on the subscription ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)); only the color changes |
-| `mid-band-reset` | orange | green | [#284](https://github.com/artem-from-ua/tokenpace/issues/284)/[ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md): the 5h reset is **4 h 41 min** away — the 90 min – 24 h band, which used to print a wall clock (`20:40`) and now reads `5h`. The only stub for this band. After ADR-0091 the number is visible **only in the popup** (`5h at …`) — it is not in the bar, so checking the format on a single frame no longer works; check the popup line itself |
-| `far-behind` | blue | blue | ADR-0061/0081: both base bars are deep behind (5h margin ~0.55, 7d ~0.61 — above the fixed behind threshold ×2 = 0.40/0.286, past the 20-min start override) **and the week itself is calm**, so the weekly gate is open → **blue**. A check of the blue zone + `ColorAdvice`: Settings → Appearance › Menu bar → "Colors tell me" — under **Slow down or speed up** blue stays colored (that is the entire difference between the two muting modes), under **Slow down** it is muted to white, under **How it's going** everything is colored. Under **Pressure** blue is white at any value, and the row itself is not on the page ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)) — so the three modes have to be checked on Balance or Progress. The per-model/credits lines (in the popup) always stay green |
-| `weekly-gate` | green | green | [ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md): 5h is deep behind (u = 5%, t = 60% → 55 pp of margin, far past the 0.40 threshold) — but 7d is **exhausted**, so the weekly gate is closed and 5h must be **green**, not blue (and not yellow). In the popup the 5h line says "on pace", not "far behind pace". The pair to `far-behind`: the frames differ only in the state of the week |
-| `idle-week-hot` | green (idle pill) | green (idle pill) | **The frame's role has changed** ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)). It existed as a contrast to `idle`: there the week is calm → a blue pill, here the week is ahead of pace (70% at t ≈ 29%) but **not** exhausted → green. The blue pill no longer exists anywhere, so **in the menu bar this frame is indistinguishable from `idle`** — both draw a green "ready to start". Do not waste time looking for a difference there: use the frame to check the **converse** — that the state of the week has **no effect** on idle (against `idle` the pill and the word must be identical, and against `idle-blocked` they must differ: gray, "waiting for limit reset"). The weekly gate does its real work on **active** bars — that is `far-behind` against `weekly-gate`, not this pair. In the popup the frame stays useful as a check that a 7d line at 70% with t ≈ 29% does not read as blocked |
+| `mid-band-reset` | orange | green | [#284](https://github.com/artem-from-ua/tokenpace/issues/284)/[ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md): the 5h reset is **4 h 41 min** away — the 90 min – 24 h band, which reads `5h`. The only stub for this band. The number is visible **only in the popup** (`5h at …`), not in the bar — check the popup line itself |
+| `far-behind` | blue | blue | ADR-0061/0081: both base bars are deep behind (5h margin ~0.55, 7d ~0.61, past the 0.40/0.286 threshold) **and the week itself is calm**, so the weekly gate is open → **blue**. A check of the blue zone + `ColorAdvice`: Settings → Appearance › Menu bar → "Colors tell me" — under **Slow down or speed up** blue stays colored, under **Slow down** it is muted to white, under **How it's going** everything is colored. Under **Pressure** blue is white at any value, and the row itself is not on the page ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)) — so the three modes have to be checked on Balance or Progress. The per-model/credits lines (in the popup) always stay green |
+| `weekly-gate` | green | green | [ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md): 5h is deep behind (u = 5%, t = 60%) — but 7d is **exhausted**, so the weekly gate is closed and 5h must be **green**, not blue. In the popup the 5h line says "on pace", not "far behind pace". The pair to `far-behind`: the frames differ only in the state of the week |
+| `idle-week-hot` | green (idle pill) | green (idle pill) | The week is ahead of pace (70% at t ≈ 29%) but **not** exhausted → green. There is no blue pill anywhere, so **in the menu bar this frame is indistinguishable from `idle`** — both draw a green "ready to start". Do not waste time looking for a difference there: use the frame to check the **converse** — that the state of the week has **no effect** on idle (against `idle` the pill and the word must be identical, and against `idle-blocked` they must differ: gray, "waiting for limit reset"). The weekly gate does its real work on **active** bars — that is `far-behind` against `weekly-gate`, not this pair. In the popup the frame stays useful as a check that a 7d line at 70% with t ≈ 29% does not read as blocked |
 | `near-zero` | green (pill) | green (pill) | Near-zero fill on **fresh** windows (5h 0%, 7d 4%, Fable/Mythos ~1–4%, almost zero elapsed) → a colored gap a hair thick. A check of the **min-strip pill geometry**: the colored part must be drawn as a rounded "pill" **inside** the track (both ends round), not a thin sliver poking out past the rounded edge. Both in the menu bar and in the popup; the interval labels and the time marker must line up with the scale compressed by `BS` |
 | `edge-extremes` | pill at the very start | red (full width) | Both edges of the scale at once: 5h at 0% and 7d at 100% on **fresh** windows. A check that **the strip's ends are grafted onto the ends of the track**: 7d must fill the track **edge to edge** — no gray tail either to the left or to the right of the fill; 5h shows a pill flush against the left end. Measure in pixels (the fill and the track must end at the same x), because a 2 pt tail is easy to miss by eye. Both in the menu bar and in the popup |
 
 > When adding a new feature with a state of its own — **add a stub and update this table** (as was done for #103, #94, ADR-0044, ADR-0061, ADR-0062).
 >
 > **Blue is for the base 5h/7d only.** The blue zone (`.farBehind`, ADR-0061) appears when the margin
-> `time − usage` exceeds the behind threshold: a base of 1h / 5h, 1d / 7d, multiplied by the fixed
-> `farBehindWidthMultiplier` = 2 (2h/2d = 0.40/0.286), more than 20 min of the window has elapsed, **and** the bar is entitled to
-> blue (`blueAllowed`). Three cases are not entitled
+> `time − usage` exceeds the behind threshold (2h/2d = 0.40/0.286), more than 20 min of the window has
+> elapsed, **and** the bar is entitled to blue (`blueAllowed`). Three cases are not entitled
 > ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)): the 5-hour bar when the weekly gate is closed
 > (the week itself is ahead of pace, ADR-0081), **all per-model / scoped lines unconditionally** (they are slices
 > of that same week), credits and idle. The existing "green" stubs (`calm-both`, `red-green`, `calm5-orange7`,
@@ -611,8 +587,8 @@ Check on any pacing stub (e.g. `far-behind`, `both-red`, `calm-both`):
   its reachability, so the list must not re-lay-out under the cursor. Check at the same time that the explanation does not
   promise too much: under `Control freak` it must read "Maximum info, but signals take a bit longer to
   spot", and **not** something about "the full picture without ⌥" — ⌥ reveals lines, but it does not change the bar's style.
-  **Work harder!** is the default preset (fresh install / Reset), and since #329
-  it sets **Balance on both surfaces** (it used to be Mixed) — which is exactly why a fresh install shows Balance.
+  **Work harder!** is the default preset (fresh install / Reset), and it sets **Balance on both
+  surfaces** — which is exactly why a fresh install shows Balance.
   Each preset gives both surfaces **one** style, and the three presets cover the three styles exactly once each:
   Chill → Pressure, Work harder! → Balance, Control freak → Progress. Check that clicking a preset
   moves **both** Style rows in sync.
@@ -620,18 +596,15 @@ Check on any pacing stub (e.g. `far-behind`, `both-red`, `calm-both`):
   appearance preset" header row**, #257): a click puts pretty-printed JSON on the clipboard with the 7 Appearance keys + `preset` +
   `appVersion`; for ~1.2 s the glyph turns into a `checkmark`, then turns back (tooltip on hover: "Copy
   appearance settings to clipboard"). **Watch the layout while the glyph is swapped**: nothing
-  may twitch — the box is fixed in both dimensions, and implicit animation is disabled. While the button shared a
-  row with the segmented control, that control held the height; alone in its row it holds the height itself, and the shorter
-  `checkmark` used to squeeze the row.
+  may twitch — the box is fixed in both dimensions, and implicit animation is disabled.
   The copy button in the Troubleshoot window must give the same feedback — the constants are shared in `CopyFeedback`.
   Paste it into an editor and check **two things at once**
   ([ADR-0104 §3](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)):
-  1. **the JSON is nested** — two groups, `"menuBar"` and `"dropdown"`, not flat top-level keys
-     (they were flat before #381). The surface is visible without knowing the code;
+  1. **the JSON is nested** — two groups, `"menuBar"` and `"dropdown"`, not flat top-level keys.
+     The surface is visible without knowing the code;
   2. **the order inside a group matches the order of the controls on the page, top to bottom**
      (`menuBar`: `style` → `colorsTell` → `hideTop5hBar` → `showServiceStatusDot`; `dropdown`:
-     `style` → `showPerModelLimits` → `showExtraUsage`), not alphabetical; that is the whole point of the feature, so
-     check it against the panel side by side.
+     `style` → `showPerModelLimits` → `showExtraUsage`), not alphabetical; check it against the panel side by side.
 
   A quick recipe (paste what you copied into `/tmp/appearance.json`):
 
@@ -641,16 +614,14 @@ Check on any pacing stub (e.g. `far-behind`, `both-red`, `calm-both`):
   ```
 
   There is **no** `barStyle` key in the dump (it is legacy-only, read-only for old configs), nor
-  any pre-#381 flat name (`calmColorMode`, `calmBarHiding`, `modelLimitsVisibility`,
-  `extraUsageVisibility`).
+  any flat name (`calmColorMode`, `calmBarHiding`, `modelLimitsVisibility`, `extraUsageVisibility`).
 
   The `customAppearanceValues` slot is **gone**
   ([ADR-0112](../adr/0112-appearance-presets-preview-apply-commits.md)): the config is not rewritten behind
   the user's back, so there is nothing to stash. The key is swept away at launch — check exactly that as a separate
   step: on an old build do a manual setup (so that it gets written), verify
   `defaults read TokenPace customAppearanceValues`, update the build — the key is gone, and **the seven live keys
-  are unchanged** (the value is deliberately not migrated: folding the snapshot into the live keys would mean silently
-  changing the widget's appearance on update).
+  are unchanged**.
 
   The `"preset"` field describes the **saved** config: the raw preset (`chill`/`workHarder`/`controlFreak`)
   that it happens to equal, or the literal `"custom"` when it equals none of them (a string, not `null`,
@@ -661,13 +632,10 @@ Check on any pacing stub (e.g. `far-behind`, `both-red`, `calm-both`):
   in the **Menu bar** section, the second in **Dropdown**, both `Pressure | Balance | Progress`. The row is called
   **"Style"** (not "Bar style") and on **both** surfaces it is the same control — a picker with
   preview images (three tiles with captions, an accent-colored outline around the selected one, as in
-  System Settings → Appearance). The asymmetry that ADR-0093 §5 called temporary was removed in
-  [ADR-0100](../adr/0100-dropdown-style-tiles-and-retired-option-segment.md) (#374); the order and
-  the captions are shared (`AppearanceBarStyle.segments`), so they cannot drift apart.
+  System Settings → Appearance); the order and the captions are shared (`AppearanceBarStyle.segments`),
+  so they cannot drift apart.
   **Style sits in its own `Section`** on both pages — with a separator below it, and the rows underneath
   (colors / visibility) live in their own card.
-  The unnamed section at the top is **gone** — its only control (Far behind pace interval) was removed
-  along with the option (ADR-0081).
   The styles: "Pressure" — a strip from the left edge with no marker, of length `pressureLength` =
   `max(0, balanceOffset)` = `clamp(r, 0, 1)`, where `r = (u − t)/(1 − t)` (zero on the bar = exactly on plan,
   16% = the start of orange, [ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md));
@@ -677,14 +645,13 @@ Check on any pacing stub (e.g. `far-behind`, `both-red`, `calm-both`):
   every state (in the menu bar, 1 pt under the track; in the popup, the zero rule drawn **through** the bar at 0.5).
   Check:
   1. **Independence** — switch the menu bar row, and the dropdown **must not budge**, and vice versa
-     (click the icon to see the popup). That is the main thing that used to be impossible to do at all;
+     (click the icon to see the popup);
   2. **a mixed pair → `Custom`** in the preset control (no preset gives the surfaces different styles);
   3. **the hints are not duplicated**: under the menu bar row there are no hints at all — the preview shows the style
      right there ([ADR-0093](../adr/0093-bar-style-picked-by-picture.md)); under the dropdown row — a single line,
      "*Extra usage* bar always draws in *Progress* style." It sits **under the word "Style"**, in the left
-     column of the row (a shared `VStack` with the heading), not under the tiles across the full width of the panel — otherwise the
-     caveat about one bar ends up far away from the control it concerns;
-  4. **three** tiles in the row (not four — "Mixed" was removed): check that the control is not
+     column of the row (a shared `VStack` with the heading), not under the tiles across the full width of the panel;
+  4. **three** tiles in the row: check that the control is not
      clipped in the **narrowest** Settings window. In **each** picker also check: the "Style" label is
      aligned to the **top** edge of the row (not centered); the click registers **on the first try** when
      the Settings window is not active; selecting a tile **does not change the row's dimensions** (the outline is drawn
@@ -693,7 +660,7 @@ Check on any pacing stub (e.g. `far-behind`, `both-red`, `calm-both`):
   5. **the credits bar does not move** ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)): switch the
      dropdown to Pressure and Balance on a stub with credits (`credits-active` / `credits-month-end`) —
      the token bars turn into markerless strips, while "Extra usage" stays Progress with its marker and
-     month-edge captions. That is not a bug: it is exactly what the hint in item 3 is about;
+     month-edge captions (not a bug — see the hint in item 3);
   6. **the tiles are drawn at runtime** ([ADR-0097](../adr/0097-bar-style-preview-rendered-at-runtime.md)),
      so what has to be checked is not that the files exist but that the specimen **matches the live bar**: set
      the same style in the menu bar and compare the anatomy (Pressure — the zero rule + the pill, Balance — the center
@@ -721,43 +688,37 @@ Check on any pacing stub (e.g. `far-behind`, `both-red`, `calm-both`):
      (6 pt) and the marker (7×14) are **as in the live dropdown**, unscaled; the bars split the tile
      into three equal parts vertically. ⌥ has **no** effect on the tile at all: it never has a ruler or a "0"
      caption, even though the live popup shows them under ⌥.
-  Saved values: the pre-#329 `barStyle` key unfolds at launch into two —
-  `mixed` → menu bar `pressure` + dropdown `progress` (exactly what it used to draw, so the appearance does not
-  change), and every other raw (including the pre-#307 `pacing`/`simple`) — into itself on both surfaces.
-  Anyone who did not have the key gets the new **Balance/Balance** default.
-- **Colors tell me** (`Slow down | Slow down or speed up | How it's going`) — the former "Calm
-  non-critical colors", renamed together with its key and values
-  ([ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). The segments are named after
-  **the advice the color carries**, not after the palettes that go dark, and they run **quieter to the left**:
-  `Slow down` leaves only orange colored, `Slow down or speed up` adds distant blue to it,
-  `How it's going` mutes nothing. Orange/red are **always** colored (an exhausted
-  window is not drawn as a bar at all — [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)).
-  All three segments are always enabled — blue can no longer be turned off, so the state "there is nothing to mute" does not
-  exist ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)).
-  **The scope was narrowed to the pacing bars** ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)):
+  Saved values: a legacy `barStyle` key unfolds at launch into two —
+  `mixed` → menu bar `pressure` + dropdown `progress`, and every other raw value into itself on both
+  surfaces. Anyone who did not have the key gets the **Balance/Balance** default.
+- **Colors tell me** (`Slow down | Slow down or speed up | How it's going`,
+  [ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). The segments run **quieter
+  to the left**: `Slow down` leaves only orange colored, `Slow down or speed up` adds distant blue to it,
+  `How it's going` mutes nothing. Orange/red are **always** colored
+  ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)). All three segments are always
+  enabled ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)).
+  **The scope is the pacing bars only** ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)):
   cycle through all three values and check what does **not** react — the service dot (`calm-degraded`:
-  as of [ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md) `degraded` is yellow unconditionally —
-  the tone changed, not who decides it),
-  the currency glyph (`credits-active`, `credits-no-limit` — it used to be muted there) and the idle pill in
+  [ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md) makes `degraded` yellow unconditionally),
+  the currency glyph (`credits-active`, `credits-no-limit`) and the idle pill in
   the "green or blue" part (`idle`, `idle-week-hot`). The only things that must react are the 5h/7d bars — and the
   pill itself, in the "colored or white" part.
   **The row is disabled under Pressure** — a separate scenario below.
-- **Hide the top 5h bar** (`Until it needs attention | Never`) — the former "Hide 5h (top) bar" with its
-  `When it's calm` segment ([ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md));
-  the behavior has not changed ([ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md) →
-  [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)). The hint under the row is now **a single phrase** —
-  "Either way, once a limit is actually reached both bars give way to the countdown to it": the first
-  half of the old hint duplicated the segment itself, whereas this one describes what the row does **not** control. Check on
-  `both-red` that the promise is true — there are no bars there at all.
+- **Hide the top 5h bar** (`Until it needs attention | Never`,
+  [ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md),
+  [ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md),
+  [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)). The hint under the row is **a single phrase** —
+  "Either way, once a limit is actually reached both bars give way to the countdown to it": it describes
+  what the row does **not** control. Check on `both-red` that the promise is true — there are no bars there at all.
 - **Show service status dot** — its own **card** (#381), not in the same block as the three rows above:
-  those read `PacingModel`, this one reads `ProviderMonitoring`. "on issues" is gone from the caption (the dot only
-  appears on a problem anyway); instead there is a hint: "Appears next to the bars when a monitored
-  service reports an outage" — and it is the only thing on the page that names the connection to Providers. Check that
-  there is a separator between the cards, and that the second card has **no** heading (a single row does not need one).
-- **The popup's ruler splits in two, and the toggle is gone**
-  ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)): the "Show ticks on
-  bars" option was removed together with the `showTicks` key — it is gone from
-  [`AppearanceConfigExport`](../../Sources/TokenPaceKit/AppearanceConfigExport.swift) too. Check in the popup, holding
+  those read `PacingModel`, this one reads `ProviderMonitoring`. There is a hint: "Appears next to the bars
+  when a monitored service reports an outage" — the only thing on the page that names the connection to
+  Providers. Check that there is a separator between the cards, and that the second card has **no** heading
+  (a single row does not need one).
+- **The popup's ruler splits in two, and there is no toggle for it**
+  ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) — no "Show ticks on
+  bars" option, no `showTicks` key, none in
+  [`AppearanceConfigExport`](../../Sources/TokenPaceKit/AppearanceConfigExport.swift) either. Check in the popup, holding
   and releasing ⌥:
   - **always visible — the zero rule**, drawn **through** the bar (it is drawn **under** the track, so only
     its ends are visible) at the zero of every markerless scale: in **Balance** that is the center (0.5,
@@ -766,15 +727,13 @@ Check on any pacing stub (e.g. `far-behind`, `both-red`, `calm-both`):
     the height is scaled for the popup's taller bar (12 pt on a 6 pt bar against 10 on a 5 pt one), and the width is 5/7 of the zero
     pill's width. In **Progress** there is no zero rule at all: the position there is carried by the time marker;
   - **only under ⌥** — the scale's ticks: under **Progress**, fractions of the window (`subdivisions − 1`: 4 for 5h, 6 for
-    7d). The `0` and month-edge captions were **removed**
-    ([ADR-0108](../adr/0108-extra-usage-one-anatomy-and-per-bar-style-caption.md)) — each named what
-    its own tick already showed, and added half a line under the bar, meaning ⌥ changed not only the content but also the
-    popup's rhythm. Release ⌥ — the ticks disappear, and the zero rule alone remains;
-  - the tick **at 20%** ("exactly on plan") in Pressure is **gone** — it was removed;
-  - **the menu bar has not changed**: it has its own zero rule
+    7d). There are no `0` or month-edge captions
+    ([ADR-0108](../adr/0108-extra-usage-one-anatomy-and-per-bar-style-caption.md)). Release ⌥ — the ticks
+    disappear, and the zero rule alone remains;
+  - there is no tick at 20% ("exactly on plan") in Pressure;
+  - **the menu bar** has its own zero rule
     ([#371](https://github.com/artem-from-ua/cc-timer/pull/371)/[#372](https://github.com/artem-from-ua/cc-timer/pull/372)),
-    but neither a 20-percent tick nor a
-    `0` caption — ⌥ does not reach that surface.
+    but neither a 20-percent tick nor a `0` caption — ⌥ does not reach that surface.
 - **the release notes** link in About to the right of the version — **only in a notarized `.app`** (in `swift run`
   it is not there; that is expected).
 
@@ -871,17 +830,13 @@ Settings → Appearance › **Menu bar**. Click the Style tiles and watch the ro
   check `defaults read TokenPace menuBar.colorsTell` before and after.
 
 **The animation is part of the check, not cosmetics.** The highlight must **travel** to `Slow down` and
-back smoothly, together with the muting (`easeInOut`, 0.2 s — in step with the press of the tile itself), rather than
-jumping. The gate here is **a picture two rows above**, so the movement leads the eye from the pressed tile to the
-row that responded.
+back smoothly, together with the muting (`easeInOut`, 0.2 s), rather than jumping.
 
 The key **negative** check: switch `Hide the top 5h bar` between segments — its own control
-**must not** go anywhere. The animation is bound specifically to `menuBarStyle`; if everything moves, that is a regression to a
-bare `.animation(_:)`.
+**must not** go anywhere. The animation is bound specifically to `menuBarStyle`.
 
 And a check that the hiding itself is honest, **on the live bar**: under Pressure the calm side must be **white**
-at any saved value. The sharpest frame is `far-behind` with `Slow down or speed up` saved:
-before #381 a **blue** pill stayed there while the control was no longer on the page.
+at any saved value. The sharpest frame is `far-behind` with `Slow down or speed up` saved.
 
 ```sh
 defaults write TokenPace menuBar.colorsTell -string slowDownOrSpeedUp
@@ -899,9 +854,7 @@ colored.
 
 In the menu bar the `degraded` dot is **yellow unconditionally**
 ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)) — the same as in the popup and on the
-Legend page. The light theme is still the decisive frame, but the question is **the mirror image** of what
-it was under [#381](https://github.com/artem-from-ua/tokenpace/issues/381): back then the check was whether the
-neutral disappears into the background, now it is whether the yellow is too loud:
+Legend page. The question is whether the yellow is too loud on a light bar:
 
 - take a screenshot of **the top strip of the real screen** (not of a window — [the rule about the menu material and
   vibrancy](#testing-menu-bar-widget-colors-swatch-mode--color-picker)). The question to ask of the shot is not "is it visible", but whether the dot reads as an
@@ -912,15 +865,14 @@ neutral disappears into the background, now it is whether the yellow is too loud
   the yellow on any of the surfaces ([ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md)
   still stands: the dot does not read settings);
 - **a white dot must not appear in any state** — the `calmWhite` branch in `statusDotTarget` is
-  gone. This is the regression `swift test` will **not** catch: the function is `private` in the app target, and the test
+  gone. `swift test` will **not** catch this: the function is `private` in the app target, and the test
   target links only `TokenPaceKit`, so a live check is the only net here;
 - the louder states stay colored on both surfaces: `partialOutage` is orange, `majorOutage` is
   red, `underMaintenance` is blue, `unknown` is gray (the `incident-*` frames);
-- repeat on the **dark** theme — there what gets checked is the contrast of the yellow against the dark bar;
-- on `color-cycle` catch the frame where a yellow **pacing gap** and a yellow **dot** sit side by side. One
-  shade carries two different meanings here ("a bit ahead of pace" and "the service is slowing down") — this was deliberately
-  accepted ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md), "Consequences"): they are
-  told apart by shape and position, not by tone. The shot is needed to keep that true.
+- repeat on the **dark** theme — check the contrast of the yellow against the dark bar;
+- on `color-cycle` catch the frame where a yellow **pacing gap** and a yellow **dot** sit side by side —
+  they are told apart by shape and position, not by tone
+  ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md), "Consequences").
 
 ### Stronger glow on the zero pill in the popup under Pressure (#381)
 
@@ -932,10 +884,8 @@ the ambient glow, sized for a full strip (radius 21 pt, alpha 0.35), reads on it
 smudge. For this case the pill gets a **triple** pass — radii **40 / 22 / 10 pt**, alpha
 **1.0** each, from wide to tight.
 
-Why three passes rather than one bigger number: `withGlow` sets the **shadow's alpha**, and `strength`
-is clamped at 1. Once you hit that, more brightness can only come from the **number** of passes — each one
-composites over the previous, so light accumulates where they overlap: bright
-near the pill, falling off outward. The radii then set the **shape** of the falloff, not its strength.
+`withGlow` sets the **shadow's alpha**, and `strength` is clamped at 1, so extra brightness can only
+come from the **number** of passes compositing over each other.
 
 - the pill must **glow** enough to read as a lit dot, not as a speck of dirt;
 - compare with the same frame under **Balance/Progress**: there the strip has length, and the glow stays
@@ -968,8 +918,7 @@ not of a window — [the rule about the menu material/vibrancy](#testing-menu-ba
   ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)); that is not a preview bug.
   The preview also reads **section visibility** (`Show *Extra usage*` / `Show per-model and per-service limits`) from
   the settings: if the credits section is not visible on a credits stub, check this mode first, not the
-  rendering. The preview used to keep a default of its own "by verdict" and silently hid calm sections, which meant a
-  stub set up precisely to show one of them rendered without it.
+  rendering.
 
 ## Scenarios without a stub
 
@@ -1009,7 +958,6 @@ it a neighbour under the card, and it is the case the first pass missed:
 
 Measuring rather than eyeballing is worth it for the margins: capture the menu, then compare the
 plate's gap to the popup edge on all four sides in pixels (remember a 2× capture halves to points).
-Three separate "looks off to me" rounds on this feature were each settled in one measurement.
 
 The switch is read on **every menu open**, so toggling it in Settings takes effect on the next open
 with no restart — verify that directly, since a stale read would look identical to a working one
@@ -1058,7 +1006,7 @@ locked".
 
 ### Auto-update signals — a single dropdown item (#130, ADR-0036)
 
-The goal is **less noise**: no system notifications at all (`UpdateNotifier` was removed), everything lives in one
+No system notifications: everything lives in one
 menu item that changes only the dot's color and the text. The **`TOKENPACE_UPDATE_STATE=<state>`** stub forces
 the item's state without a real release or failure (it writes to memory only, **not** to `UserDefaults`):
 
@@ -1083,8 +1031,6 @@ disappears after the click (except under the forced stub — that one holds the 
 `update: user opened release notes from update item (tag=…)`.
 
 ### About: failed-update details + clickable versions (#210)
-
-Several elements on the **About** pane were updated:
 
 The pane has two sections:
 
@@ -1143,10 +1089,9 @@ legitimately refuses (`forced-skip reason=insufficient-space`).
 #### Backup gates ([#306](https://github.com/artem-from-ua/tokenpace/issues/306))
 
 When the session backup isn't running, the **Providers → Backup** section explains why with a ⚠ row under
-the "Last archived …" status. Both states get the triangle: a row reporting a condition that **blocks a
-feature** is a warning, regardless of whether it will clear on its own. The difference between them is in the text
-("free up space" versus "will resume when you plug in"), not in the icon. The only rows drawn without a triangle in this
-project are hints that **describe** what a control does.
+the "Last archived …" status. Both states get the triangle — the difference is in the text
+("free up space" versus "will resume when you plug in"), not in the icon. The only rows drawn without a
+triangle in this project are hints that **describe** what a control does.
 
 The **`TOKENPACE_FAKE_ARCHIVE_GATE=battery,space`** stub forces any subset (it writes to memory only,
 **not** to `UserDefaults`). It forces only the **display** — polling and "Archive now" keep working, so the button
@@ -1173,8 +1118,8 @@ Check:
 `lastArchiveSync`, or reset the marker) → the logs show `archive: deferred reason=on-battery`, the "Last
 archived" date does not move, and "Archive now" meanwhile **does** work (it bypasses the battery gate deliberately).
 
-Checking the space gate live requires a genuinely full volume — practically unreachable, which is exactly why the stub exists; the
-arithmetic itself is covered by units (`ArchiveSpacePlanTests`).
+Checking the space gate live requires a genuinely full volume — practically unreachable, hence the stub;
+the arithmetic itself is covered by units (`ArchiveSpacePlanTests`).
 
 **The two-phase scan and the atomic replace** (the same change) — two checks that are invisible in the UI:
 
@@ -1255,11 +1200,9 @@ so you can screenshot the pane you need without an AX click on a sidebar row.
 
 **The indexes are stable identifiers, not the row order** (#333). The sidebar order is set by
 `SettingsSection.groups`, and it is different: About / **General · Providers** / **Appearance ·
-Notifications**. The split is exactly this way so that reordering rows does not silently redirect every
-documented recipe to a different pane; `2` stayed with `Appearance` through all the renames —
-it is the same pane. `4`, `5` and `6` stay as **holes**: old recipes still carry them, and pointing
+Notifications**. `4`, `5` and `6` stay as **holes**: old recipes still carry them, and pointing
 them at a different pane would mean a recipe that lies instead of failing (`5`/`6` are now addressed in the dotted
-form, because the pages themselves didn't go anywhere — they moved one level down).
+form, since the pages moved one level down).
 
 **The dotted syntax means child pages** ([#341](https://github.com/artem-from-ua/tokenpace/issues/341),
 [ADR-0084](../adr/0084-settings-drill-in-child-pages.md)): `<section>.<child index>`, where the index
@@ -1269,15 +1212,12 @@ to the log** (`settings hook: unknown …`) instead of being ignored silently.
 > ⚠️ **A child is addressed in the dotted form, never by its raw value.** `SettingsChildPage` has raw values
 > of its own (50+), and they are **not** the hook's indexes: `=53` parses as *section* 53, which does not exist. The hook writes
 > `settings hook: unknown section 53 — ignored` and opens the window wherever it was left last time —
-> that is, a recipe that does nothing will look like it works if you already happened to be on the page you wanted.
-> That is exactly how Legend was "verified" for a while ([#261](https://github.com/artem-from-ua/tokenpace/issues/261),
-> [ADR-0110](../adr/0110-legend-is-a-static-page-rendered-by-the-live-code.md) §4). **Check the log**,
-> not just what is on screen: nothing in `settings hook` = the value was accepted.
+> a recipe that does nothing will look like it works if you already happened to be on the page you wanted.
+> **Check the log**, not just what is on screen: nothing in `settings hook` = the value was accepted.
 >
 > Display order ≠ raw order. The `Legend` row is drawn **above** the presets, and both surfaces sit
 > below it, so `2.0` is Legend even though its raw value (53) is the largest of the three. The hook reads
-> `SettingsChildPage.reachablePages(of:)`, which sorts precisely by the row's position on the page; the neighboring
-> `pages(of:)` returns **only the surfaces** and feeds the page's own unnamed section.
+> `SettingsChildPage.reachablePages(of:)`, which sorts by the row's position on the page.
 
 (Monitored services now lives in **Providers › Claude** together with the Claude Usage API toggle, #341.
 Monitored services, Sessions and Backup stayed on the parent **Providers** — they belong to no single
@@ -1297,9 +1237,7 @@ should be in a freshly opened window. If ‹ is active right after launch, that'
 
 The mechanics are described in [ADR-0088](../adr/0088-settings-hosting-safe-area-and-manual-separator.md);
 the failure modes differ at different heights, so every item is checked **both at the minimum height
-(560) and stretched out**. The minimum was raised from 470 when `Legend` appeared
-([#261](https://github.com/artem-from-ua/tokenpace/issues/261)): at 470 its anatomical bars with
-callouts did not fit without scrolling, and the page opened already scrolled.
+(560) and stretched out**.
 
 ```sh
 TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.1 swift run  # Menu bar — the longest
@@ -1327,16 +1265,15 @@ The three former neighboring sidebar rows (`UI presets` · `Menu bar` · `Dropdo
 **Appearance** pane again, and the two surfaces are its **child pages** (drill-in, like
 `Providers › Claude`). What breaks most easily:
 
-1. **Sidebar** — **five** rows, not seven: About / General · Providers / **Appearance ·
-   Notifications**. `Appearance` and `Notifications` sit **in one group, with no separator between
+1. **Sidebar** — **five** rows: About / General · Providers / **Appearance · Notifications**.
+   `Appearance` and `Notifications` sit **in one group, with no separator between
    them**; the separator remains only above, over the `General · Providers` pair. Capsule tints:
-   `Appearance` — green, `Notifications` — red, while `General` and `Providers` share **one**
-   gray ([ADR-0094](../adr/0094-provider-row-brand-badge.md)) — if the `Providers` chip is purple,
-   you are looking at an old build.
+   `Appearance` — green, `Notifications` — red, `General` and `Providers` share **one**
+   gray ([ADR-0094](../adr/0094-provider-row-brand-badge.md)).
 2. **Three navigation rows** — on `Appearance`. **`Legend` sits in its own section ABOVE the presets**
    (blue `map.fill` chip, the same blue as in `About` — both pages only inform), and below the
    presets section come `Menu bar` and `Dropdown`, each
-   with a chip (black / white with a hairline — the same ones the sidebar used to have) and a **chevron**.
+   with a chip (black / white with a hairline) and a **chevron**.
    The row's subtitle is that surface's current Style **with a label**: `Style: Pressure`, not a bare
    `Pressure`; switch the style inside and come back with ‹ — the caption must change. **The whole row**
    is clickable, not just the chevron.
@@ -1358,16 +1295,13 @@ The three former neighboring sidebar rows (`UI presets` · `Menu bar` · `Dropdo
      from `hour/day ticks` reaches the last tick, the one from `tokens/credits spent` reaches the bar. Both
      bottom captions sit **on one line**, and the text↔bar spacing is the same above and below.
    - **Captions are centered on their callout lines**, not pushed to the edges of the bar: the middle of the
-     text sits exactly over the line. This breaks most easily when a **caption is renamed** — the old version
-     stretched the text across the full width and hugged the edge, so hitting the target depended on word length.
-     Renamed a caption? Check this first.
+     text sits exactly over the line. Renamed a caption? Check this first.
 3. **Navigation** — a drill-in puts the page title in the toolbar (`Menu bar`), ‹ returns to
    `Appearance` rather than "through" it; switching a sidebar row from an open child lands on the
    root of the new section.
 3a. **Clicking an already-highlighted sidebar row exits the child** (#374,
    [ADR-0100](../adr/0100-dropdown-style-tiles-and-retired-option-segment.md)): go into
-   `Appearance › Dropdown` and click `Appearance` — the parent page must open. Previously this did
-   **nothing**: the sidebar highlighted the parent while the column showed the child.
+   `Appearance › Dropdown` and click `Appearance` — the parent page must open.
    **It breaks easily, so check it by actually clicking, not by reasoning:** SwiftUI's `List` does not report
    a click that does not change the selection, so this is done with an AppKit event monitor
    (`SettingsWindowController.watchSidebarClicks(in:)`). While you are at it, check that **ordinary** selection
@@ -1507,8 +1441,7 @@ What breaks most easily:
    (`occupiedWidth` = 0 when the preview is hidden).
 2. **⌥ Option.** Hold it over Settings → the model/service rows and the data age unfold in the preview and the
    window **grows** (without a refit the block is clipped). Arrive with ⌥ already held — it must be unfolded
-   right away (seeding). The window's subtitle advertises exactly this and reads
-   **"try alt view with the ⌥ Option key"** (#374; before that — "Alternative view with the ⌥ Option key").
+   right away (seeding). The window's subtitle reads **"try alt view with the ⌥ Option key"**.
 3. **The real menu regression.** Click the icon in the menu bar, hold ⌥ → "Troubleshoot…" as always. If it
    is gone, the monitor swallowed `.flagsChanged` for the whole process (it must `return event`).
 4. **The truth.** Open the real dropdown next to it and compare row by row — the contents must match.
@@ -1523,7 +1456,7 @@ What breaks most easily:
    than blend. Measure colors with Digital Color Meter in sRGB, not off a screenshot.
 
 The chrome types (`PreviewChrome`/`ThemedFillView`/`TitlePlaqueView`) from ADR-0107 have a single consumer —
-this preview; the second window they once shared no longer exists.
+this preview.
 
 ### `TOKENPACE_SIDEBAR_FILLER` — make the sidebar long enough to scroll
 
@@ -1586,19 +1519,17 @@ screenshots. It combines with a data stub:
 TOKENPACE_OPEN_TROUBLESHOOT=1 TOKENPACE_STUB=screenshot swift run
 ```
 
-**The copy button (`doc.on.doc`, at the right of the "Usage API — last response" header)** — since #257 it gives
+**The copy button (`doc.on.doc`, at the right of the "Usage API — last response" header)** gives
 the same feedback as the copy-config button in Settings → Appearance: for ~1.2 s the glyph becomes a
 `checkmark`, then returns (the shared constants are in `CopyFeedback`). Check **both** buttons in
-one run: the duration and the glyphs must look identical. Separately, look at whether **holding**
-the button down makes the image "blink" — the button type was changed to `.momentaryPushIn` precisely because
-`.momentaryChange` restored the glyph on mouse-up and wiped out the checkmark.
+one run: the duration and the glyphs must look identical. Separately, check whether **holding**
+the button down makes the image "blink" — the button type is `.momentaryPushIn`, not `.momentaryChange`
+(which would restore the glyph on mouse-up and wipe out the checkmark).
 
 ### Development tools — the stub selector and the payload log (#187, #279)
 
 A dev-only window with two tools that have nothing to do with each other beyond a shared gate.
-Before [ADR-0107](../adr/0106-remove-dev-color-tuner-and-dissolve-colorstore.md) there was also a color tuner
-here with its own preview window — both were removed; color picking is now done the way the
-next section describes (swatch + color picker).
+Color picking is done the way the next section describes (swatch + color picker).
 
 **1. `Preview data source (stub)`** — a dropdown that switches the `TOKENPACE_STUB` scenario **without
 a restart** (#187, [ADR-0047](../adr/0047-live-stub-selector.md)). Below it, a description of the current scenario.
@@ -1646,7 +1577,7 @@ Wi-Fi, battery) has a **strict method**, earned the painful way (the semantic-co
    macOS applies color management: the display profile is embedded in the file, and on wide-gamut/XDR screens
    a pixel in a PNG **does not equal** what is on screen. Two elements that are noticeably different in the flesh
    can look identical in a screenshot — and vice versa. Do not calibrate or compare colors from pixel measurements
-   taken off a screenshot (`NSBitmapImageRep.colorAt(...)` and friends): that cost a session hours of false calibration
+   taken off a screenshot (`NSBitmapImageRep.colorAt(...)` and friends) —
    ([#202](https://github.com/artem-from-ua/tokenpace/issues/202)). The source of truth is **Digital Color
    Meter** (the native color picker) in **sRGB** mode (View → Display in sRGB), or values from there dictated by the
    maintainer; compare TARGET and RENDER **in the same space**. A screenshot is fine for **seeing** the
@@ -1654,13 +1585,11 @@ Wi-Fi, battery) has a **strict method**, earned the painful way (the semantic-co
 2. **Always on the REAL bar, a screenshot of the TOP STRIP of the full screen — not of a window.** A window
    screenshot (e.g. the dropdown preview in Settings) renders the widget **without menu-bar vibrancy and without the
    wallpaper** → it lies. Transparency effects (the color "breathing" with the background) are visible only on the real
-   bar next to the system icons (moon/Wi-Fi/battery): what looks "fine" in a window can be pale or invisible on the
-   live bar. The right way is `screencapture -x` of the whole screen + a crop of the top **~46 px**; compare our element
+   bar next to the system icons (moon/Wi-Fi/battery). The right way is `screencapture -x` of the whole screen + a crop of the top **~46 px**; compare our element
    and its system neighbor **on the same shot of the real bar**.
 3. **Vibrant surfaces draw their own material, not `windowBackgroundColor`.** A real `NSMenu` popup
    sits on the **menu material** (dark ≈ `0x212121`), so a solid `windowBackgroundColor` fill in an
-   ordinary window reads noticeably lighter — that is exactly what the false calibration in
-   [#202](https://github.com/artem-from-ua/tokenpace/issues/202) was built on.
+   ordinary window reads noticeably lighter.
 4. **Swatch mode `TOKENPACE_SWATCHES=1`.** Instead of the widget it draws **large color squares**
    (`StatusItemView.render`) — color/alpha candidates side by side. That makes them easy to sample and compare
    against a neighboring system icon on **the same** real bar. Launch:
@@ -1684,28 +1613,25 @@ A count of Claude Code sessions awaiting the user's input, in the menu bar and i
 the menu bar — Settings → Menu bar.
 
 Under the toggle there is **one** neutral description line ("Shows how many Claude Code sessions are waiting for
-your reply in the dropdown."). The permanent ⚠️ warning "Experimental. This reads Claude Code's
-internal files…" (#243) was **removed in #341**: it described a property of the whole app rather than of this
-one feature, so it was not doing its job — singling out the risky option among the ordinary ones. That the
-feature rests on a private Claude Code format stays on the record in
+your reply in the dropdown."). There is no permanent ⚠️ warning here — that the feature rests on a
+private Claude Code format stays on the record in
 [ADR-0066](../adr/0066-detect-sessions-awaiting-input.md).
 
 The conditional ⚠️ "Stubbed in this development build." in the section **header** stays — it is about the state
 of the build, and under a stub it has to be visible.
 
-> **Under any `TOKENPACE_STUB` the watcher does not run at all.** A stub is a frozen, reproducible
-> frame, while the watcher reads the **live** `~/.claude/sessions|jobs`, so under a stub real sessions that
-> happen to be awaiting input at capture time would leak into the frame. The gate is the same one the journal
+> **Under any `TOKENPACE_STUB` the watcher does not run at all.** The watcher reads the **live**
+> `~/.claude/sessions|jobs`, so under a stub real sessions that happen to be awaiting input at capture
+> time would leak into the frame. The gate is the same one the journal
 > uses (`currentScenario == .realNetwork`), and it is recomputed when the stub is switched **live** in
 > dev-tools. Consequences: under a stub without `TOKENPACE_AWAITING` there is no indicator **even with the
 > toggle on**, and Settings (Providers → Sessions and Menu bar) shows ⚠️ "Stubbed in this
 > development build.".
 >
-> **`.realNetwork` alone was not enough for a live watcher — that live mode has to be chosen explicitly (#267).**
-> That is, `TOKENPACE_STUB=real` or switching to "Real network (no stub)" in dev-tools; in both cases the
-> indicator works on a dev build too, and this is the standard way to check the raised hand on live sessions.
-> If the app ends up in live mode **not** by an explicit choice, the watcher stays down — that exact
-> desync (the hand showing real sessions in a "stubbed" run) is what exposed #267.
+> **Live mode has to be chosen explicitly (#267)** — `TOKENPACE_STUB=real` or switching to "Real
+> network (no stub)" in dev-tools; in both cases the indicator works on a dev build too, and this is
+> the standard way to check the raised hand on live sessions. If the app ends up in live mode **not**
+> by an explicit choice, the watcher stays down.
 
 The stub **`TOKENPACE_AWAITING=<N>`** synthesizes `N` awaiting sessions, bypassing the watcher (no live
 Claude sessions needed), **and** turns the display on (it bypasses the master toggle — under a stub only), so the
@@ -1716,11 +1642,9 @@ hides the indicator (just as in reality). Additionally:
   `<7` → red, `<15` → orange, the rest → neutral). Omitted ones default to 20 (neutral).
 - **`TOKENPACE_AWAITING_PROJECTS=a,b,…`** — project names for the sessions (round-robin), for the per-project
   breakdown.
-- **`TOKENPACE_AWAITING_NAMES=n1,n2,…`** — session names, **positionally** (not round-robin, unlike
-  `_PROJECTS`: projects repeat by design, whereas names identify — cyclic duplicates would make the
-  "several differently named sessions in one project" scenario impossible). An **empty element**
-  (`a,,c`) or an omitted one means a session with no name, i.e. an italic `<unnamed>` row. A long name in the list —
-  that is how tail truncation is checked.
+- **`TOKENPACE_AWAITING_NAMES=n1,n2,…`** — session names, **positionally** (not round-robin like
+  `_PROJECTS`). An **empty element** (`a,,c`) or an omitted one means a session with no name, i.e. an
+  italic `<unnamed>` row. A long name in the list checks tail truncation.
 - **`TOKENPACE_AWAITING_CYCLE=<sec>`** ⏱ — the counter blinks between `N` and zero with this period
   (its own timer, as with `color-cycle`: polling cannot be sped up below 60 s, and the slide-out takes 0.8 s).
   It is the only way to see the **transition** — `TOKENPACE_AWAITING` on its own freezes the state. It is a knob,
@@ -1743,8 +1667,7 @@ Projects alternate round-robin (`i % 2`), so even-indexed sessions go to `tokenp
 odd-indexed ones to `claude-code-daemon`. Expected look under ⌥:
 
 - **`claude-code-daemon` first** — even though the most urgent session (3 days, red) sits in the
-  *second* project. That is exactly the check for sorting by name: before #438 the project with the red
-  session would have headed the list.
+  *second* project. This checks sorting by project name, not by urgency.
 - Under each header, the session rows are indented, **the fresher ones on top** (28 → 25 → 12 → 10 → 5 → 3
   days until deletion).
 - The long Cyrillic name is truncated **at the tail** with `…` and does **not** push the hand off the shared
@@ -1761,11 +1684,11 @@ The indicator's overall tone is **red** (the most urgent session wins).
 - **The slot and the slide-out** (#283/ADR-0073) — with `TOKENPACE_AWAITING_CYCLE=3`:
   - **The width does not move** throughout the transition, not just at rest: capture the top strip of the full
     screen in both phases and check that `$`/the bars/the neighboring system element sit on the same
-    pixels. This is #283's main criterion — the reservation comes from the option, not from the counter.
+    pixels — the reservation comes from the option, not from the counter.
   - **The slide-out** — the hand appears from below the bottom edge and hides back the same way; in an
     intermediate frame you see the fingertips **clipped**, nothing sticks out past the widget or rides over the
     pause glyph. No fade, no width change.
-  - **Option OFF** — the width is the same as it was before #283 (no reserved space at all). Check
+  - **Option OFF** — no reserved space at all. Check
     **both** toggles separately: "Show waiting sessions" on *Menu bar*, and the master
     "Detect sessions waiting for input" in *Providers → Sessions*. Turning the master off only disables
     the menu-bar toggle without resetting its value, so
@@ -1784,22 +1707,20 @@ The indicator's overall tone is **red** (the most urgent session wins).
   per-project stats".
 - **Popup (holding ⌥)** (#438): `N✋` on the right **disappears** (the "updated just now" age stays next to
   "Claude"); below it — **a list of sessions, grouped by project**:
-  - **the project header** — the name itself, **nothing** on the right. The `2✋ 1✋` chips were removed: they were
-    an aggregate of the very sessions now visible by name. Hovering the header → a tooltip with
-    the count ("3 sessions waiting").
+  - **the project header** — the name itself, **nothing** on the right. Hovering the header → a
+    tooltip with the count ("3 sessions waiting").
   - **a session row** — the name, indented (the same one Claude Code's agentic view shows), and on the right
     **one** hand, tinted by **that** session's urgency. The name is in dim ink, the header in regular
     ink: the hierarchy reads by color too, not by indentation alone.
-  - **an unnamed session** — `<unnamed>` in **italics**. On disk such a session carries not an empty field but
-    a placeholder — its own 8-character `jobId`; it must not be shown, because it looks like an
-    identifier to copy, while `--resume` accepts only a full UUID or a session name.
+  - **an unnamed session** — `<unnamed>` in **italics**. On disk such a session carries a placeholder
+    (its own 8-character `jobId`), which must not be shown — `--resume` accepts only a full UUID or a
+    session name, not that placeholder.
   - **a long name** is truncated **at the tail** (`…`), the hand stays on the shared right-hand column.
   - Hovering a row → a tooltip with the **full** (untruncated) name and the bucket
     ("<7d/<15d/>15d till deletion").
   - **order**: projects by name, sessions within them fresher on top.
-  - **there is no row limit** and no scrolling either — deliberately. Under ⌥ the question is "what exactly is
-    waiting on me", and the answer "5 of 17" does not answer it; a long list at the same time makes visible the
-    cost of the habit of keeping many sessions open. The popup's height here is a gauge, not a defect.
+  - **there is no row limit** and no scrolling either — deliberately: under ⌥ the question is "what
+    exactly is waiting on me", and "5 of 17" does not answer it.
 
   (The popup always shows the indicator while the feature is ON.)
 - **The Menu bar option** "Show waiting sessions": ON → the hand in the bar (leading); OFF → in the popup only.
@@ -1854,9 +1775,8 @@ Usage history** turned on) — synthetic stub data deliberately never reaches th
 
 > ⚠️ **Testing on the notarized copy from `/Applications` — set `TOKENPACE_JOURNAL_FILE`.**
 > The `-dev` suffix in the file name means "a bundle outside `/Applications`", so the copy from `/Applications`
-> writes into the **same** `usage-journal-YYYY-MM.jsonl` as in real work — and that is the maintainer's real
-> series, which must not be mixed with test runs. The `.realNetwork` gate protects only
-> against stub data; three things slip past it:
+> writes into the **same** `usage-journal-YYYY-MM.jsonl` as in real work — the maintainer's real
+> series. The `.realNetwork` gate protects only against stub data; three things slip past it:
 >
 > - **`TOKENPACE_GENERATE_JOURNAL=<days>` without the override** — the fixture lands straight in the real file
 >   (the hook deliberately bypasses the live-only gates; it is a fixture, not a poll);
@@ -1882,9 +1802,9 @@ Usage history** turned on) — synthetic stub data deliberately never reaches th
 - **The toggle:** Settings → **General** → the "Usage history" section → "Record usage history"
   (default-off); under it a read-only "Location" (the path in Application Support) with an "Open in Finder" button.
   Viewing the data is a separate **"Insights"** window; its **"Insights…"** item in the dropdown menu (together with
-  the separator after it) is **temporarily commented out** in `App.swift`, because there is nothing to show there yet:
-  the window remains a placeholder shell (#242) until the #244 aggregator and the #245 pilot chart land.
-  So the item is not in the dropdown right now — there is nothing to check; bringing it back = uncommenting the block.
+  the separator after it) is **temporarily commented out** in `App.swift` — the window remains a
+  placeholder shell (#242) until the #244 aggregator and the #245 pilot chart land. The item is not in
+  the dropdown right now — bringing it back = uncommenting the block.
 - **Live writing:** bring the log stream up **first** (`log stream --predicate 'subsystem ==
   "com.artem-n.tokenpace"' --level debug`), then `swift run TokenPace` (without a stub) with the toggle
   on → the file `~/Library/Application Support/com.artem-n.tokenpace/usage-journal-dev-YYYY-MM.jsonl`

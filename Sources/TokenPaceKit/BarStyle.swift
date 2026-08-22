@@ -71,25 +71,27 @@ public enum BarScale: String, Sendable, Equatable, CaseIterable {
 /// any read.
 public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// A grey track, a coloured pacing gap between the used edge and the time edge, and a "you are
-    /// here" time-indicator marker. The shipped behaviour before #224. Raw value was `"pacing"`
-    /// before #307.
+    /// here" time-indicator marker. The only presentation before #224. Builds before #307 wrote this
+    /// raw value as `"pacing"` — see ``legacyRawValues``.
     case progress = "progress"
     /// No time marker: a colour ribbon anchored to the **left edge** whose length is
     /// ``BarLayout/pressureLength`` — the gap measured against the time left before the reset —
     /// coloured by the pacing state (far-behind blue → calm green → yellow → orange → red). The
     /// colour *is* the "what state am I in" answer and the width is how urgent it is, with no marker
-    /// to correlate against. Raw value was `"simple"` before #307.
+    /// to correlate against. Builds before #307 wrote this raw value as `"simple"` — see
+    /// ``legacyRawValues``.
     case pressure = "pressure"
     /// A colour ribbon anchored to the bar's **centre** (#326), growing **right** when spending is
     /// ahead of pace and **left** when it is behind, its signed length ``BarLayout/balanceOffset``. A
     /// permanent centre tick marks the zero — without it the direction would have nothing to be a
     /// direction *from*. No time marker: like Pressure, this scale has no position for one.
     ///
-    /// Raw value was `"gauge"` before #388, when the style was called **Gauge**. That name said
-    /// *instrument*, and "pressure gauge" made it read as a variant of ``pressure`` — the opposite
-    /// of the real relation, since ``BarLayout/pressureLength`` is this scale's ahead half.
-    /// **Balance** names what actually distinguishes it: a zero in the middle, deviation either way.
-    /// Unrelated to the credits API's `spend.balance` (a money figure this app never decodes).
+    /// Deliberately not called **Gauge** (its name before #388, raw value `"gauge"` — see
+    /// ``legacyRawValues``): that name says *instrument*, and "pressure gauge" reads as a variant of
+    /// ``pressure`` — the opposite of the real relation, since ``BarLayout/pressureLength`` is this
+    /// scale's ahead half. **Balance** names what actually distinguishes it: a zero in the middle,
+    /// deviation either way. Unrelated to the credits API's `spend.balance` (a money figure this app
+    /// never decodes).
     case balance = "balance"
 
     /// The style's name as a **word**, Title Case: `"Pressure"` / `"Balance"` / `"Progress"`.
@@ -148,7 +150,7 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     ///
     /// Every entry is load-bearing for someone's stored setting, so entries are **removed only when
     /// no supported upgrade path can still carry that raw**. `"gauge"` in particular was the shipped
-    /// default (`.workHarder`) before #388, so dropping it would reset the majority of installs.
+    /// default (`.workHarder`) before #388: dropping it would reset the majority of installs.
     public static let legacyRawValues: [String: BarStyle] = [
         "pacing": .progress,
         "simple": .pressure,

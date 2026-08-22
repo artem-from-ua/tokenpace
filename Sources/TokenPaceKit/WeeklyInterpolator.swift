@@ -3,7 +3,7 @@ import Foundation
 // MARK: - WeeklyInterpolator
 
 /// Reconstructs a **continuous** seven-day utilization from the quantised one, by carrying the
-/// five-hour counter's much finer steps across the weekly bucket (#386).
+/// five-hour counter's much finer steps across the weekly bucket.
 ///
 /// The API rounds `seven_day.utilization` to a whole percent, and one point is **1 h 40 m** of work:
 /// measured over 4 327 records, 96.4 % of consecutive pairs do not move at all, and ~88 % of spend
@@ -191,12 +191,9 @@ public struct WeeklyInterpolator: Sendable, Equatable, Codable {
         //
         // A hole damages the *accumulation*, not the ability to keep measuring: the counter may have
         // risen and reset unobserved, so that stretch of spend is lost for good. What follows is
-        // measurable again from the next poll on. So `isDegraded` marks the poll where trust broke
-        // — it does not latch. (It latched in an earlier draft, and replaying the journals showed
-        // the state then persisting until the next weekly bump, hours later: 33 % and 63 % of
-        // samples reported degraded instead of the 2 % and 15 % of polls that actually sat behind
-        // a hole.) The lost spend still shows up as a low reconstruction, which the ceiling clip
-        // then absorbs at the next bump.
+        // measurable again from the next poll on. So `isDegraded` marks the poll where trust broke —
+        // it does not latch across subsequent polls. The lost spend still shows up as a low
+        // reconstruction, which the ceiling clip then absorbs at the next bump.
         next.isDegraded = isHole
         if five >= previousFive {
             next.fiveHourSinceAnchor += five - previousFive
@@ -301,11 +298,10 @@ public struct WeeklyInterpolator: Sendable, Equatable, Codable {
     ///   the bar looks exactly as it did before the reconstruction, so the state would otherwise be
     ///   invisible.
     ///
-    /// The **ratchet** (`max` against a previous value) that an earlier draft carried is absent, and
-    /// deliberately so: `N` never changes *inside* a segment — a new estimate is only recorded by the
-    /// bump that closes the segment — so with `anchor` and `N` fixed and the gain non-decreasing, the
-    /// expression is monotone **arithmetically**. Measured: a ratchet changed the output by 0.000 pp
-    /// on both journals. Adding one would suggest N moves mid-segment, which it does not.
+    /// No **ratchet** (`max` against a previous value) is applied, deliberately: `N` never changes
+    /// *inside* a segment — a new estimate is only recorded by the bump that closes the segment — so
+    /// with `anchor` and `N` fixed and the gain non-decreasing, the expression is monotone
+    /// **arithmetically**. A ratchet would suggest N moves mid-segment, which it does not.
     public func value(forRaw raw: Double) -> WeeklyUtilization {
         let n = ratio.estimate
         let samples = ratio.sampleCount
@@ -328,8 +324,7 @@ public struct WeeklyInterpolator: Sendable, Equatable, Codable {
             // The fallback is the bucket's **lower edge**, not the bare quantum `k`. `k` is the
             // bucket's *centre*, so falling back to it would assert half a point of spend we never
             // measured — and the moment measurement resumes with an honest, lower estimate, the bar
-            // would visibly step *down*. Replaying the real journals showed exactly that: 41 such
-            // steps (Pro) and 22 (Max 5x), every one a `degraded → interpolated` handover.
+            // would visibly step *down*.
             //
             // The lower edge is the one thing an observed `k` guarantees, so it can never be
             // contradicted later. Above it we keep whatever the reconstruction had already earned

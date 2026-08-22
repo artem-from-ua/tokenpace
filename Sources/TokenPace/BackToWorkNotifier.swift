@@ -96,9 +96,8 @@ enum BackToWorkNotifier {
     /// delivers. The `body` (which carries the spent amount and, if set, the limit) is built by the pure
     /// `ExtraUsageOnset.bannerBody(for:)`. No-op (logged) on a dev build or when not authorized.
     ///
-    /// The title comes from `ExtraUsageOnset.bannerTitle` rather than a literal repeated here: the two
-    /// used to hold the same string by coincidence, and a wording change on either side would have
-    /// drifted silently (the seam `conventions.md` describes for `CopyFeedback`).
+    /// The title comes from `ExtraUsageOnset.bannerTitle` rather than a literal repeated here, so a
+    /// wording change can't drift between the two (the seam `conventions.md` describes for `CopyFeedback`).
     static func postExtraUsage(body: String) {
         post(kind: "extra-usage", idPrefix: "extraUsage",
              title: ExtraUsageOnset.bannerTitle, body: body)

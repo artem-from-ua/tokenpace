@@ -1,19 +1,16 @@
 import SwiftUI
 import TokenPaceKit
 
-// MARK: - The Appearance panes (#168, ADR-0042; split by surface in #333, nested back under one
-// section here)
+// MARK: - The Appearance panes (#168, ADR-0042)
 
 /// Settings → Appearance, and the two surface pages drilled into from it: ``MenuBarPane``,
-/// ``DropdownPane``. The split axis is unchanged from #333 — the surface each option configures —
-/// but the three are one section again rather than three sidebar rows, so what says they belong
-/// together is the navigation itself instead of a divider between siblings.
+/// ``DropdownPane``. The split axis is the surface each option configures.
 ///
 /// The page keeps what applies to the whole widget rather than to one surface: the preset picker and
 /// its copy-config button, then the two navigator rows.
 ///
-/// Bar style is *not* here despite looking like a single setting: since #329 it is two independent
-/// values, one per surface (ADR-0080), so each sits with its own surface.
+/// Bar style is *not* here despite looking like a single setting: it is two independent values, one
+/// per surface (ADR-0080), so each sits with its own surface.
 ///
 /// The preset control and the copy button work across the split without knowing about it: both read
 /// `SettingsModel.liveAppearanceValues`, which reads the model's fields directly rather than
@@ -34,31 +31,20 @@ struct AppearancePane: View {
     var body: some View {
         Form {
             // First section: Appearance presets (#215, #224) — a **radio group**, one row per preset,
-            // each setting every option on both child pages at once.
-            //
-            // Radios rather than the segmented control this was until now: the three names read as
-            // moods, and the question they leave open — *which signals does this make loudest?* — needs
-            // a line of prose per option, which a segment has no room for. `AppearancePreset.summary`
-            // holds those lines, beside the values they describe.
+            // each setting every option on both child pages at once. `AppearancePreset.summary` holds
+            // the prose line beside each preset's name.
             //
             // **Clicking previews; only `Apply` commits.** A click puts the preset in
             // `PersistedConfig`'s overlay, which every Appearance getter consults, so both surfaces draw
-            // it while the store is untouched — and closing the window drops it. That is what makes the
-            // rows safe to click through, which is what people come here to do: compare presets against
-            // their own config, or take one as a base to modify.
+            // it while the store is untouched — and closing the window drops it.
             //
-            // The fourth row is that config itself — "My setup" — rather than the old "Custom", which
-            // stood for the live config and a hidden snapshot at the same time and was clickable only
-            // in some states.
+            // The fourth row is that config itself — "My setup".
             // MARK: The legend — its own section, above everything (#261)
             //
             // First on the page, and alone in its section, because it is the only row here that
-            // **explains** rather than configures: read the marks, then change them. A divider is the
-            // cheapest way to say that, and putting it first follows the order a newcomer needs — the
-            // presets below are meaningless until the colours they set have names.
-            //
-            // Not folded into the surfaces' section below: those two rows lead to controls, and a
-            // reference page filed beside them would promise settings it does not have.
+            // **explains** rather than configures: read the marks, then change them. Not folded into
+            // the surfaces' section below: those two rows lead to controls, and a reference page filed
+            // beside them would promise settings it does not have.
             Section {
                 SettingsNavigationRow(
                     title: SettingsChildPage.appearanceLegend.title,
@@ -69,15 +55,9 @@ struct AppearancePane: View {
 
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    // Heading block: the section's own label with the hint directly under it. The hint
-                    // carries the whole mental model of this list — clicking previews, only Apply
-                    // commits — so it belongs to the heading rather than to any one row. Its 4 pt
+                    // Heading block: the section's own label with the hint directly under it. Its 4 pt
                     // spacing (against the 10 pt below) is what keeps the two lines reading as one
                     // heading instead of as a fifth entry.
-                    //
-                    // The copy button used to live here, trailing the label. It sits on the "My setup"
-                    // row now: it copies the stored configuration, so it belongs to the row that names
-                    // it rather than to a heading that covers all four.
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Try an appearance preset")
                         SettingsHint(text: "Click one to see it live. "
@@ -107,12 +87,9 @@ struct AppearancePane: View {
 
             // MARK: The two surfaces — unlabelled on purpose
             //
-            // A header here would have to be called something like "Surfaces", and the two row titles
-            // already say which surface each is. The section's job is the divider above it: it
-            // separates the preset row, which writes to both pages, from the pages it writes to.
-            //
-            // Row order is menu bar then dropdown, which is the order a user meets them: the widget is
-            // on screen at all times, the popup only once clicked.
+            // The two row titles already say which surface each is. Row order is menu bar then
+            // dropdown, which is the order a user meets them: the widget is on screen at all times,
+            // the popup only once clicked.
             Section {
                 ForEach(SettingsChildPage.pages(of: .appearance)) { page in
                     SettingsNavigationRow(
@@ -133,18 +110,16 @@ struct AppearancePane: View {
     ///
     /// It is a **statement about the saved config**, not a selection: a config that matches `Chill`
     /// today stops matching the moment any option changes, and selecting the `Chill` row would promise
-    /// it keeps following that preset. Naming the match beside the row says the same thing without the
-    /// promise — and disappears by itself once the config drifts.
+    /// it keeps following that preset.
     ///
     /// Drawn in secondary ink by `RadioGroup` (see `Option.titleNote`), so it reads as an observation
-    /// rather than as part of the row's name. It rides with the title rather than in the summary
-    /// because the summary is a fixed description of the row; a second line that rewrote itself as
-    /// state changed would reflow the list under the pointer, which is the one thing this control must
-    /// not do while the user is clicking through it.
+    /// rather than as part of the row's name. It rides with the title rather than in the summary,
+    /// which is a fixed description of the row that must not reflow the list under the pointer while
+    /// the user is clicking through it.
+    ///
     /// The preset's name is italicised (`*…*`, rendered by `RadioGroup` through `Text(.init(_:))`)
-    /// because it is a name being quoted, not a word in the sentence — the same reason the hints on
-    /// these panes italicise *Menu bar* and *Dropdown*. It also keeps `Work harder!` from reading as an
-    /// exclamation the note itself is making.
+    /// because it is a name being quoted, not a word in the sentence. It also keeps `Work harder!` from
+    /// reading as an exclamation the note itself is making.
     private var mySetupNote: String? {
         model.storedPresetName.map { "· same as *\($0.displayName)* preset" }
     }
@@ -191,12 +166,9 @@ struct AppearancePane: View {
             copyConfigToClipboard()
         } label: {
             Image(systemName: didCopyConfig ? CopyFeedback.confirmedSymbol : CopyFeedback.restingSymbol)
-                // A fixed box for **both** dimensions. Width was always needed — the checkmark is
-                // narrower than `doc.on.doc`, so without it the button's neighbours slide sideways on
-                // every click. Height became just as necessary once the button stopped sharing a row
-                // with the segmented control: that control used to set the row's height, and now the
-                // button sets it alone, so the checkmark's shorter glyph shrank the row and jolted
-                // everything below it. Sized off the resting glyph, which is the taller of the two.
+                // A fixed box for **both** dimensions: the checkmark is narrower and shorter than
+                // `doc.on.doc`, so without it the button's neighbours slide and the row jolts on every
+                // click. Sized off the resting glyph, which is the taller of the two.
                 .frame(width: Self.copyGlyphBox, height: Self.copyGlyphBox)
         }
         .buttonStyle(.borderless)
@@ -245,18 +217,15 @@ struct MenuBarPane: View {
     var body: some View {
         Form {
             Section {
-                // Bar style, menu-bar copy (#224, rescaled in #307, per-surface since #329). All three
-                // show the pacing state by colour and differ in *scale*: Progress marks positions in
-                // the window, Pressure measures the gap against the time left, Balance measures the same
-                // thing from a centred zero so the underpace side is drawn too.
+                // Bar style, menu-bar copy. All three show the pacing state by colour and differ in
+                // *scale*: Progress marks positions in the window, Pressure measures the gap against
+                // the time left, Balance measures the same thing from a centred zero so the underpace
+                // side is drawn too.
                 //
-                // Picked by picture, System-Settings-Appearance style: the difference between the
-                // three is purely visual, so three words never carried it. Prose was tried and cut
-                // (#341) for costing more vertical space than it bought.
+                // Picked by picture, System-Settings-Appearance style — the difference between the
+                // three is purely visual, so three words never carried it. No hint under the row: the
+                // preview is in the row itself.
                 //
-                // Still no hints under the row, but for a new reason. The old one cited the live
-                // dropdown preview beside the window — which renders the **popup** (ADR-0083) and so
-                // never showed this row's styles at all. Now the preview is in the row itself.
                 // Top-aligned, not centred: the picker is roughly three times the height of a normal
                 // control row, and a vertically centred label floats in the middle of that block
                 // instead of heading it.
@@ -269,30 +238,20 @@ struct MenuBarPane: View {
                         onSelect: { model.setMenuBarStyle($0) })
                 }
 
-                // "Colors tell me" (#224, renamed and rescoped in #381) — which pacing advice keeps its
-                // colour. Named for the advice, not for the hues it mutes: the reader is choosing what
-                // they want to be told, and "Yellow + Green" / "+ Blue" answered a question about
-                // mechanism instead. Segments run quiet-first, like every other control on the page.
+                // "Colors tell me" — which pacing advice keeps its colour. Named for the advice, not
+                // for the hues it mutes. Segments run quiet-first, like every other control on the page.
                 //
-                // **Disabled under Pressure, and shown on `Slow down`** — which is why it shares a card
-                // with `Style` rather than sitting with the row below.
-                //
-                // Pressure draws the whole quiet side at zero length (`BarLayout.pressureLength` =
-                // `max(0, balanceOffset)`) *and* `StatusItemView` mutes it to white there regardless of
-                // this value, so every segment would render the same bar. `Slow down` is the segment
-                // that describes what is actually on screen — only the "too fast" orange keeps colour —
-                // so the control reports the truth instead of offering a choice that does nothing.
-                //
-                // Disabled rather than hidden: a row that vanishes takes its own explanation with it,
-                // and the user is left to guess whether the setting is gone or merely elsewhere. Greyed
-                // out with the honest value showing, the page still answers "what will the colours do?"
-                // — which is the question the row exists for. Same treatment `AboutPane` gives a switch
-                // whose feature cannot work (`installAutoEnabled`).
+                // **Disabled under Pressure, and shown on `Slow down`.** Pressure draws the whole quiet
+                // side at zero length (`BarLayout.pressureLength` = `max(0, balanceOffset)`) *and*
+                // `StatusItemView` mutes it to white there regardless of this value, so every segment
+                // would render the same bar; `Slow down` is the segment that describes what is actually
+                // on screen. Disabled rather than hidden, so the page still answers "what will the
+                // colours do?" — same treatment `AboutPane` gives a switch whose feature cannot work
+                // (`installAutoEnabled`).
                 //
                 // **The stored value is never written here.** `displayedColorAdvice` swaps only what is
                 // *drawn*; `PersistedConfig.colorsTell` keeps whatever the user last chose, so switching
-                // back to Balance or Progress restores it with no bookkeeping of a "previous" value — the
-                // store already is that memory.
+                // back to Balance or Progress restores it with no bookkeeping of a "previous" value.
                 HStack {
                     // The title dims with the control below it — `.disabled` sits on the whole `HStack`,
                     // and `SettingsDisabledLabel` turns that environment flag into AppKit's own
@@ -309,12 +268,10 @@ struct MenuBarPane: View {
 
                 // Whether the top (5-hour) bar steps aside until it needs attention (ADR-0086, narrowed
                 // to one window by ADR-0090). The row names the bar, so the segments only say *when* —
-                // which makes it read as one sentence: "Hide the top 5h bar — until it needs attention".
+                // reading as one sentence: "Hide the top 5h bar — until it needs attention".
                 //
-                // The hint keeps only its second sentence. The first ("hidden while it's calm and comes
-                // back…") now duplicates the segment; this one describes what happens at a limit, which
-                // this row does *not* govern (ADR-0091) and which nothing else in Settings explains —
-                // and both bars vanishing at once is the app's most alarming transition.
+                // The hint describes what happens at a limit, which this row does *not* govern
+                // (ADR-0091) and which nothing else in Settings explains.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Hide the top 5h bar")
@@ -329,14 +286,11 @@ struct MenuBarPane: View {
                 }
             }
 
-            // The service dot gets its own card (#381): the three rows above are about the **pacing
-            // bars** and read `PacingModel`, while this one is about **external incidents** and reads
+            // The service dot gets its own card: the three rows above are about the **pacing bars** and
+            // read `PacingModel`, while this one is about **external incidents** and reads
             // `ProviderMonitoring`. A single row needs no section header, like the polling-pause section
             // on `ProvidersPane`.
             Section {
-                // "on issues" left the label (#381): the dot only ever appears on an issue, so that was
-                // describing the indicator's behaviour rather than offering a choice. The hint says it
-                // instead, and names the link to Providers — nothing on this page defines "service".
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Show service status dot", isOn: Binding(
                         get: { model.showServiceDot }, set: { model.setShowServiceDot($0) }))
@@ -348,11 +302,8 @@ struct MenuBarPane: View {
         .formStyle(.grouped)
         // Picking a tile moves the `Colors tell me` row's highlight (to `Slow down` under Pressure, back
         // to the stored choice otherwise) and greys the control out. Animated so the two read as one
-        // consequence of the click rather than as the page flickering.
-        //
-        // Scoped to `menuBarStyle` on purpose: a bare `.animation(_:)` would also animate every *segment*
-        // change on this page, so picking a different `Hide the top 5h bar` mode would slide its own
-        // control around.
+        // consequence of the click. Scoped to `menuBarStyle` so a bare `.animation(_:)` doesn't also
+        // animate every *segment* change on this page.
         .animation(SettingsRowReveal.animation, value: model.menuBarStyle)
     }
 
@@ -368,29 +319,21 @@ struct DropdownPane: View {
     var body: some View {
         Form {
             Section {
-                // Bar style, dropdown copy (#329) — the same three styles as the menu bar, chosen
-                // separately. Its hint states the Extra-usage exception, and states only the fact: that
-                // bar is always Progress whatever is picked here, so a Progress bar sitting under a
-                // column of Pressure/Balance bars reads as documented behaviour rather than a bug worth
-                // reporting. The hint names the *bar*, not the section: this page sets how bars are
-                // drawn, and the section also carries text and a badge that this exception says nothing
-                // about. The reasons stay here rather than in the hint — its window is a calendar
-                // month, which the bar's two captioned ends already name on the bar itself, so a user
-                // who wonders why has the answer in front of them.
+                // Bar style, dropdown copy — the same three styles as the menu bar, chosen separately.
+                // The hint states the Extra-usage exception: that bar is always Progress whatever is
+                // picked here, so a Progress bar under a column of Pressure/Balance bars reads as
+                // documented behaviour. It names the *bar*, not the section.
                 //
-                // Row and hint share one `VStack`, the same shape every other explained control on
-                // these pages uses. Left as siblings of the `Section` they became two independent rows,
-                // and the hint read as a stray statement about Extra usage rather than as the caveat on
-                // the control directly above it — which is the only thing it is.
+                // Row and hint share one `VStack` so the hint reads as the caveat on the control
+                // directly above it rather than a stray statement.
+                //
                 // Top-aligned for the same reason the menu-bar row is: the picker is roughly three times
                 // the height of a normal control row, and a vertically centred label floats in the
                 // middle of that block instead of heading it.
                 //
                 // The hint sits **under the label**, inside the row's left column, rather than under the
-                // whole row. Left below the `HStack` it ran the full pane width *beneath the tiles*,
-                // which put a caveat about one bar's style a long way from the control it qualifies —
-                // and left the picker looking like it had a footnote of its own. In the label's column
-                // it reads as what it is: a note on this setting, next to the setting's name.
+                // whole row, so it stays close to the control it qualifies instead of running the full
+                // pane width beneath the tiles.
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Style")
@@ -404,20 +347,15 @@ struct DropdownPane: View {
                 }
             }
 
-            // The visibility rows get their own section, matching the menu-bar page (#374): the Style
-            // row is three tiles plus a hint tall, and the two rows below are about *which sections
-            // appear at all* rather than about how a bar is drawn — a different decision, so a
-            // different card.
+            // The visibility rows get their own section: the Style row is three tiles plus a hint tall,
+            // and the two rows below are about *which sections appear at all* — a different decision.
             Section {
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Once used" /
-                // "When it needs attention") already say when the group shows, and a hint repeating that would
-                // crowd the two rows that close the section. The two rows offer *different* segment
-                // sets — see the constants below.
+                // "When it needs attention") already say when the group shows. The two rows offer
+                // *different* segment sets — see the constants below.
                 HStack {
-                    // "per-model and per-service", not "model and service": these are the limits belonging to
-                    // one model or one service, as against the 5h/7d windows above them, and the bare
-                    // form left that to inference. The hyphenated "model- & service-specific" says the
-                    // same thing with a harder-to-read chain of hyphens; "per-" is also the code's own
+                    // "per-model and per-service": these are the limits belonging to one model or one
+                    // service, as against the 5h/7d windows above them. "per-" is also the code's own
                     // word for these rows (`PopupLayout.perModelRows`).
                     Text("Show per-model and per-service limits")
                     Spacer()
@@ -442,23 +380,15 @@ struct DropdownPane: View {
                 }
             }
 
-            // The ⌥ caption (#475), in its own unnamed section at the foot of the page — this is where
-            // someone looks for it, so this is where it lives.
+            // The ⌥ caption (#475), in its own unnamed section at the foot of the page.
             //
             // **The one control on this pane that is not a preset value.** Everything above is an
             // `AppearancePresetValues` member: picking a preset rewrites it, and Copy config carries it
             // to another Mac. This switch does neither, on purpose — it records that its owner already
-            // knows the shortcut, which is a fact about a person rather than about how the dropdown
-            // should look, and restoring it onto a second Mac would be restoring the wrong thing.
-            //
-            // Unnamed because a heading would have to name that distinction ("Not in presets"?) and a
-            // section header is the wrong place to argue it. The row sits apart, which is as much as the
-            // layout needs to say; the reasoning is here, and in `PersistedConfig.showOptionHint`.
+            // knows the shortcut, a fact about a person rather than about how the dropdown should look.
             //
             // No `SettingsHint`: the label names the caption verbatim and the caption says what it does.
             Section {
-                // "…hint", not "…hint in dropdown": the pane is Dropdown, so naming the surface again
-                // restates the breadcrumb the reader followed to get here.
                 Toggle("Show «hold ⌥ Option» hint", isOn: Binding(
                     get: { model.showOptionHint },
                     set: { model.setShowOptionHint($0) }))
@@ -470,14 +400,11 @@ struct DropdownPane: View {
     /// The two rows above offer **different** segment sets, so neither is built from `allCases` — both
     /// are spelled out here, the way `AppearanceBarStyle.segments` is.
     ///
-    /// Ordered **quietest first** (#381), matching every segmented control in Appearance: the leftmost
-    /// option puts the least on screen, the rightmost the most. Before #381 these two ran the other way
-    /// (`Always` leftmost), which made the page's controls disagree about which direction meant "more".
+    /// Ordered **quietest first**, matching every segmented control in Appearance: the leftmost option
+    /// puts the least on screen, the rightmost the most.
     ///
-    /// The retired `⌥ Option`-only segment (#374) is gone from the enum entirely as of #381: ⌥ is OR'd
-    /// into every mode, so holding it already reveals the group whichever one is picked, and the mode's
-    /// only distinct behaviour was hiding the group when its data had turned interesting. Stored values
-    /// resolve through `PopupSectionVisibility.legacyRawValues`.
+    /// ⌥ is OR'd into every mode, so holding it already reveals the group whichever one is picked.
+    /// Stored values resolve through `PopupSectionVisibility.legacyRawValues`.
     private static let modelLimitsSegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
         [.whenItNeedsAttention, .onceUsed, .always].map { .init(value: $0, title: $0.displayName) }
 
@@ -487,25 +414,23 @@ struct DropdownPane: View {
     /// its own. Stored values of it resolve to `.onceUsed` through the enum's legacy table.
     ///
     /// Which leaves this row a plain pair, quietest first: show it from the first cent spent, or always.
-    /// Built from `PopupSectionVisibility.creditsOffered` rather than spelled out here: three separate
-    /// paths can put a value in this row's key (the #381 key migration, the getter, an imported config),
-    /// and each has to fold the mode this control does not offer. One list, consulted by all four, is what
-    /// keeps them from disagreeing — a value the control lacks opens it with no segment highlighted.
+    /// Built from `PopupSectionVisibility.creditsOffered` rather than spelled out here: multiple paths
+    /// can put a value in this row's key (the getter, an imported config), and each has to fold the
+    /// mode this control does not offer. One list, consulted by all, is what keeps them from
+    /// disagreeing — a value the control lacks opens it with no segment highlighted.
     private static let extraUsageSegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
         PopupSectionVisibility.creditsOffered.map { .init(value: $0, title: $0.displayName) }
 }
 
 // MARK: - Shared across the surface panes
 
-/// The ``BarStyle`` segments, shared by the Menu bar and Dropdown panes (#329) so the two surfaces
-/// always offer the same choices in the same order — now that the two controls live on separate
-/// panes, a shared constant is the only thing keeping them from drifting apart unnoticed.
+/// The ``BarStyle`` segments, shared by the Menu bar and Dropdown panes so the two surfaces always
+/// offer the same choices in the same order.
 ///
-/// The two consumers are no longer the same control: Menu bar renders these through
-/// ``BarStylePicker`` (preview pictures), Dropdown still through ``SegmentedControl`` (text). Both
-/// read `value` and `title` from here, so order and wording stay common across the split — including
-/// for the release-notes recipe in `docs/guides/releasing.md`, which greps the titles out of this
-/// file.
+/// The two consumers are not the same control: Menu bar renders these through ``BarStylePicker``
+/// (preview pictures), Dropdown through ``SegmentedControl`` (text). Both read `value` and `title`
+/// from here; the titles themselves come from ``BarStyle/displayName``, which is what the
+/// release-notes recipe in `docs/guides/releasing.md` greps when checking a rename.
 ///
 /// Ordered **Pressure · Balance · Progress**, not by `allCases`: it reads as a gradient of how much
 /// positional information the bar carries — length alone, then length plus direction, then two
@@ -513,9 +438,7 @@ struct DropdownPane: View {
 @MainActor
 enum AppearanceBarStyle {
     static let segments: [SegmentedControl<BarStyle>.Segment] = [
-        // Titles from `BarStyle.displayName`, not literals here (#396): the dropdown now captions each
-        // bar with the same word, and #388 renamed the centred style through it — one source, one
-        // rename. Two literals here would have meant two half-renames.
+        // Titles from `BarStyle.displayName`, not literals here — one source, one rename.
         .init(value: .pressure, title: BarStyle.pressure.displayName),
         .init(value: .balance, title: BarStyle.balance.displayName),
         .init(value: .progress, title: BarStyle.progress.displayName),
@@ -525,21 +448,20 @@ enum AppearanceBarStyle {
 /// The ``TopBarHiding`` segments for the Menu bar pane's "Hide the top 5h bar" row (ADR-0086, narrowed
 /// to one window by ADR-0090).
 ///
-/// Spelled out rather than mapped from `allCases` (#381), like every other segment list here. The order
-/// on screen is a **presentation** decision — quietest option leftmost — and deriving it from the enum
-/// made the enum's declaration order load-bearing for the UI, so a later re-ordering of the control
-/// would have read as a change to the stored type.
+/// Spelled out rather than mapped from `allCases`, like every other segment list here. The order on
+/// screen is a **presentation** decision — quietest option leftmost — and deriving it from the enum
+/// would make the enum's declaration order load-bearing for the UI.
 @MainActor
 enum AppearanceTopBarHiding {
     static let segments: [SegmentedControl<TopBarHiding>.Segment] =
         [.untilItNeedsAttention, .never].map { .init(value: $0, title: $0.displayName) }
 }
 
-/// The ``ColorAdvice`` segments for the Menu bar pane's "Colors tell me" row (#381).
+/// The ``ColorAdvice`` segments for the Menu bar pane's "Colors tell me" row.
 ///
 /// Quietest first, like its neighbours: `Slow down` keeps colour on one piece of advice, `How it's
-/// going` keeps it on everything. The titles are the advice itself, so the row and a segment read as one
-/// sentence — "Colors tell me — slow down" — and no hint is needed to explain either end.
+/// going` keeps it on everything. The titles are the advice itself, so the row and a segment read as
+/// one sentence — "Colors tell me — slow down" — and no hint is needed to explain either end.
 @MainActor
 enum AppearanceColorAdvice {
     static let segments: [SegmentedControl<ColorAdvice>.Segment] = [

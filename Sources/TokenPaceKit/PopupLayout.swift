@@ -3,18 +3,16 @@ import Foundation
 // MARK: - LimitRow
 
 /// One section of the popup: a named limit window with its pacing, a drawable bar, and a split
-/// reset countdown. The pure-data side of issue #11 — no AppKit, no human-readable sentences (the
-/// view assembles "% used · on pace · resets in …"). Reset *time* strings are the one exception:
-/// they are produced by `ResetClock` (shared time arithmetic, reused in Phase 2), not localised
-/// prose, so they live here rather than in the view.
+/// reset countdown. Pure data — no AppKit, no human-readable sentences (the view assembles
+/// "% used · on pace · resets in …"). Reset *time* strings are the one exception: they are
+/// produced by `ResetClock`, not localised prose, so they live here rather than in the view.
 ///
 /// Used for every kind of section — `5h`, `7d`, the per-model sub-windows (`Opus`, `Sonnet`),
-/// and the `weekly_scoped` models from `limits[]` (e.g. `Fable`, #65); all per-model rows are
-/// paced as `.sevenDay` (they reset on the weekly cadence).
+/// and the `weekly_scoped` models from `limits[]` (e.g. `Fable`); all per-model rows are paced
+/// as `.sevenDay` (they reset on the weekly cadence).
 public struct LimitRow: Sendable, Equatable {
     /// Section heading, e.g. `"5-hour"`, `"7-day"`, or a bare model name `"Opus"` / `"Fable"` for the
-    /// per-model rows (all 7-day paced; no "(7-day)" suffix). A raw label (the window identity), not a
-    /// localised string — the view renders it as-is.
+    /// per-model rows (all 7-day paced; no "(7-day)" suffix). Not localised — the view renders it as-is.
     public let title: String
     /// API `utilization`, percent in [0, 100].
     public let utilization: Double
@@ -26,34 +24,26 @@ public struct LimitRow: Sendable, Equatable {
     public let bar: BarLayout
     /// Number of equal sub-intervals the popup bar's tick ruler splits this window into
     /// (`LimitWindow.subdivisions`): `5` for the 5-hour window, `7` for the 7-day and per-model
-    /// windows. The view draws `subdivisions - 1` interior ticks (issue #38).
+    /// windows. The view draws `subdivisions - 1` interior ticks.
     public let subdivisions: Int
     /// The complete, unified reset line for this window (`ResetClock.resetLine`): `"15d"`,
-    /// `"7d next Monday"`, `"5d on Friday"`, `"20h at 03:00"`, `"45m at 03:00"` — the same format
-    /// every limit uses (#167). `nil` when the reset is now/past or `resets_at` was unparseable
-    /// (the view shows its "resetting…" fallback).
+    /// `"7d next Monday"`, `"5d on Friday"`, `"20h at 03:00"`, `"45m at 03:00"`. `nil` when the
+    /// reset is now/past or `resets_at` was unparseable (the view shows its "resetting…" fallback).
     public let resetLine: String?
-    /// The same line with the `"resets in"` lead-in (`ResetClock.resetLine(verbose: true)`):
-    /// `"resets in 20h at 03:00"`. Both forms are precomputed because the choice between them is the
-    /// **live ⌥ Option state**, which flips while the menu is open and without a re-poll — the same
-    /// reason the per-model rows are always built. The view picks; the layout stays ⌥-agnostic.
-    /// `nil` in exactly the cases ``resetLine`` is.
+    /// The same line with the `"resets in"` lead-in (`ResetClock.resetLine(verbose: true)`).
+    /// Both forms are precomputed because the choice is the **live ⌥ Option state**, which flips
+    /// while the menu is open without a re-poll. `nil` in exactly the cases ``resetLine`` is.
     public let resetLineVerbose: String?
-    /// Whether this is the **idle** 5-hour row — the 5h window does not exist server-side (no active
-    /// session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view renders a green knobless
-    /// bar, the status word "ready to start", and **no second (utilization + reset) line at all**; the
-    /// numeric fields (`utilization`, `pacing`, `indicator`, the three `reset*`) are inert placeholders
-    /// the idle render path ignores. `false` on every normal row.
+    /// Whether this is the **idle** 5-hour row — the 5h window does not exist server-side (no
+    /// active session, ``UsageSnapshot/sessionIdle``). When `true` the view renders a green
+    /// knobless bar, the status word "ready to start", and **no second line at all**; the numeric
+    /// fields are inert placeholders the idle render path ignores. `false` on every normal row.
     public let sessionIdle: Bool
-    /// Whether this idle 5-hour row is also **blocked** (#158): the 7-day limit is exhausted and paid
-    /// credits cannot cover, so there is no path to start a session. When `true` the view draws the
-    /// idle pill **grey** (not green) and shows the status word "waiting for limit reset" instead
-    /// of "ready to start". Only ever `true` alongside ``sessionIdle``; `false` on every other row.
+    /// Whether this idle 5-hour row is also **blocked**: the 7-day limit is exhausted and paid
+    /// credits cannot cover, so there is no path to start a session. When `true` the view draws
+    /// the idle pill **grey** and shows "waiting for limit reset" instead of "ready to start".
+    /// Only ever `true` alongside ``sessionIdle``; `false` on every other row.
     public let sessionBlocked: Bool
-    // No `weeklyHeadroom` here since #381: the idle "ready to start" pill is **green** whatever the week
-    // is doing, on both surfaces, so the fill no longer needs the weekly verdict carried alongside an
-    // inert bar. `PacingModel.weeklyHasHeadroom` is untouched — it still gates `blueAllowed` for every
-    // *active* row, which is what ADR-0081 was about.
 
     public init(
         title: String,
@@ -83,14 +73,14 @@ public struct LimitRow: Sendable, Equatable {
 // MARK: - CreditsRow
 
 /// The "Extra usage" (money-credits) section of the popup — the pure-data counterpart of
-/// ``LimitRow`` for the paid overspend that covers you past the plan limits (#143/#145).
+/// ``LimitRow`` for the paid overspend that covers you past the plan limits.
 ///
 /// Like ``LimitRow`` it carries **raw** values only — money objects, a drawable ``BarLayout``, and a
-/// pre-formatted reset line (`ResetClock`, the one prose exception) — and **no**
-/// human-readable sentences: the view (`PopupViewController`) assembles "on pace / ahead / limit
-/// reached" and "€spent / €limit" from these (ADR-0009). It is a **separate** field on
-/// ``PopupLayout`` (not one of ``PopupLayout/rows``) because a credits section is not a limit window:
-/// it has no utilisation percent, no tick subdivisions, and its "cap" may be absent (unlimited).
+/// pre-formatted reset line — and **no** human-readable sentences: the view assembles
+/// "on pace / ahead / limit reached" and "€spent / €limit" from these (ADR-0009). It is a
+/// **separate** field on ``PopupLayout`` (not one of ``PopupLayout/rows``) because a credits
+/// section is not a limit window: no utilisation percent, no tick subdivisions, and its "cap"
+/// may be absent (unlimited).
 ///
 /// ## Two shapes, keyed by ``bar``
 /// - **Limit set** (`bar != nil`): a full section — status word (from `bar.pacing` / cap-reached),
@@ -106,13 +96,11 @@ public struct CreditsRow: Sendable, Equatable {
     public let limit: Money?
     /// The pacing bar (`CreditsPacing.barLayout`), graded exactly like a token bar (usage vs. month
     /// elapsed), or `nil` for an **unlimited** limit — then the view draws no bar and no status word.
-    /// The view colours it with the **same** `PopupBarView.aheadColor(usage:time:)` the token bars use.
     public let bar: BarLayout?
     /// The unified reset line to the end of the money window — the next `00:00` UTC on the 1st
-    /// (`CreditsPacing.monthEnd` → `ResetClock.resetLine`), in the **same** format every limit uses
-    /// (#167): `"15d"`, `"5d on Friday"`, `"20h at 03:00"`. The `00:00` UTC boundary reads as the
-    /// user's **local** day/time. `nil` when the limit is unlimited (no reset line) or the boundary
-    /// was unresolvable.
+    /// (`CreditsPacing.monthEnd` → `ResetClock.resetLine`), in the same format every limit uses:
+    /// `"15d"`, `"5d on Friday"`, `"20h at 03:00"`. The `00:00` UTC boundary reads as the user's
+    /// **local** day/time. `nil` when the limit is unlimited or the boundary was unresolvable.
     public let resetLine: String?
     /// The ⌥ form of ``resetLine``, with the `"resets in"` lead-in — see
     /// ``LimitRow/resetLineVerbose`` for why both are precomputed. `nil` whenever ``resetLine`` is.
@@ -124,22 +112,18 @@ public struct CreditsRow: Sendable, Equatable {
     /// overflowing into credits.
     public let inUse: Bool
     /// Whether the money cap is **spent** — the server's own `spend_limit_reached`, not an arithmetic
-    /// comparison of the two amounts (#396).
+    /// comparison of the two amounts.
     ///
-    /// Distinct from `bar.usageFraction >= 1`, which the bar forces to `1` for this flag *and* reaches
-    /// on its own when `used >= limit`: the fraction answers "how full is the bar", this answers "has
-    /// the paid tier been switched off". The view needs the second one for the **unlimited** row, which
-    /// has no bar to read a fraction from — without a cap there is nothing to be `1` of, yet the credits
-    /// can still be spent out.
+    /// Distinct from `bar.usageFraction >= 1`: the fraction answers "how full is the bar", this answers
+    /// "has the paid tier been switched off". The view needs the second one for the **unlimited** row,
+    /// which has no bar — without a cap there is nothing to be `1` of, yet credits can still run out.
     public let spendLimitReached: Bool
     /// The captions for the credits bar's two boundary ticks — the money window's first and last day,
     /// `("Aug 1", "Aug 31")`, from `CreditsPacing.monthBoundaryLabels`. `nil` when there is no
-    /// bar to caption (unlimited) or the calendar could not resolve the bounds; the view then draws the
-    /// bar without a ruler rather than inventing labels.
+    /// bar to caption (unlimited) or the calendar could not resolve the bounds.
     ///
-    /// Precomputed here, like ``resetLine``, so the view formats no dates (ADR-0009). These name the
-    /// **UTC** month bounds that define the bar's own `0` and `1` — see
-    /// `CreditsPacing.monthBoundaryLabels` for why they do not follow ``resetLine``'s local zone.
+    /// These name the **UTC** month bounds that define the bar's own `0` and `1` — they do not follow
+    /// ``resetLine``'s local zone (`CreditsPacing.monthBoundaryLabels`).
     public let monthBounds: (start: String, end: String)?
 
     public init(spent: Money, limit: Money?, bar: BarLayout?, resetLine: String?,
@@ -170,19 +154,19 @@ public struct CreditsRow: Sendable, Equatable {
 // MARK: - PopupLayout
 
 /// The pure, AppKit-free model of the click-to-open popup for one usage snapshot — the testable
-/// core behind `PopupViewController` (issue #11).
+/// core behind `PopupViewController`.
 ///
-/// Mirrors `MenuBarLayout` (#10): `make(...)` is **stateless and deterministic** (`now`,
-/// `lastUpdate`, `interval` are injected) and adds **no new pacing arithmetic** — it reuses
-/// `PacingModel` and `ResetClock`. The struct computes *what* to show; the thin `NSViewController`
-/// shell in `TokenPace` does *how* (ADR-0009).
+/// Mirrors `MenuBarLayout`: `make(...)` is **stateless and deterministic** (`now`, `lastUpdate`,
+/// `interval` are injected) and adds **no new pacing arithmetic** — it reuses `PacingModel` and
+/// `ResetClock`. The struct computes *what* to show; the thin `NSViewController` shell in
+/// `TokenPace` does *how* (ADR-0009).
 ///
 /// The service-line values (`lastUpdateAge`, `intervalSeconds`) are **raw seconds** — the view
 /// formats them ("just now", "3m") so a future localisation touches only the view.
 ///
-/// Issue #12 adds ``warning``: when a poll is failing, the popup shows a two-line banner
-/// **immediately** (no 30-min threshold — that gate is the menu bar's, not the popup's), above the
-/// possibly-stale ``rows``. A healthy layout leaves it `nil`.
+/// ``warning``: when a poll is failing, the popup shows a two-line banner **immediately** (no
+/// 30-min threshold — that gate is the menu bar's, not the popup's), above the possibly-stale
+/// ``rows``. A healthy layout leaves it `nil`.
 public struct PopupLayout: Sendable, Equatable {
     /// Age of the last successful 200, in seconds (clamped ≥ 0). Drives "Last update: …".
     public let lastUpdateAge: TimeInterval
@@ -193,42 +177,37 @@ public struct PopupLayout: Sendable, Equatable {
     /// (e.g. `Fable`). Absent models are simply not in the array (null-safe). Empty on a
     /// cold-start failure (no snapshot yet — the warning stands alone).
     public let rows: [LimitRow]
-    /// The current failure cause when a poll is failing, else `nil`. Drives the popup warning banner
-    /// (issue #12); the view turns it into the two-line title/detail (the localisation seam).
+    /// The current failure cause when a poll is failing, else `nil`. Drives the popup warning banner;
+    /// the view turns it into the two-line title/detail (the localisation seam).
     public let warning: FailureReason?
     /// The Claude service status (two component states), or `nil` until the first status poll has
-    /// succeeded (issue #31). When `nil`, the view shows **no** status lines (cold start); otherwise
-    /// it renders one line per component with a colour dot and a linked status word — the view is
-    /// the localisation/colour seam, this layer carries only the semantic ``ServiceStatus`` values.
-    /// Independent of `warning`: the usage poll and the status poll fail and succeed separately.
+    /// succeeded. When `nil`, the view shows **no** status lines (cold start); otherwise it renders
+    /// one line per component with a colour dot and a linked status word. Independent of `warning`:
+    /// the usage poll and the status poll fail and succeed separately.
     public let serviceStatus: StatusHealth?
     /// Age of the **GitHub** provider's last successful status poll, in seconds, or `nil` when it has
-    /// never succeeded or the provider is not monitored (#454).
+    /// never succeeded or the provider is not monitored.
     ///
     /// Its own field rather than a reuse of ``lastUpdateAge``: GitHub polls on a cadence of its own,
-    /// so Claude's age says nothing about it, and one number standing for two independently-polled
-    /// sources would be the kind of quiet lie `withStatusAge`'s docblock already refuses.
+    /// so Claude's age says nothing about it.
     public let githubStatusAge: TimeInterval?
-    /// The **GitHub** provider's visible incidents (#454), rendered on its own plate under Option.
+    /// The **GitHub** provider's visible incidents, rendered on its own plate under Option.
     ///
-    /// Separate from ``incidents``, which stays Claude's. One list would put a GitHub outage under
-    /// the Claude header — the exact attribution error two plates exist to prevent, and one the
-    /// incident rows cannot correct on their own because they deliberately do not name the services
-    /// they affect (ADR-0071 §3).
+    /// Separate from ``incidents``, which stays Claude's — one list would put a GitHub outage under
+    /// the Claude header, and the incident rows deliberately do not name the services they affect
+    /// (ADR-0071 §3), so they cannot self-correct that attribution.
     public let githubIncidents: [VisibleIncident]
-    /// The "Extra usage" money-credits section (#145), or `nil` when credits are inactive for this
+    /// The "Extra usage" money-credits section, or `nil` when credits are inactive for this
     /// snapshot (`snapshot.spend == nil` or `!CreditsPacing.isActive`). A **separate** field from
-    /// ``rows`` — a credits section is not a limit window (see ``CreditsRow``). The view renders it as
-    /// its own "Extra usage" block below the limit rows.
+    /// ``rows`` — a credits section is not a limit window (see ``CreditsRow``).
     public let credits: CreditsRow?
     /// Which one reset the view should highlight in **red** as the **blocking** reset — the reset that
-    /// actually unblocks work. Set in two cases (#158, #193):
-    /// - **Blocked** (no path to work: idle-blocked, or active with a main window exhausted and credits not
-    ///   covering) — the "last stand" pick (`BlockingReset.forBlocked`), which may be the credits reset.
-    /// - **Subscription-exhausted while credits cover** (`CreditsPacing.subscriptionExhaustedWhileCovered`,
-    ///   #193) — the latest exhausted **token** reset (`BlockingReset.forSubscriptionExhausted`); never the
-    ///   credits reset, since credits are the cover, not the blocker. Not blocked (work continues on the
-    ///   paid tier), but the red badge marks when the plan quota returns and credits stop being spent.
+    /// actually unblocks work. Set in two cases:
+    /// - **Blocked** (no path to work: idle-blocked, or active with a main window exhausted and credits
+    ///   not covering) — the "last stand" pick (`BlockingReset.forBlocked`), which may be the credits reset.
+    /// - **Subscription-exhausted while credits cover** (`CreditsPacing.subscriptionExhaustedWhileCovered`)
+    ///   — the latest exhausted **token** reset (`BlockingReset.forSubscriptionExhausted`); never the
+    ///   credits reset, since credits are the cover, not the blocker.
     ///
     /// `nil` in every other state. When non-`nil`:
     /// - ``BlockingReset/Choice/token(id:resetsAt:)`` — `id` is the index into ``rows`` whose reset
@@ -241,81 +220,73 @@ public struct PopupLayout: Sendable, Equatable {
     /// The index in ``rows`` at which the **per-model / per-service** rows begin — the first row after
     /// the base `5h`/`7d` pair, i.e. `2` on a normal snapshot. Rows before it are the base limits and
     /// are never gated; rows from here on are the optional group governed by
-    /// ``PopupSectionVisibility`` (#211). Equal to ``rows``'s count when a snapshot carries no
-    /// per-model windows (empty group).
+    /// ``PopupSectionVisibility``. Equal to ``rows``'s count when a snapshot carries no per-model
+    /// windows (empty group).
     ///
-    /// The group is expressed as an **index** rather than by dropping the rows here because
-    /// `BlockingReset` keys its `.token(id:)` pick to the *full* row order (`0` = 5h, `1` = 7d, then the
-    /// per-model windows) and the view matches it with `id == index`. Filtering in this layer would
-    /// renumber the rows the view enumerates and mis-paint the red blocking-reset badge; the view
-    /// therefore hides rows while keeping their original indices.
+    /// Expressed as an **index** rather than by dropping the rows here because `BlockingReset` keys
+    /// its `.token(id:)` pick to the *full* row order (`0` = 5h, `1` = 7d, then per-model) and the
+    /// view matches it with `id == index`. Filtering here would renumber the rows and mis-paint the
+    /// red blocking-reset badge; the view hides rows while keeping their original indices.
     public let perModelRowsStart: Int
 
     /// Whether any **per-model / per-service** row is orange or red (`PacingSeverity.isNonCalm`) — the
     /// "is this group worth attention?" input to ``PopupSectionVisibility/shows(isNonCalm:isAboveZero:optionHeld:)``.
-    /// `false` when the group is empty. Computed here (the pure layer) so the view needs no pacing
-    /// knowledge, and recomputed on every poll like the rows themselves.
+    /// `false` when the group is empty.
     public let perModelRowsAreNonCalm: Bool
 
     /// Whether any **per-model / per-service** row has been used at all (`utilization > 0`) — the
     /// "is there anything in this group?" input to ``PopupSectionVisibility/aboveZero``. `false` when
     /// the group is empty or every row sits at a flat zero.
     ///
-    /// Deliberately independent of ``perModelRowsAreNonCalm``: this reads the raw value, that reads the
-    /// pacing verdict, and early in a 7-day window a 2 % row is simultaneously above zero *and* orange.
-    /// Only the base rows are excluded, exactly as in the non-calm flag.
+    /// Independent of ``perModelRowsAreNonCalm``: this reads the raw value, that reads the pacing
+    /// verdict, and early in a 7-day window a 2 % row is simultaneously above zero *and* orange.
     public let perModelRowsAreAboveZero: Bool
 
     /// Whether the **Extra usage** credits section is orange or red — `credits.bar`'s severity, or
-    /// `false` when there is no credits section or it is unlimited (`bar == nil`, nothing to pace, so
-    /// nothing to be alarmed about).
+    /// `false` when there is no credits section or it is unlimited (`bar == nil`, nothing to pace).
     public let creditsIsNonCalm: Bool
 
     /// Whether any money has been spent this period (`credits.spent` non-zero), or `false` when there
     /// is no credits section.
     ///
-    /// Reads ``CreditsRow/spent`` and **not** ``CreditsRow/bar`` — that distinction is the whole reason
-    /// this flag exists. An unlimited money cap (`spend.limit == null`) produces no bar and therefore no
-    /// severity, so ``creditsIsNonCalm`` is permanently `false` there and a `nonCalm` gate would hide a
-    /// paying user's spend forever. `spent` is always present (`spentMoney(from:)` falls back to a zero
-    /// amount), so this stays meaningful in every credits state.
+    /// Reads ``CreditsRow/spent`` and **not** ``CreditsRow/bar``: an unlimited money cap produces no
+    /// bar and therefore no severity, so ``creditsIsNonCalm`` is permanently `false` there and a
+    /// `nonCalm` gate would hide a paying user's spend forever. `spent` is always present
+    /// (`spentMoney(from:)` falls back to a zero amount), so this stays meaningful in every state.
     public let creditsIsAboveZero: Bool
 
     /// The Claude Code sessions awaiting user input to advertise flush-right in the "Claude" section
-    /// header (#233, ADR-0066), or `nil` to draw nothing. `nil` whenever the feature is off, the count
-    /// is `0`, or the watcher isn't running. When non-`nil` (count `≥ 1`) the popup draws a
-    /// `hand.raised` icon tinted by ``AwaitingSessions/urgency``; a count of `1` shows the bare icon,
-    /// `≥ 2` appends the count. Clicking the block opens the per-project breakdown
-    /// (``AwaitingSessions/perProject``). Sourced by the shell from `AwaitingInputWatcher`,
-    /// independent of the usage snapshot, so it's supplied to `make` rather than derived from it.
+    /// header (ADR-0066), or `nil` to draw nothing. `nil` whenever the feature is off, the count is
+    /// `0`, or the watcher isn't running. When non-`nil` (count `≥ 1`) the popup draws a `hand.raised`
+    /// icon tinted by ``AwaitingSessions/urgency``; a count of `1` shows the bare icon, `≥ 2` appends
+    /// the count. Clicking the block opens the per-project breakdown (``AwaitingSessions/perProject``).
+    /// Sourced by the shell from `AwaitingInputWatcher`, independent of the usage snapshot.
     public let awaitingInput: AwaitingSessions?
 
     /// The short plan label shown in brand colour right after "Claude" in the header (e.g. "Max (5x)"),
     /// or `nil` to draw just "Claude". Derived from the Keychain `rateLimitTier` via
-    /// ``claudePlanLabel(rateLimitTier:)`` — like ``awaitingInput``, it comes from a source outside the
-    /// usage snapshot (the OAuth payload), so the shell grafts it on via ``withPlanLabel(_:)`` rather
-    /// than threading it through `make`.
+    /// ``claudePlanLabel(rateLimitTier:)`` — comes from the OAuth payload, not the usage snapshot, so
+    /// the shell grafts it on via ``withPlanLabel(_:)`` rather than threading it through `make`.
     public let planLabel: String?
 
-    /// The status-page incidents worth showing (#279), already filtered by ``IncidentVisibility``.
-    /// Empty on every ordinary frame. Like ``planLabel`` and ``awaitingInput`` these arrive on the
-    /// status poll's own cadence rather than with the usage snapshot, so the shell grafts them on via
-    /// ``withIncidents(_:)`` instead of threading them through `make`.
+    /// The status-page incidents worth showing, already filtered by ``IncidentVisibility``. Empty on
+    /// every ordinary frame. Arrives on the status poll's own cadence rather than with the usage
+    /// snapshot, so the shell grafts it on via ``withIncidents(_:)`` instead of threading it through `make`.
     public let incidents: [VisibleIncident]
 
     /// What the single subscribe row should show, or `nil` when there is nothing to subscribe to and
-    /// the row is omitted entirely (#279).
+    /// the row is omitted entirely.
     public let subscription: EpisodeSubscriptionState?
 
-    /// What the user currently monitors (#341) — the popup's own copy of the mode the menu bar shows
-    /// as `zzz` or ⚠️. The view uses it to swap the red failure banner for a plain explanation, to
-    /// keep the service rows visible while everything is green, and to read ``lastUpdateAge`` as the
-    /// age of the *status* poll rather than the usage poll.
+    /// What the user currently monitors — the popup's own copy of the mode the menu bar shows as
+    /// `zzz` or ⚠️. The view uses it to swap the red failure banner for a plain explanation, to keep
+    /// the service rows visible while everything is green, and to read ``lastUpdateAge`` as the age
+    /// of the *status* poll rather than the usage poll.
     public let monitoringMode: MonitoringMode
 
-    /// Which data sources are switched on (#341).
+    /// Which data sources are switched on.
     public enum MonitoringMode: Sendable, Equatable {
-        /// The usage API is polled — the ordinary case, and every layout that predates #341.
+        /// The usage API is polled — the ordinary case.
         case usageAndServices
         /// The usage poll is off; status-page services are still watched.
         case servicesOnly
@@ -326,16 +297,14 @@ public struct PopupLayout: Sendable, Equatable {
     /// The weekly window has no reset instant and none can be reconstructed — a cold start that has
     /// never seen one (ADR-0107). Every row is withheld while this is `true`.
     ///
-    /// **Not a ``FailureReason``.** That enum is the taxonomy of polling failures, and nothing has
-    /// failed here: the request returned 200 and the body was well-formed. The API simply has not
-    /// created a weekly window yet, because no tokens have been spent. Dressing it as
-    /// `.serverProblem` would show "Usage API unavailable", sending the user to check their network
-    /// when the actual fix is to start working — the opposite of useful.
+    /// **Not a ``FailureReason``.** Nothing has failed: the request returned 200 and the body was
+    /// well-formed. The API simply has not created a weekly window yet, because no tokens have been
+    /// spent. Dressing it as `.serverProblem` would show "Usage API unavailable", sending the user to
+    /// check their network when the actual fix is to start working.
     ///
     /// Rows are withheld rather than partially drawn because the emptiness cascades: the per-model
-    /// windows (`Fable`, `Opus`, `Sonnet`) inherit the weekly reset, so they would all render with a
-    /// time marker pinned to the far edge — `elapsedFraction` returns `1.0` for an unparseable reset.
-    /// Showing nothing and saying why beats showing four wrong bars.
+    /// windows inherit the weekly reset, so they would all render with a time marker pinned to the
+    /// far edge — `elapsedFraction` returns `1.0` for an unparseable reset.
     public let weeklyResetUnknown: Bool
 
     public init(
@@ -367,8 +336,8 @@ public struct PopupLayout: Sendable, Equatable {
         self.serviceStatus = serviceStatus
         self.credits = credits
         self.blockingReset = blockingReset
-        // Default: the two base rows come first, so the per-model group starts at 2 — clamped for the
-        // short `rows` a cold start / broken-data layout carries (empty, or fewer than two rows).
+        // Default: the two base rows come first, so the group starts at 2 — clamped for a short
+        // `rows` (cold start / broken-data layout: empty, or fewer than two rows).
         self.perModelRowsStart = perModelRowsStart ?? min(2, rows.count)
         self.perModelRowsAreNonCalm = perModelRowsAreNonCalm
         self.perModelRowsAreAboveZero = perModelRowsAreAboveZero
@@ -384,12 +353,8 @@ public struct PopupLayout: Sendable, Equatable {
         self.githubIncidents = githubIncidents
     }
 
-    /// A copy of this layout with **one** field replaced, everything else carried over.
-    ///
-    /// Every `with*` helper below routes through here. They used to reconstruct the whole value by
-    /// hand, which is a standing trap: the compiler cannot tell a dropped field from an intentional
-    /// omission, so a field added by one branch and a helper touched by another merge cleanly into
-    /// a layout that silently loses data. One copy point means adding a field is one edit.
+    /// A copy of this layout with **one** field replaced, everything else carried over. Every `with*`
+    /// helper below routes through here so adding a field is one edit, not one edit per helper.
     private func copy(
         lastUpdateAge: TimeInterval? = nil,
         awaitingInput: AwaitingSessions?? = nil,
@@ -417,33 +382,27 @@ public struct PopupLayout: Sendable, Equatable {
             githubIncidents: githubIncidents ?? self.githubIncidents)
     }
 
-    /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
-    /// (#233). The shell calls this on the `make(...)` result so the awaiting indicator — sourced
-    /// from `AwaitingInputWatcher`, not the usage snapshot — doesn't have to thread through `make`.
+    /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged.
+    /// The shell calls this on the `make(...)` result so the awaiting indicator — sourced from
+    /// `AwaitingInputWatcher`, not the usage snapshot — doesn't have to thread through `make`.
     public func withAwaitingInput(_ awaitingInput: AwaitingSessions?) -> PopupLayout {
         copy(awaitingInput: .some(awaitingInput))
     }
 
-    /// A copy of this layout with the status-page incidents grafted on, everything else unchanged
-    /// (#279). Incidents ride the status poll, not the usage poll, so the shell calls this on the
-    /// `make(...)` result exactly as it does for the awaiting-input breakdown.
+    /// A copy of this layout with the status-page incidents grafted on, everything else unchanged.
+    /// Incidents ride the status poll, not the usage poll.
     public func withIncidents(_ incidents: [VisibleIncident]) -> PopupLayout {
         copy(incidents: incidents)
     }
 
-    /// A copy of this layout with the subscribe row's state grafted on (#279). `nil` omits the row.
+    /// A copy of this layout with the subscribe row's state grafted on. `nil` omits the row.
     public func withSubscription(_ subscription: EpisodeSubscriptionState?) -> PopupLayout {
         copy(subscription: .some(subscription))
     }
 
     /// A copy of this layout whose ``lastUpdateAge`` is measured from the **status** poll instead of
-    /// the usage poll (#341) — used only in ``MonitoringMode/servicesOnly``, where the usage clock is
+    /// the usage poll — used only in ``MonitoringMode/servicesOnly``, where the usage clock is
     /// deliberately stopped and reporting its age would be a lie ("0 s ago" for data nobody fetched).
-    ///
-    /// A graft rather than a `make` parameter, following ``withIncidents(_:)`` and
-    /// ``withSubscription(_:)``: like those, this value rides the status poll's own cadence, so it
-    /// arrives outside the usage snapshot and threading it through `make` would touch every call site
-    /// for a value most of them do not have.
     ///
     /// `nil` means the status poll has not landed yet — the common case on entry to the mode, since
     /// the shell clears its status clock at exactly that moment. The age then stays `0` and the view
@@ -460,13 +419,13 @@ public struct PopupLayout: Sendable, Equatable {
         copy(planLabel: .some(planLabel))
     }
 
-    /// A copy carrying the GitHub status poll's age (#454) — grafted on like the plan label, since it
-    /// comes from the shell's own poll bookkeeping rather than from any usage snapshot.
+    /// A copy carrying the GitHub status poll's age, grafted on like the plan label, since it comes
+    /// from the shell's own poll bookkeeping rather than from any usage snapshot.
     public func withGitHubStatusAge(_ age: TimeInterval?) -> PopupLayout {
         copy(githubStatusAge: .some(age.map { max(0, $0) }))
     }
 
-    /// A copy carrying GitHub's visible incidents (#454), grafted like Claude's.
+    /// A copy carrying GitHub's visible incidents, grafted like Claude's.
     public func withGitHubIncidents(_ incidents: [VisibleIncident]) -> PopupLayout {
         copy(githubIncidents: incidents)
     }
@@ -476,15 +435,14 @@ public struct PopupLayout: Sendable, Equatable {
     /// Build the popup layout from one usage snapshot at instant `now`.
     ///
     /// - Parameters:
-    ///   - snapshot: A decoded usage poll (`UsageClient`/#9).
+    ///   - snapshot: A decoded usage poll (`UsageClient`).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
-    ///   - lastUpdate: Instant of the last successful 200 (→ `lastUpdateAge`). Mock today; real with #13.
-    ///   - interval: Current polling interval in seconds (`PollingBackoff.interval`). Mock today.
+    ///   - lastUpdate: Instant of the last successful 200 (→ `lastUpdateAge`).
+    ///   - interval: Current polling interval in seconds (`PollingBackoff.interval`).
     ///
-    /// The per-model rows are **always** built (#211 → the tri-state `PopupSectionVisibility`): whether
-    /// they are drawn is the view's call, since it depends on the live ⌥ Option state, which changes
-    /// while the menu is open and without a re-poll. ``perModelRowsStart`` and
-    /// ``perModelRowsAreNonCalm`` carry everything the view needs to decide.
+    /// The per-model rows are **always** built: whether they are drawn is the view's call, since it
+    /// depends on the live ⌥ Option state, which changes while the menu is open and without a
+    /// re-poll. ``perModelRowsStart`` and ``perModelRowsAreNonCalm`` carry everything the view needs.
     public static func make(
         from snapshot: UsageSnapshot,
         now: Date,
@@ -511,9 +469,8 @@ public struct PopupLayout: Sendable, Equatable {
 
     /// Build the popup from the last known snapshot **and** the polling health.
     ///
-    /// The entry point the live loop (#13) calls. Unlike the menu bar's staged thresholds, the popup
-    /// warns the moment a failure is in progress (SPEC: "on any non-working authorization …
-    /// immediately"):
+    /// The entry point the live loop calls. Unlike the menu bar's staged thresholds, the popup warns
+    /// the moment a failure is in progress (SPEC: "on any non-working authorization … immediately"):
     /// - ``warning`` = `health.reason` whenever `health.isFailing`, else `nil`.
     /// - ``lastUpdateAge`` is measured from `health.lastSuccess` so the service line shows how stale
     ///   the data is (clamped `≥ 0`; `0` on a cold start where there is no last success).
@@ -525,16 +482,15 @@ public struct PopupLayout: Sendable, Equatable {
     ///   - health: The polling-health context (last success, failure start, reason).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
     ///   - interval: Current polling interval in seconds (`PollingBackoff.interval`).
-    ///   - serviceStatus: The latest Claude service status (issue #31), or `nil` until the first
-    ///     status poll has succeeded (the status loop is independent of the usage poll). Threaded
-    ///     through unchanged — the view renders it.
+    ///   - serviceStatus: The latest Claude service status, or `nil` until the first status poll has
+    ///     succeeded (the status loop is independent of the usage poll). Threaded through unchanged.
+    ///   - monitoringAnything: Whether anything is monitored at all. `false` produces a layout with
+    ///     no rows and no red banner — nothing is broken, so the view explains the state in words
+    ///     instead. Default `true`.
     ///
     /// As in the other overload, the per-model rows are always built; ``perModelRowsStart`` /
     /// ``perModelRowsAreNonCalm`` / ``creditsIsNonCalm`` let the view apply the user's
-    /// ``PopupSectionVisibility`` against the live ⌥ state (#211).
-    ///   - monitoringAnything: Whether anything is monitored at all (#341). `false` produces a layout
-    ///     with no rows and no red banner — nothing is broken, so the view explains the state in
-    ///     words instead. Default `true`.
+    /// ``PopupSectionVisibility`` against the live ⌥ state.
     public static func make(
         from snapshot: UsageSnapshot?,
         health: UsageHealth,
@@ -545,10 +501,10 @@ public struct PopupLayout: Sendable, Equatable {
     ) -> PopupLayout {
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
 
-        // #341, ahead of every failure branch below — for the same reason as in `MenuBarLayout`: these
-        // are user choices, and the failure machinery would otherwise dress them up as breakage. In
-        // both modes there are no rows: whatever snapshot survived is not being refreshed, and drawing
-        // bars from it would present frozen numbers as current.
+        // Ahead of every failure branch below: monitoring mode is a user choice, and the failure
+        // machinery would otherwise dress it up as breakage. In both modes there are no rows:
+        // whatever snapshot survived is not being refreshed, and drawing bars from it would present
+        // frozen numbers as current.
         //
         // `lastUpdateAge` starts from the usage clock and is replaced by `withStatusAge(_:)` in the
         // services-only mode — the shell owns that value, since it is the one polling the status page.
@@ -564,15 +520,13 @@ public struct PopupLayout: Sendable, Equatable {
         }
 
         // A malformed **current** 200 body — an active window with a non-empty, unparseable `resets_at`
-        // (`hasBrokenActiveReset`, #167/ADR-0043). Unlike a *health* failure (where the last **good**
+        // (`hasBrokenActiveReset`, ADR-0043). Unlike a *health* failure (where the last **good**
         // snapshot's stale rows are still worth showing), here the current snapshot itself is corrupt, so
         // there is nothing trustworthy to render: show **only** the red warning banner (`.serverProblem`),
         // with no limit rows / credits / blocking-reset — the same shape as a cold-start failure.
         //
-        // Note the guard is `!isFailing`, which #341's third state would also satisfy: a stale snapshot
-        // with a broken reset would raise a red server-problem banner in a mode where nothing is being
-        // fetched. The monitoring branches above return before reaching here, which is why this line
-        // needs no condition of its own.
+        // The guard is `!isFailing`, which the "nothing monitored" state would also satisfy; the
+        // monitoring branches above already return before reaching here.
         let brokenData = !health.isFailing && (snapshot?.hasBrokenActiveReset == true)
         if brokenData {
             return PopupLayout(
@@ -582,15 +536,11 @@ public struct PopupLayout: Sendable, Equatable {
 
         // No weekly reset at all, and no anchor to reconstruct one from (ADR-0107) — a cold start
         // that has never seen a token spent. Deliberately **not** a `warning`: the poll succeeded and
-        // the body was valid, so the failure vocabulary would misdescribe it and send the user to
-        // check their network. Rows are withheld for the same reason as `brokenData` above: the
-        // per-model windows inherit the empty weekly reset, so every one of them would draw a marker
-        // pinned to the far edge. `hasBrokenActiveReset` does not catch this — it requires
-        // `utilization > 0` and a *non-empty* unparseable string, and here both are the opposite.
-        // The `utilization == 0` half mirrors `MenuBarLayout`: a blank date beside real usage is a
-        // different state, where the numbers are still worth drawing and only the countdown is
-        // missing. Both surfaces must agree, or the widget and the popup would describe one snapshot
-        // two different ways.
+        // the body was valid, so the failure vocabulary would misdescribe it. Rows are withheld for
+        // the same reason as `brokenData` above: the per-model windows inherit the empty weekly
+        // reset, so every one would draw a marker pinned to the far edge. `hasBrokenActiveReset` does
+        // not catch this — it requires `utilization > 0` and a *non-empty* unparseable string.
+        // The `utilization == 0` half mirrors `MenuBarLayout`, so both surfaces agree on this state.
         if !health.isFailing,
            snapshot?.sevenDay.resetsAt.isEmpty == true,
            snapshot?.sevenDay.utilization == 0 {
@@ -647,10 +597,10 @@ public struct PopupLayout: Sendable, Equatable {
 
     /// The ordered limit sections for a snapshot: `5h`, `7d`, then any present per-model rows: the
     /// legacy top-level sub-windows (`Opus`/`Sonnet`, null-safe) followed by the `weekly_scoped` models
-    /// from `limits[]` (e.g. `Fable`, #65; already deduped against the legacy rows by
+    /// from `limits[]` (e.g. `Fable`; already deduped against the legacy rows by
     /// ``UsageSnapshot/scopedModelWindows``). All per-model rows are paced as `.sevenDay`.
     ///
-    /// The per-model rows are **always** included — visibility is the view's decision (#211, see
+    /// The per-model rows are **always** included — visibility is the view's decision (see
     /// ``PopupSectionVisibility``), and dropping them here would renumber the indices `BlockingReset`
     /// depends on.
     ///
@@ -658,9 +608,9 @@ public struct PopupLayout: Sendable, Equatable {
     private static func rows(
         from snapshot: UsageSnapshot, now: Date
     ) -> [LimitRow] {
-        // The 5-hour row is the idle placeholder when the window has no active session (#100); every
-        // other row is built normally, including the 7-day one (which always exists). When idle is also
-        // **blocked** (#158) the placeholder carries `sessionBlocked` so the view greys it and swaps the
+        // The 5-hour row is the idle placeholder when the window has no active session; every other
+        // row is built normally, including the 7-day one (which always exists). When idle is also
+        // **blocked** the placeholder carries `sessionBlocked` so the view greys it and swaps the
         // status word to "waiting for limit reset". (An *active* fully-exhausted 5h row is not idle, so
         // it shows the normal "limit reached" — only the red blocking-reset badge marks it, via
         // `blockingReset`.)
@@ -671,9 +621,8 @@ public struct PopupLayout: Sendable, Equatable {
         //
         // Per-model rows do **not** take this gate — they are slices of that same week, so the advice
         // would be addressed to itself, and they pass `false` outright (reason 2 on
-        // `BarLayout.blueAllowed`). They used to take it, which let the model report blue while the
-        // popup silenced them again through `PopupBarView.isBaseLimit` — and the journal, which reads
-        // the model, recorded blues that were never on screen.
+        // `BarLayout.blueAllowed`). Letting them take it lets the model report blue while the popup
+        // silences it again through `PopupBarView.isBaseLimit`, and the journal records a blue never on screen.
         let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: snapshot, now: now)
         var rows: [LimitRow] = [
             snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
@@ -696,11 +645,10 @@ public struct PopupLayout: Sendable, Equatable {
     ///
     /// ## Show gate — deliberately softer than the menu-bar icon's
     /// The menu-bar credits **icon** shows only when `CreditsPacing.shouldShowIcon` holds — credits
-    /// active **and** a base limit exhausted (a glanceable badge should be quiet until the paid tier is
-    /// actually in play). The **dropdown** is the detail view the user has explicitly opened, so the
-    /// gate is only ``CreditsPacing/isActive(_:)`` (`enabled` **or** `spend_limit_reached`): once
-    /// credits are switched on, showing the amount spent is useful even before a plan limit is spent.
-    /// We do **not** additionally require `baseLimitExhausted` here (that stays the icon's concern).
+    /// active **and** a base limit exhausted. The **dropdown** is the detail view the user has
+    /// explicitly opened, so the gate is only ``CreditsPacing/isActive(_:)`` (`enabled` **or**
+    /// `spend_limit_reached`): once credits are switched on, showing the amount spent is useful even
+    /// before a plan limit is spent. `baseLimitExhausted` is not additionally required (icon's concern).
     ///
     /// ## Shape
     /// - `spent` is `spend.used` (exact ``Money``); when absent, it is reconstructed from the
@@ -719,13 +667,11 @@ public struct PopupLayout: Sendable, Equatable {
             ResetClock.resetLine(resetsAt: $0, now: now, verbose: true)
         }
         // "active" badge = credits are actually being spent right now — `isSpending` (enabled AND not
-        // capped AND a main window exhausted). Deliberately stricter than the icon's `shouldShowIcon`:
-        // once the money cap is reached the server disables credits (Claude is blocked), so the badge
-        // must NOT claim they are active even though the icon still shows (red "ceiling hit"). It also
-        // uses `mainWindowExhausted` — NOT the icon's wider `anyBaseLimitExhausted` — so only the two
-        // windows that actually gate work (5h / 7d) turn it "active": a per-model row at 100 %
-        // (Opus / Sonnet / a scoped model like Fable or Mythos) does not put credits in use, since work
-        // isn't blocked and nothing has overflowed onto the paid tier yet.
+        // capped AND a main window exhausted). Stricter than the icon's `shouldShowIcon`: once the
+        // money cap is reached the server disables credits, so the badge must NOT claim they're
+        // active even though the icon still shows (red "ceiling hit"). Uses `mainWindowExhausted` —
+        // NOT the icon's wider `anyBaseLimitExhausted` — so only the windows that actually gate work
+        // (5h / 7d) turn it "active": a per-model row at 100% does not put credits in use.
         let inUse = CreditsPacing.isSpending(
             spend, baseLimitExhausted: CreditsPacing.mainWindowExhausted(in: snapshot))
         // Boundary captions for the bar's own ruler — only when there *is* a bar to caption.
@@ -748,11 +694,11 @@ public struct PopupLayout: Sendable, Equatable {
         return Money(amountMinor: minor, currency: currency, exponent: exponent)
     }
 
-    /// The idle 5-hour placeholder row (#100, ADR-0027): title `"5-hour"`, `sessionIdle: true`, the
-    /// reset line `nil`, and an inert zeroed bar (the view draws a grey track plus a zero pill and skips
+    /// The idle 5-hour placeholder row (ADR-0027): title `"5-hour"`, `sessionIdle: true`, the reset
+    /// line `nil`, and an inert zeroed bar (the view draws a grey track plus a zero pill and skips
     /// the second line). `subdivisions` stays the 5-hour value so the under-bar tick ruler keeps the
-    /// row's anatomy in family with the active rows; the numeric fields are placeholders the idle render
-    /// path ignores.
+    /// row's anatomy in family with the active rows; the numeric fields are placeholders the idle
+    /// render path ignores.
     private static func idleFiveHourRow(blocked: Bool = false) -> LimitRow {
         LimitRow(
             title: "5-hour",
@@ -768,20 +714,20 @@ public struct PopupLayout: Sendable, Equatable {
             sessionBlocked: blocked)
     }
 
-    /// The blocking reset for the popup (#158) — `nil` unless the snapshot is **blocked** (no path to
+    /// The blocking reset for the popup — `nil` unless the snapshot is **blocked** (no path to
     /// work: idle-blocked, or an active state with both 5h and 7d exhausted and credits not covering;
     /// ``CreditsPacing/isBlocked(in:)``). Delegates to the shared ``BlockingReset/forBlocked(snapshot:now:)``
     /// so the popup badge and the menu-bar countdown pick the same reset. The returned
     /// ``BlockingReset/Choice`` carries a popup **row index** (`token(id:)`) or the credits section
     /// (`credits`) — the view maps it to the one reset line it paints as a red badge.
     private static func blockingReset(from snapshot: UsageSnapshot, now: Date) -> BlockingReset.Choice? {
-        // Blocked (no path to work: idle-blocked, or active with a main window exhausted and credits not
-        // covering) → the "last stand" pick, which may be the credits reset (#158).
+        // Blocked (no path to work: idle-blocked, or active with a main window exhausted and credits
+        // not covering) → the "last stand" pick, which may be the credits reset.
         if CreditsPacing.isBlocked(in: snapshot) {
             return BlockingReset.forBlocked(snapshot: snapshot, now: now)
         }
-        // Not blocked, but a subscription limit is exhausted **and** paid credits are covering the work
-        // (#193): still surface a red badge on the blocking subscription limit's reset — the moment the
+        // Not blocked, but a subscription limit is exhausted **and** paid credits are covering the
+        // work: still surface a red badge on the blocking subscription limit's reset — the moment the
         // plan quota returns and credits stop being spent. Never the credits reset here (credits are the
         // *cover*, not the blocker), so this uses the token-only `forSubscriptionExhausted`.
         if CreditsPacing.subscriptionExhaustedWhileCovered(in: snapshot) {

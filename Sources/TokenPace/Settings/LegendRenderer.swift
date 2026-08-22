@@ -6,54 +6,43 @@ import TokenPaceKit
 /// Draws the specimens the **Legend** pane shows — with the real widget and bar code, at runtime,
 /// exactly as the two `…PreviewRenderer`s do for the style tiles (ADR-0093, ADR-0097).
 ///
-/// A third renderer rather than an extension of those two, for the reason ADR-0097 gives for keeping
-/// *them* apart: each is pinned to the job it illustrates, and the concrete decisions differ. Those
-/// two answer "how do the three styles differ" and therefore hold one specimen frame constant across
-/// three renders. This one answers "what does each mark mean" and therefore varies the frame per row
-/// while holding the style constant. Merging them would mean a parameter for every axis both fix.
+/// A third renderer rather than an extension of those two: those answer "how do the three styles
+/// differ" and hold one specimen frame constant across three renders; this one answers "what does
+/// each mark mean" and varies the frame per row while holding the style constant.
 ///
-/// **Every state comes from ``LegendCatalog``**, which builds it through `PacingModel.barLayout`. The
-/// alternative — literals written here — is what the other two renderers explicitly refuse, and this
-/// page has more reason to refuse it than they do: a legend that disagreed with the model would be a
-/// reference that lies about the thing it references.
+/// **Every state comes from ``LegendCatalog``**, built through `PacingModel.barLayout` — literals
+/// written here would risk a legend that disagrees with the model it explains.
 @MainActor
 enum LegendRenderer {
 
     // MARK: Menu-bar widget
 
-    /// The widget drawn with `fiveHour` above `sevenDay`, either of which may be absent.
-    ///
-    /// Passing `nil` for the five-hour bar is how the "one bar" render is made, and it is not a trick:
-    /// `MenuBarMode.expanded` takes both as optionals precisely because `TopBarHiding` drops the calm
-    /// top bar in the live widget. The two Legend renders are therefore the same code path the app
-    /// takes, one frame apart, rather than a picture of a state and a picture of a different state.
+    /// The widget drawn with `fiveHour` above `sevenDay`, either of which may be absent. Passing
+    /// `nil` for the five-hour bar is not a trick — `MenuBarMode.expanded` takes both as optionals
+    /// precisely because `TopBarHiding` drops the calm top bar in the live widget.
     ///
     /// Baked under **VibrantDark always**, matching `BarStylePreviewRenderer`: the menu bar is a dark
-    /// vibrant surface under a light theme too, and system colours resolve differently there
-    /// (`labelColor` α 0.847 in DarkAqua against 0.898 in VibrantDark). A specimen baked for the
-    /// window's theme would show the widget against a backing it never has.
+    /// vibrant surface under a light theme too, and system colours resolve differently there. A
+    /// specimen baked for the window's theme would show the widget against a backing it never has.
     static func menuBarImage(fiveHour: BarLayout?, sevenDay: BarLayout?) -> NSImage {
         let view = StatusItemView(frame: .zero)
         // Without this the widget reserves the awaiting-input slot from `PersistedConfig`, so the
-        // specimen's width would depend on a setting the page is not talking about — and the two
-        // renders in the Menu bar section would shift relative to each other for an unrelated reason.
+        // specimen's width would depend on a setting the page is not talking about.
         view.isPreviewSpecimen = true
         view.layout = MenuBarLayout(mode: .expanded(
             fiveHour: fiveHour.map { BarView(layout: $0, indicator: .neutral, window: .fiveHour) },
             sevenDay: sevenDay.map { BarView(layout: $0, indicator: .neutral, window: .sevenDay) }))
-        // Balance: the default style, and the one that shows *direction* without a marker — which is
-        // what this section wants, since it is about how many bars there are, not where the marks sit.
+        // Balance: shows *direction* without a marker, which is what this section wants — how many
+        // bars there are, not where the marks sit.
         view.barStyle = .balance
-        // Full-strength colour, pinned rather than read from the user's setting: the section explains
-        // the calm/loud distinction elsewhere, and a specimen that muted itself here would illustrate
-        // the reader's configuration instead of the rule.
+        // Full-strength colour, pinned rather than read from the user's setting: a specimen that
+        // muted itself here would illustrate the reader's configuration instead of the rule.
         view.colorsTell = .howItsGoing
         // A specimen has no previous value to ease away from, so colours resolve straight to target.
         view.colorAnimator = nil
 
-        // Force-unwrapped for the reason `BarStylePreviewRenderer` states: `.vibrantDark` is a
-        // system-defined name that cannot be absent, and an optional-chained call would silently skip
-        // the render and leave a blank image with nothing to trace it to.
+        // Force-unwrapped: `.vibrantDark` is a system-defined name that cannot be absent, and an
+        // optional-chained call would silently skip the render and leave a blank image untraceable.
         let appearance = NSAppearance(named: .vibrantDark)!
         var image = NSImage()
         appearance.performAsCurrentDrawingAppearance { image = view.snapshotImage() }
@@ -65,18 +54,12 @@ enum LegendRenderer {
     /// One popup bar, drawn at `width` with no chrome around it.
     ///
     /// **Width is a parameter here**, unlike in `DropdownBarStylePreviewRenderer` where it is a
-    /// constant: the style tiles are a set of like-for-like comparisons and must share a width, while
-    /// this page draws a wide anatomy bar above narrow reading-rule bars, and the difference in length
-    /// is part of what distinguishes the two kinds of row.
+    /// constant: this page draws a wide anatomy bar above narrow reading-rule bars, and the
+    /// difference in length is part of what distinguishes the two kinds of row.
     ///
-    /// The scale is inset by `minStripWidth/2` at each end — a constant derived from the bar's height,
-    /// not its length — so a narrower bar spends proportionally more of itself on that inset and its
-    /// marks shift by up to ~2 % of the width. Measured and accepted in ADR-0097 for the 56 pt tile;
-    /// the same holds here. Shapes and their order are identical, which is what the rows are about.
     /// Whether a row may show blue rides on the `layout` the caller passes
-    /// (``BarLayout/blueAllowed``), as it does everywhere else since #426 — the legend's specimens
-    /// build theirs through `PacingModel.barLayout`, so a blue rung stays blue here without this
-    /// renderer having to claim anything about which rows are "base".
+    /// (``BarLayout/blueAllowed``) — the legend's specimens build theirs through
+    /// `PacingModel.barLayout`, so a blue rung stays blue here for free.
     static func dropdownBarImage(_ layout: BarLayout, style: BarStyle, width: CGFloat,
                                  subdivisions: Int = 0,
                                  showsRuler: Bool = false,
@@ -85,39 +68,22 @@ enum LegendRenderer {
         view.bar = layout
         view.subdivisions = subdivisions
         view.barStyle = style
-        // A step brighter than the popup's own track, and only here (#261). `monochromeGrey` is
-        // `tertiaryLabelColor` blended halfway toward `quaternary` — right on a vibrant card, where the
-        // track should be the absence of colour rather than a shape. On a Settings form that tone all
-        // but vanishes: the plate is flatter and there are no surrounding rows to say where the bar is.
-        //
-        // A **quarter** of the way back toward quaternary, not the whole way. Plain `tertiaryLabelColor`
-        // was tried first and overshot — the track stopped reading as backing and started competing with
-        // the coloured ribbon on top of it, which is the one thing on these bars that must be loudest.
-        // This lands between the two: visible as a shape, still quieter than anything it carries.
+        // A step brighter than the popup's own track, and only here (#261): `monochromeGrey` reads
+        // right on a vibrant card, but all but vanishes on a flat Settings form with no surrounding
+        // rows to say where the bar is. A **quarter** of the way toward quaternary, not the whole way
+        // — plain `tertiaryLabelColor` overshot and competed with the coloured ribbon on top.
         //
         // A **dynamic** colour, not a blend computed here: `blended` resolves against whatever
-        // appearance is current at the call site, and this runs before the `performAsCurrentDrawing`
-        // block below. Computing it inside the provider is the same shape `Palette.monochromeGrey`
-        // uses, and for the same reason — it is what makes the tone flip with the theme instead of
-        // freezing at whatever the theme was when the view was configured.
-        // The marker's halo, dialled down for the same surface reason as the track above. At full
-        // strength it blooms on a flat form, and this page has a callout pointing *at* the marker —
-        // a label naming a 7 pt mark should not sit under a glow twice that wide.
+        // appearance is current at the call site, which runs before `performAsCurrentDrawing` below —
+        // computing it inside the provider is what makes the tone flip with the theme.
+        // Dialled down for the same flat-form reason: at full strength the marker's halo blooms, and
+        // this page has a callout pointing *at* the marker.
         view.markerGlowScale = 0.4
-        // The coloured strip's own halo, faded for the same surface reason. The popup's glow is tuned
-        // to lift a ribbon off vibrant material; on this flat form the same light blooms across the
-        // page, and these specimens sit in a stacked list where one bar's bloom reaches the next row.
-        //
-        // A **strength** scale, unlike the marker's radius one above. The marker is a 7 pt mark with a
-        // callout pointing at it, so what mattered there was the halo not being wider than the thing
-        // being named. The strip has no such callout and is the widest coloured thing on the page —
-        // shrinking its halo would read as a different glow, while fading it reads as the same one,
-        // quieter, which is what a flat form needs.
+        // Same reason, a **strength** scale rather than radius: the strip has no callout and is the
+        // widest coloured thing on the page, so fading (not shrinking) reads as the same glow, quieter.
         view.stripGlowScale = 0.35
-        // Teeth at shipped size. Enlarging them was tried — the ruler is a named part on this page, and
-        // 2 × 5 pt of tertiary label is easy to miss — but a legend that redraws the thing it explains
-        // at a size the app never uses teaches the wrong picture, and the leader pointing at them does
-        // the job the extra pixels were for.
+        // Teeth at shipped size — a legend that redraws the thing it explains at a size the app never
+        // uses teaches the wrong picture; the leader pointing at them does the job extra pixels would.
         view.trackTint = NSColor(name: nil) { appearance in
             var mixed: NSColor = .tertiaryLabelColor
             appearance.performAsCurrentDrawingAppearance {
@@ -126,34 +92,22 @@ enum LegendRenderer {
             }
             return mixed
         }
-        // **The ruler is on for the anatomy bars**, unlike every other specimen in the app.
-        //
-        // ADR-0098 puts the teeth behind ⌥ because in the live dropdown they are the explanatory half
-        // of the ruler, and a bar that showed them unheld would be permanently louder than it needs to
-        // be. The style tiles keep them off for a second reason: a tile baked with ⌥ on advertises a
-        // state the row is not in.
-        //
-        // This page is the case both arguments were carving out. It exists to *name the parts*, and the
-        // ruler is one of them — a diagram captioned "ticks — hours / days" beside a bar with no ticks
-        // explains nothing. Off by default so the reading-rule bars, which are about the ribbon rather
-        // than the scale, stay uncluttered.
+        // **The ruler is on for the anatomy bars**, unlike every other specimen in the app: ADR-0098
+        // puts the teeth behind ⌥ in the live dropdown and the style tiles keep them off entirely, but
+        // this page exists to *name the parts*, and a diagram captioned "ticks" beside a bar with no
+        // ticks explains nothing. Off by default so reading-rule bars stay uncluttered.
         view.optionHeld = showsRuler
 
-        // **Tall enough for the ruler.** `viewHeight` is the marker's height and stops at the track's
-        // foot — #388 deliberately stripped the strip that used to be reserved for teeth, because the
-        // live popup only draws them under ⌥ and the reserved space read as padding the rest of the
-        // time. Here the ruler is always on, so a canvas that height clipped the teeth at 2 of their
-        // 5 pt: they looked like a smaller tick than the dropdown's rather than the same one, which is
-        // exactly the misreport a specimen must not make.
+        // **Tall enough for the ruler.** `viewHeight` stops at the track's foot (#388), so a canvas
+        // that height would clip the teeth to 2 of their 5 pt when the ruler is always on here.
         let rulerDepth: CGFloat = showsRuler ? PopupBarView.rulerDepth : 0
         let size = NSSize(width: width, height: PopupBarView.viewHeight + rulerDepth)
         let image = NSImage(size: size)
         image.lockFocusFlipped(true)
         // Baked under the **current** theme's vibrant appearance, not a pinned one: the dropdown is a
-        // card that flips with the system. The caller passes it explicitly because this view can be
-        // hosted under a forced appearance, where `NSApp`'s would be the wrong one — and because
-        // assigning `NSApp.appearance` does not take effect until the run loop turns, which silently
-        // produced two copies of one theme when ADR-0097's author tried it.
+        // card that flips with the system. Passed explicitly since this view can be hosted under a
+        // forced appearance, where `NSApp`'s would be wrong — and assigning `NSApp.appearance`
+        // directly doesn't take effect until the run loop turns.
         (appearance ?? NSApp.effectiveAppearance).performAsCurrentDrawingAppearance {
             view.render(in: NSRect(origin: .zero, size: size))
         }
@@ -165,12 +119,8 @@ enum LegendRenderer {
 
     // MARK: Pacing swatches
 
-    /// The colour a bar in this state draws its ribbon in — the pane's five tier swatches.
-    ///
-    /// Computed rather than listed, through the **same two functions the live bars call**
-    /// (`StatusItemView.gapColorTarget` branches identically). A hand-written list of five hexes would
-    /// be a sixth palette to keep in step with the other five, and the first threshold change would
-    /// make the legend disagree with the widget it explains.
+    /// Computed rather than listed, through the **same two functions the live bars call** — a
+    /// hand-written list of hexes would be a sixth palette to keep in step with the other five.
     static func tierColor(_ layout: BarLayout) -> NSColor {
         layout.pacing == .ahead
             ? PopupBarView.aheadColor(usage: layout.usageFraction, time: layout.timeFraction,
@@ -180,21 +130,13 @@ enum LegendRenderer {
 
     // MARK: Glyphs
 
-    /// One of the widget's own glyphs, at the size and weight the widget draws it.
+    /// One of the widget's own glyphs, at the size and weight the widget draws it. Symbol *names*
+    /// come from ``LegendGlyphs``, which the draw sites read too, so this cannot advertise a glyph
+    /// the widget no longer uses.
     ///
-    /// The symbol *names* come from ``LegendGlyphs``, which the draw sites read too — so this cannot
-    /// advertise a glyph the widget no longer uses. What is duplicated is only the four lines of
-    /// `SymbolConfiguration`, because every glyph routine on `StatusItemView` is private and there is
-    /// no seam that returns one icon; the alternative, rendering the whole widget per row, would put a
-    /// bar and a countdown beside every caption.
     /// **Returned as a template**, with no colour baked in — the caller tints it with
-    /// `.foregroundStyle`, and SwiftUI re-resolves that on every theme flip.
-    ///
-    /// The first version filled the glyph with an `NSColor` here and shipped a non-template image.
-    /// That froze the colour at bake time: a label glyph drawn under the dark theme stayed near-white
-    /// after a switch to light, on a near-white form. The bars have the same property and solve it by
-    /// re-baking (the view depends on `colorScheme`, so the whole image is redrawn), but a glyph does
-    /// not need that machinery — a template is the platform's own answer to exactly this.
+    /// `.foregroundStyle`, which SwiftUI re-resolves on every theme flip. A non-template image would
+    /// freeze the colour at bake time.
     static func glyphImage(_ name: String, pointSize: CGFloat = 12) -> NSImage? {
         let configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
         guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?

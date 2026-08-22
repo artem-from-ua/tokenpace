@@ -10,26 +10,22 @@ import SwiftUI
 /// hand-tuned card/row/padding metrics (the whole point of moving to `Form.formStyle(.grouped)`).
 struct SettingsRootView: View {
     @Bindable var model: SettingsModel
-    /// The window's floor: its pinned width (the width never changes) and, since ADR-0069, the
-    /// smallest height it can be dragged to. The hosting view has no intrinsic size for a
-    /// `NavigationSplitView`, so the root asks to fill at least the window — otherwise the whole
-    /// SwiftUI content lays out narrower than the window and the split's columns shrink with it (a
-    /// too-narrow sidebar that truncates, plus dead space on the right of the detail).
-    ///
-    /// Both must match the window's `contentMinSize`, and `SettingsWindowController` passes them
-    /// explicitly so they cannot drift. The defaults here are only a fallback for previews — the live
-    /// values come from `Metrics`.
+    /// The window's floor: pinned width, and since ADR-0069 the smallest height it can be dragged to.
+    /// The hosting view has no intrinsic size for a `NavigationSplitView`, so the root asks to fill at
+    /// least the window — otherwise the columns shrink with it (a too-narrow sidebar, dead space on
+    /// the detail's right). Must match the window's `contentMinSize`, passed explicitly by
+    /// `SettingsWindowController`; the defaults here are only a fallback for previews.
     var minWidth: CGFloat = 792
     var minHeight: CGFloat = 470
 
     var body: some View {
         NavigationSplitView {
             // Grouped so dividers separate About (top) and Notifications (bottom) from the standard
-            // panes in the middle — a `.sidebar` List renders the gap between `Section`s as the divider.
-            // Bound straight to `selection`, which keeps the parent row highlighted while a child page
-            // is open (System Settings behaves the same way). Clicking the *already-highlighted* row is
-            // handled by the row's own gesture instead — a binding cannot see that click at all, since
-            // the List does not report a selection that did not change. See `sidebarRow(_:)`.
+            // panes — a `.sidebar` List renders the gap between `Section`s as the divider. Bound
+            // straight to `selection`, which keeps the parent row highlighted while a child page is
+            // open. Clicking the *already-highlighted* row is handled by the row's own gesture
+            // instead — a binding cannot see that click, since the List doesn't report an unchanged
+            // selection. See `sidebarRow(_:)`.
             List(selection: $model.selection) {
                 ForEach(Array(SettingsSection.groups.enumerated()), id: \.offset) { _, group in
                     Section {
@@ -38,30 +34,25 @@ struct SettingsRootView: View {
                 }
             }
             .listStyle(.sidebar)
-            // Keeps the List itself from laying out narrower than the column it sits in. The column's
-            // real width — and the fact that its divider cannot be dragged — is settled in AppKit, on
-            // the `NSSplitViewItem`: neither SwiftUI lever works here (`.navigationSplitViewColumnWidth`
-            // is unreliable for a `.sidebar` List, and `.frame` alone snaps between a few fixed states
-            // rather than scaling). See `SettingsWindowController.pinSidebarSplit()`.
+            // Keeps the List from laying out narrower than its column. The column's real width is
+            // settled in AppKit on the `NSSplitViewItem` — neither SwiftUI lever works here
+            // (`.navigationSplitViewColumnWidth` is unreliable for a `.sidebar` List). See
+            // `SettingsWindowController.pinSidebarSplit()`.
             .frame(width: model.sidebarIcons.sidebarWidth)
             // A menu-bar Settings window has no collapsible sidebar (System Settings doesn't either);
             // suppress the automatic sidebar toggle so only the fixed split shows.
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            // No header row here: the ‹ › buttons and the pane name live in the window's toolbar,
-            // where System Settings keeps them (`SettingsToolbarController`).
+            // No header row here: the ‹ › buttons and the pane name live in the window's toolbar
+            // (`SettingsToolbarController`).
             //
-            // The top margin lands the first card at System Settings' own offset. Instrumented, not
-            // eyeballed: the grouped `Form` keeps 18 pt of leading padding inside its scroll document
-            // (measured on the live cards, and no public API removes it — `defaultMinListHeaderHeight`
-            // was tried and does nothing), so the scroll inset is trimmed to 52 − 18 = 34 and the
-            // card tops out at the system's 52 (#311, #346).
+            // The top margin lands the first card at System Settings' own offset. The grouped `Form`
+            // keeps 18 pt of its own leading padding inside its scroll document (measured; no public
+            // API removes it), so the inset is trimmed to 52 − 18 = 34.
             //
-            // The margin makes the bridge manage the inset by hand, which kills AppKit's automatic
-            // titlebar separator — but that was dead anyway: measured with pristine insets *and* with
-            // `automaticallyAdjustsContentInsets` forced back on, the automatic line never tracks the
-            // bridged scroll view and just stays drawn. The separator over this column is driven
-            // explicitly instead — `SettingsWindowController.driveDetailTitlebarSeparator()`.
+            // Managing the inset by hand kills AppKit's automatic titlebar separator, but it was dead
+            // anyway — measured, it never tracked the bridged scroll view. Driven explicitly instead:
+            // `SettingsWindowController.driveDetailTitlebarSeparator()`.
             detailPane
                 .contentMargins(.top, Metrics.formTopMargin, for: .scrollContent)
         }
@@ -69,14 +60,11 @@ struct SettingsRootView: View {
     }
 
     private enum Metrics {
-        /// Top inset for the grouped `Form`, replacing its default (#311, #346). The form's document
-        /// carries 18 pt of its own leading padding (measured), so 52 − 18 puts the first card at
-        /// System Settings' measured 52 pt.
+        /// The form's document carries 18 pt of its own leading padding, so 52 − 18 puts the first
+        /// card at System Settings' measured 52 pt.
         static let formTopMargin: CGFloat = -18
     }
 
-    /// One sidebar row for a section — the tinted chip plus the title, tagged for selection. Shared
-    /// by every sidebar group.
     private func sidebarRow(_ section: SettingsSection) -> some View {
         Label {
             Text(section.title)
@@ -86,26 +74,20 @@ struct SettingsRootView: View {
         }
         // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
         .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
-        // Clicking the **already-selected** row pops out of its child page (#374) — but that is handled
-        // in AppKit, not here. Two SwiftUI spellings were tried and instrumented, and neither ever sees
-        // the click: `List(selection:)` does not write the binding when the selection is unchanged, and
-        // a `simultaneousGesture` on the row fired only for a row that was *not* already selected (a log
-        // line in `SettingsModel` recorded exactly one call, on the click that entered the section).
-        // Once a row is current the List consumes the event outright. See
+        // Clicking the **already-selected** row pops out of its child page (#374) — handled in AppKit,
+        // not here: `List(selection:)` does not write the binding when the selection is unchanged, and
+        // `simultaneousGesture` only fires for a row that was *not* already selected. See
         // `SettingsWindowController.watchSidebarClicks(in:)`.
         .tag(section)
     }
 
     /// The detail column's content — the child page when one is drilled into, else the section's pane.
-    ///
-    /// Two sections are parents rather than leaves. `Providers` (#341, ADR-0084) grows a child page per
-    /// provider. `Appearance` has two, one per rendered surface: they were sidebar rows of their own
-    /// between #333 and this change, which put two of the sidebar's five rows on halves of one topic —
-    /// nesting states the relationship structurally instead of leaning on a divider to imply it.
+    /// Two sections are parents rather than leaves: `Providers` (ADR-0084) grows a child page per
+    /// provider, `Appearance` has two (one per rendered surface).
     ///
     /// The child branch is checked **first and in the same switch**, so a drilled-in page replaces the
-    /// section's pane rather than stacking with it, and the switch stays flat: `.contentMargins` has
-    /// to land on the pane's own scroll view, so nothing may wrap the panes in a container here.
+    /// section's pane rather than stacking with it: `.contentMargins` has to land on the pane's own
+    /// scroll view, so nothing may wrap the panes in a container here.
     @ViewBuilder
     private var detailPane: some View {
         if let child = model.childPage {
@@ -154,43 +136,37 @@ private struct SidebarLabelStyle: LabelStyle {
 private struct SidebarChip: View {
     let section: SettingsSection
     var metrics: SidebarIconMetrics
-    /// Sidebar labels are vibrant, so the material dims them automatically when the window resigns
-    /// key — but the chip is a flat tint that never participates in vibrancy, so it kept full color
-    /// in an inactive window. System Settings dims the two chip layers separately: the tinted
-    /// capsule drops to ~half strength (α ≈ 0.5 against the sidebar background), while the glyph is
-    /// redrawn in a solid neutral tone rather than composited white-over-tint, which would leave it
-    /// tinted. That tone is *not* the same in both appearances — see `Metrics.inactiveGlyph`.
+    /// Sidebar labels are vibrant and dim automatically when the window resigns key, but the chip is
+    /// a flat tint that never participates in vibrancy. System Settings dims the two chip layers
+    /// separately: the capsule drops to ~half strength, while the glyph is redrawn in a solid neutral
+    /// tone rather than composited white-over-tint — a tone that differs per appearance, see
+    /// `Metrics.inactiveGlyph`.
     @Environment(\.appearsActive) private var appearsActive
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         glyph
             .foregroundStyle(glyphColor)
-            // The system artwork's glyph carries a hairline dark edge that separates it from the
-            // tint (visible as a thin gray outline hugging the glyph, strongest below it); a
+            // The system artwork's glyph carries a hairline dark edge separating it from the tint; a
             // sub-point shadow reproduces it.
             .shadow(color: Metrics.glyphEdge, radius: Metrics.glyphEdgeRadius, y: Metrics.glyphEdgeOffset)
             .frame(width: metrics.chip, height: metrics.chip)
-            // Fixed 5 pt corner radius, matching the previous AppKit ChipView (System Settings' chip).
             .background(capsuleStyle, in: Self.shape)
-            // Only the white chip asks for one — it is the single capsule lighter than the sidebar
+            // Only the white chip asks for one — it's the single capsule lighter than the sidebar
             // material behind it, so without a hairline its edge simply is not there.
             .overlay { if section.tint.needsBorder { Self.shape.stroke(Metrics.chipBorder, lineWidth: 1) } }
     }
 
-    /// The capsule outline, shared by the fill and the optional border so the two cannot drift.
     private static let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
 
-    /// The glyph's colour. The inactive-window treatment only applies to chips whose glyph is white:
-    /// the system redraws those in a neutral tone, which on the **white** capsule would paint the
-    /// glyph into invisibility. A chip that already carries a dark glyph keeps it.
+    /// The inactive-window treatment only applies to chips whose glyph is white: the system redraws
+    /// those in a neutral tone, which on the **white** capsule would paint the glyph invisible.
     private var glyphColor: Color {
         guard section.tint.glyph == .white else { return section.tint.glyph }
         return appearsActive ? .white : Metrics.inactiveGlyph(for: colorScheme)
     }
 
-    /// The symbol, drawn whole — or, for a section that asks for it, only the middle band of it
-    /// (``SymbolTrim``, shared with the navigator-row badge so one measured band serves both chips).
+    /// Shared with the navigator-row badge (``SymbolTrim``) so one measured band serves both chips.
     @ViewBuilder
     private var glyph: some View {
         if section.trimsOuterRules, let trimmed = SymbolTrim.middleBand(section.symbol, size: metrics.symbol) {
@@ -200,11 +176,8 @@ private struct SidebarChip: View {
         }
     }
 
-    /// System Settings capsules are not flat: a gradient runs from the measured `tint.dark` at the
-    /// bottom-right up to the measured `tint.light` at the top-left (see `SettingsSection.tint` for
-    /// the per-pane Digital Color Meter values). The axis is tilted off vertical toward the
-    /// top-left corner, but shallower than the full 45° diagonal. The inactive window keeps the
-    /// same gradient at the dimmed opacity.
+    /// System Settings capsules are not flat: a gradient runs from `tint.dark` at the bottom-right to
+    /// `tint.light` at the top-left (see `SettingsSection.tint` for the per-pane values).
     private var capsuleStyle: AnyShapeStyle {
         let gradient = LinearGradient(
             colors: [section.tint.light, section.tint.dark],
@@ -217,28 +190,20 @@ private struct SidebarChip: View {
     }
 
     private enum Metrics {
-        /// Glyph color in an inactive window, measured with Digital Color Meter (sRGB) on System
-        /// Settings — separately per appearance, because the system does not dim the glyph the same
-        /// way in both. Dark mode drops it to a mid gray (0x909090); light mode keeps it essentially
-        /// white (0xf8f8f8), only a hair off the active glyph. A single shared constant therefore
-        /// cannot serve both: the dark-mode gray reads as a dark, dirty glyph on a light sidebar.
+        /// Measured with Digital Color Meter (sRGB) on System Settings — separately per appearance,
+        /// since the system does not dim the glyph the same way in both: dark mode drops to a mid
+        /// gray (0x909090), light mode stays near-white (0xf8f8f8). A shared constant would read as a
+        /// dark, dirty glyph on a light sidebar.
         static func inactiveGlyph(for scheme: ColorScheme) -> Color {
             let white = scheme == .dark ? 0x90 / 255.0 : 0xF8 / 255.0
             return Color(.sRGB, white: white, opacity: 1)
         }
-        /// Capsule tint opacity in an inactive window; matches System Settings' ~half-strength dim.
         static let inactiveTintAlpha: Double = 0.5
-        /// Gradient axis: light at the top-left, dark at the bottom-right — tilted off vertical,
-        /// but shallower than the corner-to-corner 45° diagonal.
         static let gradientLightPoint = UnitPoint(x: 0.25, y: 0)
         static let gradientDarkPoint = UnitPoint(x: 0.75, y: 1)
-        /// The glyph's hairline dark edge (screenshot pixels dip ~10–25% below the capsule
-        /// gradient in a 1–2 device-pixel ring under the glyph).
         static let glyphEdge = Color.black.opacity(0.25)
         static let glyphEdgeRadius: CGFloat = 0.5
         static let glyphEdgeOffset: CGFloat = 0.5
-        /// Hairline around the white capsule — the system separator colour, so it tracks the
-        /// appearance the way every other divider in the window does.
         static let chipBorder = Color(nsColor: .separatorColor)
     }
 }

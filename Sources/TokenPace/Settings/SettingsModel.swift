@@ -6,20 +6,13 @@ import TokenPaceKit
 
 /// The observable state behind the Settings window. It lives as long as `SettingsWindowController`
 /// (created in its `init`, **not** inside any SwiftUI view), so the background poll/archive callbacks
-/// (`updateAvailability`/`updateArchiveStatus`) always have somewhere to write even while the window
-/// is closed. That is what lets the SwiftUI panes build lazily — the eager-build invariant that the
-/// old AppKit design needed (nil outlets on a closed window) is gone: these methods mutate model
-/// state, not a view.
+/// always have somewhere to write even while the window is closed.
 ///
-/// The AppDelegate contract (the 10 callbacks + `archiveSummaryProvider`) actually lives here;
-/// `SettingsWindowController` just forwards its same-named properties into this model, so
-/// `AppDelegate.openSettings` is unchanged.
-///
-/// **Ordering invariant:** every setter writes `PersistedConfig` *first*, then fires the callback —
-/// exactly as the old `@objc` actions did. Views never bind `PersistedConfig` directly; they call
-/// these `set…` methods (via `Binding(get:set:)`), so SwiftUI can't reorder persist vs callback.
-/// `syncFromConfig()` reads the store back into the model without going through the setters, so a
-/// re-sync never re-persists or re-fires a callback.
+/// **Ordering invariant:** every setter writes `PersistedConfig` *first*, then fires the callback.
+/// Views never bind `PersistedConfig` directly; they call these `set…` methods (via
+/// `Binding(get:set:)`), so SwiftUI can't reorder persist vs callback. `syncFromConfig()` reads the
+/// store back into the model without going through the setters, so a re-sync never re-persists or
+/// re-fires a callback.
 @MainActor
 @Observable
 final class SettingsModel {
@@ -27,9 +20,7 @@ final class SettingsModel {
     // MARK: Callbacks (the AppDelegate contract — set by the window controller's forwarders)
 
     var onProviderMonitoringChange: ((ProviderMonitoring) -> Void)?
-    /// The GitHub provider's config changed (#454). Its **own** callback rather than a second
-    /// meaning for `onProviderMonitoringChange`: that one carries Claude's config, and reusing it
-    /// would make a GitHub toggle re-resolve Claude's status for no reason.
+    /// Separate from `onProviderMonitoringChange`, which carries Claude's config only (#454).
     var onGitHubMonitoringChange: ((GitHubMonitoring) -> Void)?
     var onCheckForUpdatesNow: (() -> Void)?
     var onInstallUpdateNow: (() -> Void)?
@@ -41,39 +32,27 @@ final class SettingsModel {
     var onExtraUsageVisibilityChange: ((PopupSectionVisibility) -> Void)?
     var onTopBarHidingChange: ((TopBarHiding) -> Void)?
     var onPausePollingChange: ((Bool) -> Void)?
-    /// Master toggle for the awaiting-input indicator flipped (#233) — the shell starts/stops the
-    /// `AwaitingInputWatcher` and re-renders.
+    /// Starts/stops the `AwaitingInputWatcher` and re-renders (#233).
     var onAwaitingInputEnabledChange: ((Bool) -> Void)?
-    /// An awaiting-input **appearance** option changed — the shell just re-renders from the last
-    /// snapshot; no watcher restart needed. Still fired after a preset/reset (#233): the reserved slot
-    /// follows `awaitingInputEnabled`, which those can flip.
+    /// An appearance-only option changed — re-render from the last snapshot, no watcher restart.
     var onAwaitingInputAppearanceChange: (() -> Void)?
     var onArchiveNow: (() -> Void)?
     var onBackToWorkEnabled: ((@escaping @MainActor (BackToWorkNotifier.AuthState) -> Void) -> Void)?
-    /// Fire the "Back to work!" notification immediately, bypassing the edge-detection and quiet-hours
-    /// gates (those live in `AppDelegate`, not the notifier) — the Settings "Try" button (#193).
+    /// Settings "Try" button (#193): posts immediately, bypassing edge-detection and quiet hours.
     var onTryBackToWork: (() -> Void)?
-    /// Fire the "Switching to Extra usage" notification immediately from its Settings "Try" button —
-    /// the shell reads the latest snapshot's spend for the amount/limit body (ADR-0050).
     var onTryExtraUsage: (() -> Void)?
-    /// Fire one of every incident banner on demand, for the "Preview" button beside the incident
-    /// hint (#279).
+    /// "Preview" button beside the incident hint (#279): fires one of every incident banner.
     var onPreviewIncidents: (() -> Void)?
     var archiveSummaryProvider: (() -> LogArchiver.Summary?)?
 
     // MARK: Selection (dev hook)
 
-    /// The section the root view should show — bound straight to the sidebar's `List(selection:)`.
-    ///
-    /// Every write records the previous pane in the history, which is what makes the toolbar's ‹ ›
-    /// buttons work: they walk the history of *visited panes*, exactly like a browser's. Writes coming
-    /// from ``goBack()`` / ``goForward()`` are excluded — replaying history must not itself become
-    /// history, or ‹ would never reach further than one step.
+    /// Bound straight to the sidebar's `List(selection:)`. Writes coming from ``goBack()`` /
+    /// ``goForward()`` are excluded from history — a replay must not itself become history.
     var selection: SettingsSection = .about {
         didSet {
             guard selection != oldValue, !isReplayingHistory else { return }
-            // Picking a different sidebar row cannot leave the window inside the previous section's
-            // child page (#341) — the section is entered at its own root.
+            // A different sidebar row always re-enters at the section's own root (#341).
             childPage = nil
             history.visit(SettingsRoute(selection))
         }
@@ -88,17 +67,12 @@ final class SettingsModel {
         childPage.map { SettingsRoute(selection).drilling(into: $0) } ?? SettingsRoute(selection)
     }
 
-    /// Back/forward over the places the user has visited — what the toolbar's ‹ › buttons walk. The
-    /// rules (a new pick clears the forward branch, a replay records nothing) live in the kit, where
-    /// they are unit-tested; this class only keeps the route and the history in step.
-    ///
-    /// The history is over **routes**, not sections, which is what makes a parent and its child two
-    /// distinct stops: ‹ from `Providers › Claude` lands on `Providers`, rather than skipping past it
-    /// to whatever came before the section.
+    /// History over **routes**, not sections, so a parent and its child are two distinct stops: ‹
+    /// from `Providers › Claude` lands on `Providers` rather than skipping past it.
     private var history = NavigationHistory<SettingsRoute>(current: SettingsRoute(.about))
 
-    /// Set while ``goBack()``/``goForward()`` write the route, so the `didSet` above can tell a
-    /// history replay from a user's own pick — replaying must not itself become history.
+    /// Set while ``goBack()``/``goForward()`` write the route, so `didSet` above can tell a replay
+    /// from a user's own pick.
     private var isReplayingHistory = false
 
     /// The title the toolbar shows — the child page's name while one is open, else the section's.
@@ -107,29 +81,15 @@ final class SettingsModel {
     var canGoBack: Bool { history.canGoBack }
     var canGoForward: Bool { history.canGoForward }
 
-    /// A click landed somewhere in the sidebar column — leave any open child page.
+    /// A click landed somewhere in the sidebar column — leave any open child page. Clicking a
+    /// **different** row already clears `childPage` via `selection`'s `didSet`, so this only matters
+    /// for a click on the **current** row or the empty space below the rows (SwiftUI's `List`
+    /// consumes clicks on the already-selected row, so `SettingsWindowController`'s local mouse
+    /// monitor is what calls this).
     ///
-    /// The behaviour this exists for: while inside "Appearance › Dropdown", clicking "Appearance" in the
-    /// sidebar should return to Appearance's own page. It did nothing at all before — the sidebar
-    /// highlighted the parent while the detail column kept showing the child, with the toolbar's ‹ as
-    /// the only way out.
-    ///
-    /// Called from `SettingsWindowController`'s local mouse monitor, which is the only thing that sees a
-    /// click on the row that is already selected (SwiftUI's `List` consumes it). The monitor cannot tell
-    /// *which* row was hit without duplicating the list's geometry, and it does not need to:
-    ///
-    /// - clicking a **different** row changes `selection`, whose `didSet` already clears `childPage` —
-    ///   so this call finds nothing to pop and does nothing;
-    /// - clicking the **current** row is exactly the case that needs popping;
-    /// - clicking the column's empty space below the rows pops too, which is right for the same reason
-    ///   the highlighted row does: the sidebar names where you are, and the section is what it names.
-    ///
-    /// `openAt` guards the deferred call against the one ordering that would misfire: the click arrives,
-    /// the List switches to another section, and only then does this run — where popping would discard a
-    /// child page the *new* section legitimately opened. Comparing against the page that was open when
-    /// the click happened makes it pop only that page.
-    ///
-    /// Idempotent otherwise, so it is harmless whenever there is nothing open.
+    /// `openAt` guards against the click arriving after the List has already switched to another
+    /// section: comparing against the page that was open *when the click happened* stops this from
+    /// popping a child page the new section legitimately opened.
     func popFromSidebarClick(openAt page: SettingsChildPage?) {
         guard let page, childPage == page else { return }
         popToRoot()
@@ -150,18 +110,13 @@ final class SettingsModel {
     }
 
     /// Seat the window on a pane **without recording a visit** — the `TOKENPACE_SETTINGS_SECTION`
-    /// dev hook's entry point.
-    ///
-    /// Opening straight onto a pane is where the user *starts*, not somewhere they navigated to, so
-    /// it seeds the history rather than appending to it: otherwise ‹ would light up on a freshly
-    /// opened window and step "back" to About, a pane never shown. (The hook used to write
-    /// `selection` directly and did exactly that.)
+    /// dev hook's entry point. Seeds the history rather than appending to it, so ‹ does not light up
+    /// on a freshly opened window and step "back" to a pane never shown.
     func openAtLaunch(_ section: SettingsSection) {
         seat(SettingsRoute(section))
     }
 
-    /// Seat the window directly on a **child page**, same no-visit semantics as the section form —
-    /// both toolbar chevrons stay dimmed, because the page is where the window opened.
+    /// Same no-visit semantics for a **child page** — both toolbar chevrons stay dimmed.
     func openAtLaunch(_ page: SettingsChildPage) {
         seat(SettingsRoute(page.section).drilling(into: page))
     }
@@ -196,69 +151,55 @@ final class SettingsModel {
     }
 
     /// Whether a data stub (`TOKENPACE_STUB`, or the dev-tools selector) is driving the app rather than
-    /// the real network. Owned by the shell, which pushes the live value on every `openSettings` and
-    /// again whenever the dev-tools selector switches scenarios (#187) — it can't be derived from
-    /// `ProcessInfo` here, since the launch env goes stale the moment the selector is used.
+    /// the real network. Pushed by the shell on every `openSettings` and on each dev-tools scenario
+    /// switch (#187) — can't be derived from `ProcessInfo` since the launch env goes stale once the
+    /// selector is used.
     ///
     /// Drives the ⚠️ "Stubbed in this development build." hints: under a stub the service statuses are
-    /// canned rather than fetched, and the awaiting-input watcher doesn't run at all. The toggles stay
-    /// enabled — the stored preferences still apply to the next real run.
+    /// canned and the awaiting-input watcher doesn't run. Toggles stay enabled for the next real run.
     var stubScenarioActive = false
 
-    /// Live sidebar icon sizing, keyed off the system "Sidebar icon size" (System Settings). Lives here
-    /// so it persists with the window and keeps observing while open.
+    /// Live sidebar icon sizing, keyed off the system "Sidebar icon size". Lives here so it persists
+    /// with the window and keeps observing while open.
     let sidebarIcons = SidebarIconMetrics()
 
     // MARK: General
 
     private(set) var launchAtLogin = false
-    /// Whether the last launch-at-login toggle failed in an `.app` bundle (drives the recovery hint,
-    /// #69); reset on a successful toggle or a fresh `show()`.
+    /// Drives the recovery hint (#69); reset on a successful toggle or a fresh `show()`.
     private(set) var launchToggleFailed = false
     var pausePolling = false
 
     // MARK: Appearance (menu-bar widget)
 
-    /// What the menu bar's bar colours tell the user — the row "Colors tell me" (#381). Governs the
-    /// pacing bars only; the service dot, credits glyph and idle pill no longer read it.
+    /// The "Colors tell me" row (#381). Governs the pacing bars only; the service dot, credits glyph
+    /// and idle pill don't read it.
     var colorsTell: ColorAdvice = .slowDown
 
-    /// What the "Colors tell me" control should show — ``colorsTell`` normally, and always
-    /// ``ColorAdvice/slowDown`` while the menu bar is on **Pressure**.
-    ///
-    /// Under that style `StatusItemView` mutes the entire quiet side to white whatever this value says,
-    /// so every segment would draw the same bar and only the "too fast" orange keeps its colour — which
-    /// is exactly what `Slow down` names. The row is disabled there, so this reports the truth rather
-    /// than leaving a segment lit that describes a bar nobody is drawing.
-    ///
-    /// **Read-only, and deliberately not a stored "previous value".** Nothing writes
-    /// `PersistedConfig.colorsTell` on a style change, so the user's own choice sits untouched in the
-    /// store and comes back the moment they pick Balance or Progress. A remembered-previous field would be
-    /// a second copy of something the store already holds, with the usual failure mode: the two disagree
-    /// after a preset, a reset, or a restart.
+    /// What the "Colors tell me" control should show — ``colorsTell`` normally, forced to
+    /// ``ColorAdvice/slowDown`` while the menu bar is on **Pressure**, since that style mutes the
+    /// entire quiet side to white and only the "too fast" orange keeps its color. Read-only and not
+    /// stored back: the user's own choice stays untouched and returns on Balance/Progress.
     var displayedColorAdvice: ColorAdvice { menuBarStyle == .pressure ? .slowDown : colorsTell }
 
-    /// Whether the **top (5-hour)** bar steps aside until it needs attention (ADR-0086) — the choice
-    /// that replaced the boolean "Show 7-day bar when calm" checkbox.
+    /// Whether the **top (5-hour)** bar steps aside until it needs attention (ADR-0086).
     var hideTop5hBar: TopBarHiding = .untilItNeedsAttention
-    /// When the popup lists the per-model 7-day limit rows (Opus/Sonnet/scoped, #211). A popup
-    /// concern, not a menu-bar one — it lives on the separate `Dropdown` child page.
+    /// Per-model 7-day limit rows in the popup (Opus/Sonnet/scoped, #211) — lives on the `Dropdown`
+    /// child page, not the menu-bar one.
     var showPerModelLimits: PopupSectionVisibility = .whenItNeedsAttention
-    /// When the popup shows the "Extra usage" credits section. The menu-bar credits icon has no user
-    /// gate at all (ADR-0090), so there is nothing to confuse this with.
+    /// The popup's "Extra usage" credits section. The menu-bar credits icon has no user gate
+    /// (ADR-0090).
     var showExtraUsage: PopupSectionVisibility = .onceUsed
     var showServiceDot = false
-    /// The **menu-bar widget**'s bar presentation style, shown as a segmented control in that
-    /// section (#224, per-surface since #329).
+    /// The **menu-bar widget**'s bar style (#224, per-surface since #329).
     var menuBarStyle: BarStyle = .progress
-    /// The **dropdown popup**'s bar presentation style, chosen independently of ``menuBarStyle``
-    /// and shown in the "Dropdown Widget" section (#329).
+    /// The **dropdown popup**'s bar style, independent of ``menuBarStyle`` (#329).
     var dropdownStyle: BarStyle = .progress
 
     // MARK: Provider monitoring (#89, #341)
 
-    /// Whether the usage API is polled — the switch behind the bars (#341). Separate from the
-    /// status-page services below: turning it off leaves them monitored.
+    /// Whether the usage API is polled. Separate from the status-page services below: turning it off
+    /// leaves them monitored.
     var usageApiEnabled = true
     var claudeCodeEnabled = true
     var webDesktopEnabled = true
@@ -277,11 +218,9 @@ final class SettingsModel {
     /// Whether the `Claude API` row is forced on and locked — derived, never stored (#341).
     var claudeApiLocked: Bool { providerMonitoring.claudeApiLocked }
 
-    /// The state line under the `Claude` row on the Providers page (#341) — what is being collected
-    /// and how many services are watched, so the answer is readable without opening the page.
-    ///
-    /// Counts the services actually resolved (`Claude API` included, `Cowork` when the mode adds it)
-    /// rather than the switches, so the number matches the rows the popup draws.
+    /// The state line under the `Claude` row on the Providers page (#341). Counts the services
+    /// actually resolved (`Claude API` included, `Cowork` when the mode adds it), not the switches,
+    /// so the number matches the rows the popup draws.
     var claudeProviderSummary: String {
         let services = StatusHealth.monitoredComponentNames(
             for: providerMonitoring.services, usageApiEnabled: usageApiEnabled).count
@@ -292,8 +231,8 @@ final class SettingsModel {
 
     // MARK: GitHub provider (#454)
 
-    /// Whether GitHub's `Development services` group is monitored. On by default, like every other
-    /// monitoring flag; the value here is only a placeholder until `resync()` reads the stored one.
+    /// Whether GitHub's `Development services` group is monitored. On by default; placeholder until
+    /// `resync()` reads the stored value.
     var githubDevelopmentServicesEnabled = true
 
     /// What the GitHub page currently describes — the value its callback carries.
@@ -301,39 +240,24 @@ final class SettingsModel {
         GitHubMonitoring(developmentServicesEnabled: githubDevelopmentServicesEnabled)
     }
 
-    /// The state line under the `GitHub` row on the Providers page — the twin of
-    /// ``claudeProviderSummary``, and deliberately answering with the same shape.
-    ///
-    /// It names the group rather than counting components: `Development services` is one switch over
-    /// five constituents, so "5 services monitored" would promise a granularity the page does not
-    /// offer. `Off` is the state most users see first, and it has to read as a choice rather than as
-    /// a fault.
+    /// The state line under the `GitHub` row on the Providers page. Names the group rather than
+    /// counting components — `Development services` is one switch over five constituents, so a count
+    /// would promise a granularity the page doesn't offer.
     var githubProviderSummary: String {
         githubDevelopmentServicesEnabled ? "Development services" : "Off"
     }
 
-    /// The state line under a surface's navigator row on the Appearance page — the bar style that
-    /// surface currently draws, which is the one setting both pages open with and the only one whose
-    /// answer differs between them by default.
-    ///
-    /// Labelled `Style: Balance`, not the bare style name: on the parent page the row title says only
-    /// which *surface* the page configures, so a lone "Balance" leaves the reader to guess which of the
-    /// page's several settings it reports. The label is the child page's own control label verbatim,
-    /// so the summary and the control it summarises name the setting the same way.
-    ///
-    /// The name comes from `AppearanceBarStyle.segments`, the same table the picker on the child page
-    /// labels its own segments from: a row reporting "Balance" while the control inside says something
-    /// else would be worse than a row reporting nothing.
+    /// The state line under a surface's navigator row on the Appearance page — labelled
+    /// `Style: Balance` using the child page's own control label, from the same
+    /// `AppearanceBarStyle.segments` table the picker reads.
     func surfaceSummary(for page: SettingsChildPage) -> String? {
         let style: BarStyle
         switch page {
         case .appearanceMenuBar: style = menuBarStyle
         case .appearanceDropdown: style = dropdownStyle
-        // The provider pages configure no surface. Their rows report their own state through
-        // `claudeProviderSummary` / `githubProviderSummary`, written where the row is built.
+        // These report their own state via `claudeProviderSummary` / `githubProviderSummary`.
         case .providersClaude, .providersGitHub: return nil
-        // Legend configures nothing, so there is no setting to report. Its row carries a fixed
-        // subtitle written where the row is built, rather than a summary of state it does not own.
+        // Legend configures nothing; its row carries a fixed subtitle instead.
         case .appearanceLegend: return nil
         }
         guard let name = AppearanceBarStyle.segments.first(where: { $0.value == style })?.title else {
@@ -351,7 +275,6 @@ final class SettingsModel {
     var notifyStartMinute = 0
     var notifyEndMinute = 0
     var suppressDays: SuppressDays = .never
-    /// Notification-authorization state, driving the hint row and the master switch's enablement.
     /// Updated asynchronously by `refreshAuthState()` / the `onBackToWorkEnabled` completion.
     private(set) var authState: BackToWorkNotifier.AuthState = .notDetermined
 
@@ -373,32 +296,28 @@ final class SettingsModel {
 
     // MARK: Dropdown — the ⌥ caption (#475)
 
-    /// Whether the dropdown draws "hold ⌥ Option for more" where the action items sit while ⌥ is up.
-    /// Default-**on**: it is the only thing announcing that the menu has actions at all.
+    /// Whether the dropdown draws "hold ⌥ Option for more". Default-**on**: the only thing announcing
+    /// the menu has actions at all.
     var showOptionHint = true
 
     // MARK: Awaiting-input indicator (#233, ADR-0066)
 
-    /// Master toggle: show the "N sessions awaiting input" indicator. Default-off. Placement is
-    /// configured separately in Appearance and only matters while this is on.
+    /// Master toggle for the "N sessions awaiting input" indicator. Default-off. Placement is
+    /// configured separately in Appearance.
     var awaitingInputEnabled = false
-    /// Appearance option: also show the indicator in the menu bar (first leading element, bare icon,
-    /// no count), in addition to the popup. Default-off. Only meaningful while ``awaitingInputEnabled``
-    /// is on.
+    /// Also show the indicator in the menu bar (bare icon, no count), in addition to the popup.
+    /// Default-off. Only meaningful while ``awaitingInputEnabled`` is on.
 
     // MARK: About / Updates (#37)
 
     var automaticUpdateChecks = false
     var installAutomatically = false
     private(set) var latestRelease: GitHubRelease?
-    /// The most recent failed auto-install (#210) — tag + stage + reason — or `nil`. Read from
-    /// `PersistedConfig` in `syncFromConfig()` (so it refreshes each time the window opens); a past
-    /// event, so no live update is needed. Drives the ⚠️ "Update … failed" row on the About pane.
+    /// The most recent failed auto-install (#210), or `nil`. Read from `PersistedConfig` in
+    /// `syncFromConfig()`; drives the ⚠️ "Update … failed" row on the About pane.
     private(set) var lastUpdateFailure: LastUpdateFailure?
-    /// Every environment condition currently holding back an available update (#221), or `[]` when
-    /// nothing blocks. Pushed in by the AppDelegate on each install evaluation, so it tracks the live
-    /// state rather than a snapshot taken when the window opened. Drives the ⚠️ "Update pending
-    /// because …" row on the About pane.
+    /// Every environment condition currently holding back an available update (#221), or `[]`. Pushed
+    /// by the AppDelegate on each install evaluation. Drives the ⚠️ "Update pending because …" row.
     private(set) var deferralReasons: [UpdateDeferralReason] = SettingsModel.forcedDeferralReasons ?? []
 
     // MARK: Static build facts
@@ -407,16 +326,13 @@ final class SettingsModel {
     /// "Back to work" master switch (ADR-0012 §4, ADR-0018).
     let inAppBundle = LaunchAtLoginController.isAppBundle
     let versionText = SettingsModel.makeVersionText()
-    /// The GitHub release tag of the **installed** version (`vX.Y.Z`) — used by the About pane's
-    /// "release notes" link beside the version (#224). Shown only in a real `.app` bundle (`inAppBundle`);
-    /// a dev build has no published release to point at.
+    /// The GitHub release tag of the **installed** version (`vX.Y.Z`), for the About pane's "release
+    /// notes" link (#224). Shown only in a real `.app` bundle — a dev build has no published release.
     let currentVersionTag = "v\(TokenPaceKit.version)"
 
     /// A forced install-failure for live verification of the About pane (#210), from
-    /// `TOKENPACE_FAKE_FAILURE=<stage>:<reason>` (e.g. `verify:team id mismatch (expected …)`); the
-    /// tag comes from `TOKENPACE_FAKE_LATEST` or a placeholder. A maintainer aid like
-    /// `TOKENPACE_UPDATE_STATE` — it never writes UserDefaults; `nil` for a normal run or an
-    /// unparsable value (unknown stage / missing reason).
+    /// `TOKENPACE_FAKE_FAILURE=<stage>:<reason>`; the tag comes from `TOKENPACE_FAKE_LATEST` or a
+    /// placeholder. Never writes UserDefaults; `nil` for a normal run or an unparsable value.
     static let forcedUpdateFailure: LastUpdateFailure? = {
         let env = ProcessInfo.processInfo.environment
         guard let raw = env["TOKENPACE_FAKE_FAILURE"], !raw.isEmpty,
@@ -429,10 +345,9 @@ final class SettingsModel {
     }()
 
     /// Forced deferral reasons for live verification of the About pane (#221), from
-    /// `TOKENPACE_FAKE_DEFERRAL=battery,metered,space` (any subset, in any order — the row renders
-    /// them in `allCases` order regardless). Like `TOKENPACE_FAKE_FAILURE` it never writes
-    /// UserDefaults, and it exists because the real reasons need a `.app` bundle plus an actual
-    /// unplugged/metered/full-disk Mac to reproduce. `nil` for a normal run; unknown tokens are ignored.
+    /// `TOKENPACE_FAKE_DEFERRAL=battery,metered,space` (any subset; the row renders them in
+    /// `allCases` order regardless). Never writes UserDefaults. `nil` for a normal run; unknown
+    /// tokens are ignored.
     static let forcedDeferralReasons: [UpdateDeferralReason]? = {
         guard let raw = ProcessInfo.processInfo.environment["TOKENPACE_FAKE_DEFERRAL"], !raw.isEmpty
         else { return nil }
@@ -450,14 +365,9 @@ final class SettingsModel {
     }()
 
     /// Forced archive gates for live verification of the Sessions-backup hints (#306), from
-    /// `TOKENPACE_FAKE_ARCHIVE_GATE=battery,space` (either, both, in any order). Like
-    /// `TOKENPACE_FAKE_DEFERRAL` it never writes UserDefaults, and it exists because the real gates
-    /// need an unplugged laptop and a genuinely full destination volume to reproduce. `nil` for a
-    /// normal run; unknown tokens are ignored.
-    ///
-    /// It forces only the **display**: the poll still runs and "Archive now" still archives, matching
-    /// `TOKENPACE_FAKE_DEFERRAL` (which doesn't block a real install either). A stub that also broke
-    /// the feature would make the button untestable in the same run.
+    /// `TOKENPACE_FAKE_ARCHIVE_GATE=battery,space` (either, both). Never writes UserDefaults; `nil`
+    /// for a normal run. Forces only the **display** — the poll still runs and "Archive now" still
+    /// archives, so the button stays testable.
     static let forcedArchiveGate: (battery: Bool, space: ArchiveSpaceVerdict)? = {
         guard let raw = ProcessInfo.processInfo.environment["TOKENPACE_FAKE_ARCHIVE_GATE"], !raw.isEmpty
         else { return nil }
@@ -473,13 +383,12 @@ final class SettingsModel {
         return (battery, space)
     }()
 
-    // MARK: Computed enablement (was the scattered imperative `updateX Availability()` methods)
+    // MARK: Computed enablement
 
     var launchToggleEnabled: Bool { inAppBundle }
-    /// The hint under the launch-at-login switch, and whether it is the standard dev-build warning
-    /// (⚠️ styling, same as auto-install / back-to-work). On a dev build the feature can never work, so
-    /// it shows the shared "Unavailable in development builds." line; in a real `.app` it is empty
-    /// unless a toggle failed, then a recovery hint (not a dev warning). Empty in the neutral case.
+    /// The hint under the launch-at-login switch. On a dev build the feature can never work, so it
+    /// shows the shared "Unavailable in development builds." line; in a real `.app` it is empty
+    /// unless a toggle failed, then a recovery hint.
     var launchHint: (text: String, devBuild: Bool) {
         if !inAppBundle {
             return ("Unavailable in development builds.", true)
@@ -494,11 +403,8 @@ final class SettingsModel {
 
     var webDesktopRadioEnabled: Bool { webDesktopEnabled }
 
-    /// The live Appearance config assembled from the model's own (observable) fields — the model-side
-    /// mirror of `PersistedConfig.currentAppearanceValues`. Reads the stored fields rather than
-    /// `PersistedConfig` so it stays reactive under `@Observable`: any toggle/picker change invalidates
-    /// it and re-lights the preset control. The two `hide…` fields are in the same *hide* form as
-    /// `AppearancePresetValues` (see `syncFromConfig`).
+    /// The live Appearance config assembled from the model's own (observable) fields, so it stays
+    /// reactive under `@Observable` and re-lights the preset control on any toggle/picker change.
     private var liveAppearanceValues: AppearancePresetValues {
         AppearancePresetValues(
             colorsTell: colorsTell,
@@ -512,11 +418,9 @@ final class SettingsModel {
 
     // MARK: Appearance presets — preview, then apply
 
-    /// The preset currently being **previewed**, or `nil` when the widget is showing the stored setup.
-    ///
-    /// Observable so the radio list re-lights on every click. The preview itself lives in
-    /// `PersistedConfig`'s overlay (which is what reaches the widget); this mirrors it so SwiftUI has
-    /// something to observe, since a `static var` on a plain enum is invisible to `@Observable`.
+    /// The preset currently being **previewed**, or `nil` when the widget shows the stored setup.
+    /// Mirrors `PersistedConfig`'s overlay so `@Observable` (invisible to a plain enum's static var)
+    /// has something to observe and the radio list re-lights on every click.
     private(set) var previewedPreset: AppearancePreset?
 
     /// Which radio row is selected — a previewed preset, or the stored setup.
@@ -524,8 +428,8 @@ final class SettingsModel {
         AppearanceChoice.selected(stored: storedAppearanceValues, previewing: previewedPreset)
     }
 
-    /// The preset the **stored** setup happens to equal, for the `· same as Chill preset` suffix on the
-    /// "My setup" row. `nil` once the user has made a combination of their own.
+    /// The preset the **stored** setup happens to equal, for the `· same as Chill preset` suffix.
+    /// `nil` once the user has made a combination of their own.
     var storedPresetName: AppearancePreset? {
         AppearanceChoice.storedPresetName(storedAppearanceValues)
     }
@@ -535,29 +439,23 @@ final class SettingsModel {
         AppearanceChoice.canApply(stored: storedAppearanceValues, previewing: previewedPreset)
     }
 
-    /// The stored Appearance values, read past the preview overlay.
-    ///
-    /// Not `liveAppearanceValues`: during a preview the model's fields hold the previewed values (they
-    /// are synced from the same getters the overlay shadows), and every question on this screen — which
-    /// row is selected, what the suffix names, whether `Apply` does anything — is about the *stored*
-    /// setup rather than what is on screen.
+    /// The stored Appearance values, read past the preview overlay — everything this screen asks
+    /// (selected row, suffix, whether `Apply` does anything) is about the *stored* setup.
     private var storedAppearanceValues: AppearancePresetValues {
-        // Touch the observable fields so SwiftUI re-evaluates the rows after an edit on a child page;
-        // `PersistedConfig` is not observable, so a read of it alone would never invalidate the view.
+        // Touch the observable fields so SwiftUI re-evaluates after an edit on a child page;
+        // `PersistedConfig` alone is not observable.
         _ = liveAppearanceValues
         return PersistedConfig.persistedAppearanceValues
     }
 
-    /// The master "Back to work" switch is disabled on a dev build (authorization is impossible there,
-    /// so the feature can never work — like launch-at-login / auto-install).
+    /// Disabled on a dev build — authorization is impossible there.
     var backToWorkMasterEnabled: Bool { authState != .dev }
     var notifyDependentsEnabled: Bool { backToWorkMasterEnabled && backToWorkEnabled }
-    /// True on a `swift run` dev build, where no notification can ever be delivered (authorization is
-    /// impossible). The Notifications pane surfaces this once as a banner above the whole section — not
-    /// per-switch — since it gates every notification alike (both toggles are disabled).
+    /// The Notifications pane surfaces this once as a banner above the whole section, since it gates
+    /// every notification alike.
     var notificationsDevBuild: Bool { authState == .dev }
-    /// The auth hint under the master switch; empty in the authorized / not-yet-decided case. The
-    /// dev-build case is handled by the pane-level banner (`notificationsDevBuild`), not here.
+    /// Empty in the authorized / not-yet-decided case. The dev-build case is handled by
+    /// `notificationsDevBuild`, not here.
     var backToWorkHint: String {
         switch authState {
         case .denied:
@@ -577,9 +475,7 @@ final class SettingsModel {
     }
 
     var installAutoEnabled: Bool { automaticUpdateChecks && inAppBundle }
-    /// The hint under "Install updates automatically". The row is shown only when periodic checks are
-    /// on (the view hides it otherwise), so the only cases here are a dev build (⚠️ — auto-install can
-    /// never work) or the enabled description. A non-empty `devBuild` flag drives the ⚠️ styling.
+    /// Shown only when periodic checks are on. A non-empty `devBuild` flag drives the ⚠️ styling.
     var installAutoHint: (text: String, devBuild: Bool) {
         if !inAppBundle {
             return ("Unavailable in development builds.", true)
@@ -589,54 +485,37 @@ final class SettingsModel {
               + "item linking to the release instead.", false)
     }
 
-    /// The ⚠️ line explaining why an available update hasn't installed (#221), or `nil` when nothing
-    /// blocks it. Wording comes from the kit so it stays testable; the view supplies the icon and dot.
+    /// The ⚠️ line explaining why an available update hasn't installed (#221), or `nil`.
     var deferralExplanation: String? {
         UpdateDeferralReason.pendingExplanation(for: deferralReasons)
     }
 
-    /// The ⚠️ line explaining a backup blocked for lack of disk space (#306), or `""` when nothing
-    /// blocks it — the empty-string idiom, so `SettingsHint` renders nothing at all.
+    /// `""` when nothing blocks — the empty-string idiom, so `SettingsHint` renders nothing.
     var archiveSpaceHint: String {
         ArchiveSpacePlan.blockedExplanation(for: archiveSpaceBlock) ?? ""
     }
 
-    /// Whether the daily backup is currently held back by the battery gate (#306).
-    ///
-    /// Read live rather than pushed: that gate lives in `pollArchiveIfDue` and returns before the
-    /// archiver runs, so there is no outcome that could carry it back. `@Observable` will not
-    /// re-render when the power state changes, and that is accepted — the line refreshes on the next
-    /// `refreshArchiveStatus()` (window open, toggle, finished sync). **Don't** "fix" this with an
-    /// IOKit notification observer: a neutral hint lagging a few seconds is not worth a new
-    /// subscription lifecycle in this model.
+    /// Read live rather than pushed: the gate lives in `pollArchiveIfDue` and returns before the
+    /// archiver runs, so there's no outcome to carry it back. `@Observable` won't re-render on a power
+    /// change; the line refreshes on the next `refreshArchiveStatus()`. Don't add an IOKit observer
+    /// for this — a few seconds of lag isn't worth a new subscription lifecycle here.
     var archiveOnBattery: Bool {
         if let forced = SettingsModel.forcedArchiveGate { return forced.battery }
         return archiveEnabled && archiveDestination != nil && !PowerSource.isOnACPower
     }
 
-    /// The ⚠️ line explaining a battery-deferred backup, or `""`.
-    ///
-    /// Carries a warning icon like every other hint that reports something holding a feature back —
-    /// the icon-less style is for describing what a control *does*, not for reporting a blocked state.
-    /// That the battery clears itself changes the wording ("will resume"), not the icon.
-    ///
-    /// Suppressed while a space block is showing. Unlike `UpdateDeferralReason.pendingExplanation`,
-    /// which joins every clause because all of them must be cleared, these two are not peers: a full
-    /// disk is a hard stop and the battery is a soft one, so showing both would imply that plugging in
-    /// helps — which it does not.
+    /// Suppressed while a space block is showing — a full disk is a hard stop and the battery is a
+    /// soft one, so showing both would imply plugging in helps, which it does not.
     var archiveBatteryHint: String {
         guard archiveSpaceHint.isEmpty, archiveOnBattery else { return "" }
         return "Backup will resume when you plug in."
     }
 
-    /// Whether "Update now" can do anything — a known release, and a real `.app` to replace. The
-    /// power/metered gates are deliberately **not** consulted: bypassing them is the button's whole
-    /// purpose. A disk too full still lets the user click; the install then declines and logs why,
-    /// which beats an unexplained dead button.
+    /// Power/metered gates are deliberately **not** consulted: bypassing them is the button's whole
+    /// purpose. A disk too full still lets the user click; the install then declines and logs why.
     var canInstallNow: Bool {
-        // Under `TOKENPACE_FAKE_DEFERRAL` show the button regardless of the build: the whole point of
-        // that stub is to review this row on a dev build, and the real bundle check would hide the
-        // very control being verified. Clicking it there still declines (`skipNotAppBundle`) and logs.
+        // `TOKENPACE_FAKE_DEFERRAL` shows the button regardless of build, so the row under
+        // verification isn't hidden by the real bundle check. Clicking it still declines and logs.
         if SettingsModel.forcedDeferralReasons != nil { return true }
         guard inAppBundle, let release = latestRelease else { return false }
         return UpdateAssetSelector.selectZIP(from: release) != nil
@@ -644,9 +523,9 @@ final class SettingsModel {
 
     // MARK: Sync from config / system (called by the controller's show())
 
-    /// Re-read every field from `PersistedConfig` / the system into the model — the SwiftUI equivalent
-    /// of the old `show()` block of `syncX FromConfig` calls. Goes straight to the stored properties,
-    /// bypassing the `set…` methods, so a re-sync never re-persists or re-fires a callback.
+    /// Re-read every field from `PersistedConfig` / the system into the model. Goes straight to the
+    /// stored properties, bypassing the `set…` methods, so a re-sync never re-persists or re-fires a
+    /// callback.
     func syncFromConfig() {
         launchToggleFailed = false
         let status = LaunchAtLoginController.currentStatus()
@@ -661,16 +540,13 @@ final class SettingsModel {
         menuBarStyle = PersistedConfig.menuBarStyle
         dropdownStyle = PersistedConfig.dropdownStyle
 
-        // Straight assignments, not the `set…` methods — see the ordering invariant above: a re-sync
-        // must not re-persist or re-fire `onProviderMonitoringChange`, or every open of the Settings
-        // window would signal a polling-mode change (#341).
+        // Straight assignments, not `set…` methods: a re-sync must not re-fire
+        // `onProviderMonitoringChange`/`onGitHubMonitoringChange`, or opening Settings would kick a poll.
         let pm = PersistedConfig.providerMonitoring
         usageApiEnabled = pm.usageApiEnabled
         claudeCodeEnabled = pm.services.claudeCodeEnabled
         webDesktopEnabled = pm.services.webDesktopEnabled
         webDesktopMode = pm.services.webDesktopMode
-        // Same rule for the GitHub provider (#454): a bare assignment, so re-opening Settings never
-        // re-fires `onGitHubMonitoringChange` and kicks the GitHub poll.
         githubDevelopmentServicesEnabled = PersistedConfig.githubMonitoring.developmentServicesEnabled
 
         backToWorkEnabled = PersistedConfig.backToWorkEnabled
@@ -683,8 +559,6 @@ final class SettingsModel {
 
         automaticUpdateChecks = PersistedConfig.automaticUpdateChecks
         installAutomatically = PersistedConfig.installUpdatesAutomatically
-        // Real store, unless a verification stub forces a failure (see `forcedUpdateFailure`) — the
-        // stub never writes UserDefaults, mirroring `TOKENPACE_UPDATE_STATE`.
         lastUpdateFailure = Self.forcedUpdateFailure ?? PersistedConfig.lastUpdateFailure
 
         archiveEnabled = PersistedConfig.archiveEnabled
@@ -711,17 +585,14 @@ final class SettingsModel {
         onAwaitingInputEnabledChange?(on)
     }
 
-    /// Toggle the usage journal (#242). No callback: the poll seam reads `PersistedConfig.journalEnabled`
-    /// live on each write, so a change takes effect on the next poll without a restart or a wiring hop.
+    /// No callback: the poll seam reads `PersistedConfig.journalEnabled` live on each write.
     func setJournalEnabled(_ on: Bool) {
         journalEnabled = on
         PersistedConfig.journalEnabled = on
         AppLogger.lifecycle.notice("journal: enabled set \(on, privacy: .public)")
     }
 
-    /// Toggle the dropdown's ⌥ caption (#475). No callback: `menuWillOpen` re-reads
-    /// `PersistedConfig.showOptionHint` on every open, so the change lands on the next open without a
-    /// restart or a wiring hop — the same seam `devToolsEnabled` uses.
+    /// No callback: `menuWillOpen` re-reads `PersistedConfig.showOptionHint` on every open.
     func setShowOptionHint(_ on: Bool) {
         showOptionHint = on
         PersistedConfig.showOptionHint = on
@@ -729,8 +600,6 @@ final class SettingsModel {
     }
 
     func setColorAdvice(_ mode: ColorAdvice) {
-        // Leaving a preset preview: persist the seven stored values before writing this one, or the
-        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
         dropPreviewBeforeEdit()
         colorsTell = mode
         PersistedConfig.colorsTell = mode
@@ -739,8 +608,6 @@ final class SettingsModel {
     }
 
     func setTopBarHiding(_ mode: TopBarHiding) {
-        // Leaving a preset preview: persist the seven stored values before writing this one, or the
-        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
         dropPreviewBeforeEdit()
         hideTop5hBar = mode
         PersistedConfig.hideTop5hBar = mode
@@ -749,8 +616,6 @@ final class SettingsModel {
     }
 
     func setModelLimitsVisibility(_ mode: PopupSectionVisibility) {
-        // Leaving a preset preview: persist the seven stored values before writing this one, or the
-        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
         dropPreviewBeforeEdit()
         showPerModelLimits = mode
         PersistedConfig.showPerModelLimits = mode
@@ -759,8 +624,6 @@ final class SettingsModel {
     }
 
     func setExtraUsageVisibility(_ mode: PopupSectionVisibility) {
-        // Leaving a preset preview: persist the seven stored values before writing this one, or the
-        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
         dropPreviewBeforeEdit()
         showExtraUsage = mode
         PersistedConfig.showExtraUsage = mode
@@ -769,8 +632,6 @@ final class SettingsModel {
     }
 
     func setShowServiceDot(_ on: Bool) {
-        // Leaving a preset preview: persist the seven stored values before writing this one, or the
-        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
         dropPreviewBeforeEdit()
         showServiceDot = on
         PersistedConfig.showServiceStatusDot = on
@@ -778,12 +639,8 @@ final class SettingsModel {
         onServiceDotChange?(on)
     }
 
-    /// Persist the **menu-bar** bar style (#224, #329) and fire the callback. The segmented control in
-    /// the Menu Bar Widget section writes `menuBarStyle` directly (via the binding), then calls this.
-    /// Touches that surface only — the dropdown keeps whatever it was set to.
+    /// Touches the menu-bar surface only (#224, #329) — the dropdown keeps whatever it was set to.
     func setMenuBarStyle(_ style: BarStyle) {
-        // Leaving a preset preview: persist the seven stored values before writing this one, or the
-        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
         dropPreviewBeforeEdit()
         menuBarStyle = style
         PersistedConfig.menuBarStyle = style
@@ -791,11 +648,8 @@ final class SettingsModel {
         onMenuBarStyleChange?(style)
     }
 
-    /// Persist the **dropdown** bar style (#329) and fire the callback. Mirror of
-    /// ``setMenuBarStyle(_:)`` for the popup's own segmented control.
+    /// Mirror of ``setMenuBarStyle(_:)`` for the popup's own segmented control (#329).
     func setDropdownStyle(_ style: BarStyle) {
-        // Leaving a preset preview: persist the seven stored values before writing this one, or the
-        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
         dropPreviewBeforeEdit()
         dropdownStyle = style
         PersistedConfig.dropdownStyle = style
@@ -803,15 +657,9 @@ final class SettingsModel {
         onDropdownStyleChange?(style)
     }
 
-    /// **Preview** a preset: draw it on the live widget without writing anything.
-    ///
-    /// The values go into `PersistedConfig`'s overlay, which every Appearance getter consults, so the
-    /// menu-bar widget, the dropdown and the preview window beside Settings all pick it up from the one
-    /// call to ``fireAppearanceCallbacks()`` below. `syncFromConfig()` then pulls the previewed values
-    /// into this model's fields, so the child pages show what is on screen while the preview is up.
-    ///
-    /// Switching between presets is just another call — that is what lets the user compare them in any
-    /// order without a modal "you are previewing" state to get out of.
+    /// **Preview** a preset: draw it on the live widget without writing anything. Goes into
+    /// `PersistedConfig`'s overlay, which every Appearance getter consults, so the menu-bar widget,
+    /// dropdown and preview window all pick it up from ``fireAppearanceCallbacks()``.
     func previewPreset(_ preset: AppearancePreset) {
         previewedPreset = preset
         PersistedConfig.beginAppearancePreview(preset.values)
@@ -820,8 +668,8 @@ final class SettingsModel {
         fireAppearanceCallbacks()
     }
 
-    /// End the preview and go back to the stored setup — what closing the Settings window does, and
-    /// what clicking the "My setup" row does. No-op when nothing is being previewed.
+    /// What closing the Settings window does, and clicking the "My setup" row. No-op when nothing is
+    /// being previewed.
     func endPreview() {
         guard previewedPreset != nil else { return }
         previewedPreset = nil
@@ -831,12 +679,8 @@ final class SettingsModel {
         fireAppearanceCallbacks()
     }
 
-    /// Make the previewed preset permanent — the `Apply` button. Writes all seven keys, then drops the
-    /// overlay so the stored values are what everything reads again.
-    ///
-    /// The overlay has to go *after* the write rather than before it: dropping it first would repaint
-    /// both surfaces with the old stored setup for one frame, which reads as a flicker back to where
-    /// the user came from at the exact moment they chose to leave it.
+    /// The `Apply` button. Writes all seven keys, then drops the overlay — **in that order**: dropping
+    /// it first would repaint both surfaces with the old stored setup for one frame (a flicker back).
     func applyPreviewedPreset() {
         guard let preset = previewedPreset else { return }
         PersistedConfig.apply(preset)
@@ -847,14 +691,9 @@ final class SettingsModel {
         fireAppearanceCallbacks()
     }
 
-    /// Drop a live preview before an individual Appearance option is written.
-    ///
-    /// Without this, a setter called during a preview would persist its own field while the other six
-    /// stayed shadowed by the overlay — the screen would show a mixture, and closing the window would
-    /// reveal a third state. Re-syncing after clearing the overlay is what puts the other six fields
-    /// back to their stored values before the setter writes the seventh.
-    ///
-    /// A no-op — one nil check — in the overwhelmingly common case where no preview is up.
+    /// Drop a live preview before an individual Appearance option is written. Without this, a setter
+    /// called during a preview would persist its own field while the other six stayed shadowed by the
+    /// overlay — the screen would show a mixture. No-op when no preview is up.
     private func dropPreviewBeforeEdit() {
         guard previewedPreset != nil else { return }
         previewedPreset = nil
@@ -863,19 +702,10 @@ final class SettingsModel {
         AppLogger.lifecycle.notice("appearance preview: ended")
     }
 
-    /// The **stored** Appearance config as clipboard-ready pretty-printed JSON (#257) — the payload
-    /// behind the copy button on the "My setup" row. Read-only: unlike every setter above it writes
-    /// nothing to `PersistedConfig` and fires no callback, so it sits outside the "persist, then notify"
-    /// contract this class otherwise follows.
-    ///
-    /// Returns the string rather than writing the pasteboard itself, which keeps this class free of
-    /// AppKit (it imports only Foundation / Observation / the kit); the pane owns the `NSPasteboard`
-    /// write.
-    ///
-    /// Reads past the preview overlay on purpose. The button sits on the row that names the saved
-    /// setup, so that is what it has to hand over — copying a preset the user is merely trying on would
-    /// contradict the row it is part of, and would quietly hand someone else a configuration the user
-    /// does not actually run.
+    /// The **stored** Appearance config as clipboard-ready pretty-printed JSON (#257), behind the copy
+    /// button on the "My setup" row. Returns the string rather than writing the pasteboard, keeping
+    /// this class free of AppKit; the pane owns the `NSPasteboard` write. Reads past the preview
+    /// overlay on purpose — copying a preset the user is merely trying on would contradict the row.
     func appearanceConfigJSON() -> String {
         let stored = PersistedConfig.persistedAppearanceValues
         return AppearanceConfigExport.json(
@@ -884,9 +714,8 @@ final class SettingsModel {
             appVersion: TokenPaceKit.version)
     }
 
-    /// Fire every Appearance-pane callback with the model's current (freshly-synced) value, so the
-    /// menu-bar widget rebuilds — the same notifications the individual setters send. Shared by the
-    /// reset and preset paths, which both mutate all keys at once and then re-render as a batch.
+    /// Shared by the reset and preset paths, which both mutate all keys at once and re-render as a
+    /// batch.
     private func fireAppearanceCallbacks() {
         onColorAdviceChange?(colorsTell)
         onTopBarHidingChange?(hideTop5hBar)
@@ -898,9 +727,6 @@ final class SettingsModel {
         onAwaitingInputAppearanceChange?()   // #233: a preset/reset may flip the menu-bar copy
     }
 
-    /// Build ``ProviderMonitoring`` from the current toggles/radio, persist both halves, and fire the
-    /// callback. Persist-then-notify, per the ordering invariant at the top of this file.
-    ///
     /// One commit for both halves on purpose: `Claude API`'s locked state is derived from the two of
     /// them together, so the shell must never see one without the other.
     func commitProviderMonitoring() {
@@ -916,8 +742,7 @@ final class SettingsModel {
             launchToggleFailed = false
             AppLogger.lifecycle.notice("launch-at-login: user set \(wantOn, privacy: .public)")
         } catch {
-            // Best-effort: remember the failure so the hint explains it (#69). The model prop rolls
-            // back below from the re-read system status.
+            // Remember the failure so the hint explains it (#69); the status re-read below rolls it back.
             launchToggleFailed = true
             AppLogger.lifecycle.error(
                 "launch-at-login: toggle failed: \(error.localizedDescription, privacy: .public)")
@@ -929,12 +754,9 @@ final class SettingsModel {
         launchAtLogin = LaunchAtLogin.toggleState(for: status)
     }
 
-    /// Turn GitHub's `Development services` monitoring on or off (#454): assign, persist, log, notify
-    /// — the ordinary shape for an independent setting.
-    ///
-    /// Not routed through `commitProviderMonitoring()`. That one exists to write Claude's two halves
-    /// atomically because `claudeApiLocked` is derived from both together; GitHub has no such derived
-    /// state, and borrowing that path would re-fire Claude's callback on every GitHub toggle.
+    /// Not routed through `commitProviderMonitoring()` — that one exists to write Claude's two halves
+    /// atomically because `claudeApiLocked` is derived from both; GitHub has no such derived state,
+    /// and sharing the path would re-fire Claude's callback on every GitHub toggle.
     func setGitHubDevelopmentServices(_ on: Bool) {
         githubDevelopmentServicesEnabled = on
         let config = githubMonitoring
@@ -969,9 +791,8 @@ final class SettingsModel {
         onTryExtraUsage?()
     }
 
-    /// Show every incident banner the app can produce, from the Settings "Preview" button. Unlike
-    /// the other two previews this fires **three** notifications — the update, the fix-deployed
-    /// ending and the recovered ending — because judging their wording means seeing them together.
+    /// Fires **three** notifications — update, fix-deployed ending, recovered ending — since judging
+    /// their wording means seeing them together.
     func previewIncidentNotifications() {
         onPreviewIncidents?()
     }
@@ -981,21 +802,20 @@ final class SettingsModel {
         PersistedConfig.extraUsageNotifyEnabled = on
         AppLogger.lifecycle.notice("extra-usage: notify enabled set \(on, privacy: .public)")
         if on {
-            // Shares one authorization grant with "Back to work" — request lazily on first enable of
-            // either feature, then refresh the hint with the result.
+            // Shares one authorization grant with "Back to work" — request lazily on first enable.
             onBackToWorkEnabled?({ [weak self] state in self?.applyAuthState(state) })
         } else {
             refreshAuthState()
         }
     }
 
-    /// Set the popup's incident age cut-off (#279). `0` means no limit.
+    /// `0` means no limit (#279).
     func setIncidentMaxAgeHours(_ hours: Int) {
         incidentMaxAgeHours = hours
         PersistedConfig.incidentMaxAge = hours > 0 ? TimeInterval(hours) * 3600 : nil
         AppLogger.lifecycle.notice("incident: max age set \(hours, privacy: .public)h")
-        // Reuse the provider-monitoring callback: the app re-resolves the status (and with it the
-        // visible incidents) on that signal, which is exactly what a changed age cut-off needs.
+        // Reuse the provider-monitoring callback: it re-resolves the status, and with it the
+        // visible incidents.
         commitProviderMonitoring()
     }
 
@@ -1018,7 +838,6 @@ final class SettingsModel {
         automaticUpdateChecks = on
         PersistedConfig.automaticUpdateChecks = on
         AppLogger.lifecycle.notice("update: automatic checks set \(on, privacy: .public)")
-        // `installAutoEnabled` / `installAutoHint` are computed, so the nested toggle updates itself.
     }
 
     func setInstallAutomatically(_ on: Bool) {
@@ -1036,8 +855,7 @@ final class SettingsModel {
 
     func setArchiveEnabled(_ on: Bool) {
         if on, PersistedConfig.archiveDestination == nil {
-            // Turning on with no folder yet → prompt. If the user cancels (still no folder), the
-            // feature can't do anything, so flip the toggle back off rather than leaving it stuck on.
+            // No folder yet → prompt; if the user cancels, flip the toggle back off.
             chooseArchiveFolder()
             if PersistedConfig.archiveDestination == nil {
                 archiveEnabled = false
@@ -1058,9 +876,8 @@ final class SettingsModel {
         PersistedConfig.archiveDestination = path
         AppLogger.lifecycle.notice("archive: destination chosen")
         refreshArchiveStatus()
-        // Archive into the newly chosen folder right away, so the status reflects a real sync instead
-        // of sitting at "Not archived yet". The sync runs in the shell; its completion refreshes the
-        // status (via updateArchiveStatus).
+        // Sync into the newly chosen folder right away, so the status doesn't sit at "Not archived
+        // yet". The sync runs in the shell; its completion refreshes the status.
         onArchiveNow?()
     }
 
@@ -1068,32 +885,26 @@ final class SettingsModel {
 
     func openRepo() { NSWorkspaceOpener.open(SettingsLinks.repoURL) }
 
-    /// A release tag stripped of a leading `v`/`V` for display (`"v0.55.0"` → `"0.55.0"`) — the About
-    /// pane shows bare `X.Y.Z` (#210), while URLs still use the real `vX.Y.Z` tag.
+    /// `"v0.55.0"` → `"0.55.0"` — the About pane shows bare `X.Y.Z` (#210), URLs keep the real tag.
     static func displayTag(_ tag: String) -> String {
         guard let first = tag.first, first == "v" || first == "V" else { return tag }
         return String(tag.dropFirst())
     }
 
-    /// Open the release-notes page for a specific tag (#210) — used by the "New version available"
-    /// row's "release notes" link, which carries that release's own tag. Since the "Download" button
-    /// was dropped (#221) this is also the manual fallback: the release page is where a hand-download
-    /// starts, which matters where auto-install can't run (dev build, or a release with no asset).
+    /// Also the manual fallback since the "Download" button was dropped (#221) — the release page is
+    /// where a hand-download starts.
     func openReleaseNotes(tag: String) {
         NSWorkspaceOpener.open(GitHubReleaseClient.releaseNotesURL(tag: tag).absoluteString)
     }
 
     // MARK: Background-driven mutators (safe while the window is closed — they touch model state only)
 
-    /// Reflect the current update state (#37): the model exposes `latestRelease`; the About pane shows
-    /// "Update available: vX.Y.Z" + Download when non-nil.
     func updateAvailability(_ release: GitHubRelease?) {
         latestRelease = release
     }
 
-    /// Reflect why an available update hasn't installed (#221): the About pane turns these into the
-    /// "Update pending because …" row. A forced set from `TOKENPACE_FAKE_DEFERRAL` wins, so live
-    /// verification isn't overwritten by the real (unblocked) environment on the next check.
+    /// A forced set from `TOKENPACE_FAKE_DEFERRAL` wins, so live verification isn't overwritten by
+    /// the real (unblocked) environment on the next check.
     func updateDeferral(_ reasons: [UpdateDeferralReason]) {
         deferralReasons = SettingsModel.forcedDeferralReasons ?? reasons
     }
@@ -1105,7 +916,6 @@ final class SettingsModel {
         archiveSpaceBlock = SettingsModel.forcedArchiveGate?.space ?? verdict
     }
 
-    /// Reflect the current archive state (#110): destination + the "Last archived …" status line.
     func refreshArchiveStatus() {
         archiveDestination = PersistedConfig.archiveDestination
         archiveStatusText = Self.composeArchiveStatus(
@@ -1122,9 +932,7 @@ final class SettingsModel {
 
     private func applyAuthState(_ state: BackToWorkNotifier.AuthState) {
         authState = state
-        // On a dev build authorization is impossible, so the master switch is disabled and both
-        // notification toggles are forced off (the computed `backToWorkMasterEnabled` disables them;
-        // force the stored values + store to off).
+        // On a dev build authorization is impossible, so force both notification toggles off.
         if state == .dev {
             if backToWorkEnabled {
                 backToWorkEnabled = false

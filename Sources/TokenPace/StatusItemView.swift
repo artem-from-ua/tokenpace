@@ -1,7 +1,7 @@
 import AppKit
 import TokenPaceKit
 
-/// The menu-bar item's custom view — the thin AppKit shell of issue #10.
+/// The menu-bar item's custom view.
 ///
 /// It owns **no** business logic: it switches on a ``MenuBarLayout`` (computed in `TokenPaceKit`)
 /// and draws it into a single non-template `NSImage` (``snapshotImage()`` → `button.image`). All colours
@@ -9,20 +9,18 @@ import TokenPaceKit
 /// that both dims *and* breathes the wallpaper like the moon); the **bright** mono tones (reset text, ⚠️,
 /// tick ring) are `labelColor` at the system menu-bar text opacity (``bright(_:)``);
 /// accents (pacing gap, service dot, idle) are `.systemGreen`/`.systemRed`/… scaled by ``accentSaturation``.
-/// No fixed sRGB, no statusline parity (the old xterm mapping was dropped). True template vibrancy is
-/// unavailable for arbitrary coloured geometry, so this custom-draw approximation is the same one every
-/// menu-bar app uses (Stats/iStat/AlDente); see ADR-0059.
+/// True template vibrancy is unavailable for arbitrary coloured geometry, so this custom-draw
+/// approximation is the same one every menu-bar app uses (Stats/iStat/AlDente); see ADR-0059.
 ///
 /// ## Redraw discipline
 /// Assigning ``layout`` marks the view dirty (`needsDisplay`); nothing else triggers a redraw, so
 /// the item repaints **only when the data changes** — never on a timer (architecture.md: energy
-/// efficiency). The polling layer (#13) will set ``layout`` after each successful poll; for now
-/// `AppDelegate` sets it once from a mock snapshot.
+/// efficiency).
 ///
 /// **One scoped exception (ADR-0070):** while a pacing colour is *changing*, ``ColorAnimator`` drives
-/// ~450 ms of frames so the new colour eases in instead of snapping (a threshold crossing used to
-/// read as a blink). The timer exists only for the duration of a transition and stops itself the
-/// moment nothing is animating — an idle widget still runs no loop at all.
+/// ~450 ms of frames so the new colour eases in instead of snapping. The timer exists only for the
+/// duration of a transition and stops itself the moment nothing is animating — an idle widget still
+/// runs no loop at all.
 final class StatusItemView: NSView {
 
     // MARK: Layout input
@@ -37,8 +35,8 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// What the widget's **pacing-bar** colours tell the user (#105, #224, ADR-0061; rescoped and renamed
-    /// in #381) — the row "Colors tell me". The view reads its two derived flags:
+    /// What the widget's **pacing-bar** colours tell the user (ADR-0061) — the row "Colors tell me".
+    /// The view reads its two derived flags:
     /// - ``ColorAdvice/mutesCalm`` — when true, the widget's **soft** pacing signals mute to a neutral
     ///   (a system-matched light grey, `calmWhite`): the idle ready pill, the on-pace green gap and the
     ///   mild ahead-of-pace yellow. Orange keeps its colour always, and an exhausted window is never a
@@ -48,15 +46,13 @@ final class StatusItemView: NSView {
     ///   the rest; when false it stays coloured, so a big surplus reads as a nudge that there is headroom
     ///   to push. Only visible when `mutesCalm` is on.
     ///
-    /// **Pacing bars only** since #381. The service-status dot, the credits glyph and the idle pill's
-    /// blue/green split used to read this too; all three now answer their own questions without it.
+    /// **Pacing bars only.** The service-status dot, the credits glyph and the idle pill's blue/green
+    /// split answer their own questions without it.
     ///
     /// **And not under Pressure at all.** That style mutes the whole quiet side unconditionally — blue,
     /// green and yellow all draw white — so this value has no effect there. That is what lets the
     /// Settings row sit **disabled on `Slow down`** under Pressure and still tell the truth: only the
-    /// "too fast" orange keeps colour, which is what that segment names. Sizing was never the whole
-    /// story — a zero-length pill still takes a colour, so before this rule the setting kept tinting a
-    /// visible mark from a control that claimed not to apply.
+    /// "too fast" orange keeps colour, which is what that segment names.
     ///
     /// Set by `AppDelegate` from `PersistedConfig.colorsTell`; the view stays a thin shell and does not
     /// read the config itself. Changing it requests a redraw (no size change).
@@ -67,11 +63,11 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// Bar presentation style for **this surface** (#224, per-surface since #329) — fed from
-    /// `PersistedConfig.menuBarStyle`. ``BarStyle/progress`` draws the current gap + time-indicator
-    /// marker; ``BarStyle/pressure`` a left-anchored ribbon with no marker; ``BarStyle/balance`` a
-    /// ribbon growing either way from a centre tick. Render-only (the bar occupies the same rect
-    /// whichever it is), so a redraw is all that's needed.
+    /// Bar presentation style for **this surface** — fed from `PersistedConfig.menuBarStyle`.
+    /// ``BarStyle/progress`` draws the current gap + time-indicator marker; ``BarStyle/pressure`` a
+    /// left-anchored ribbon with no marker; ``BarStyle/balance`` a ribbon growing either way from a
+    /// centre tick. Render-only (the bar occupies the same rect whichever it is), so a redraw is all
+    /// that's needed.
     ///
     /// Deliberately **not** kept in sync with `PopupBarView.barStyle` any more: the two surfaces are
     /// chosen independently, and the drawing code they share is reached through `BarStyle.scale`.
@@ -110,9 +106,7 @@ final class StatusItemView: NSView {
 
     /// Saturation/vividness of the **colour accents** (pacing gap, service dot, idle pill) — a multiplier
     /// applied to the resolved `.system*` colour at the draw site. `1.0` = the raw system colour; lower
-    /// values mute the accent toward grey so it sits calmer against a busy wallpaper. Kept as a hook for
-    /// the accent-tuning pass (the mono formula shipped first); at `1.0` the accents are the plain system
-    /// colours. Redraw on change.
+    /// values mute the accent toward grey so it sits calmer against a busy wallpaper. Redraw on change.
     var accentSaturation: CGFloat = 1.0 {
         didSet {
             guard accentSaturation != oldValue else { return }
@@ -163,82 +157,63 @@ final class StatusItemView: NSView {
         /// Width of the dark ring around the time-indicator marker.
         static let tickStroke: CGFloat = 1
         /// Width of the **zero tick** — the permanent mark for the zero each marker-less ribbon grows
-        /// out of: Balance's centre (#326) and Pressure's origin. Drawn *under* the track in the neutral
-        /// tick tone rather than over it in the pacing colour, so a lone vertical mark on a 34 pt bar
-        /// cannot be mistaken for the Progress time marker: only its ends show, it never moves, and it
-        /// carries no colour.
-        ///
-        /// Widened 1 → 1.5 pt: at a single point the ends reading out from under the track were too
-        /// fine to find at a glance, especially once ``zeroTickAlpha`` faded them. Still **less than a
-        /// third** of ``tickWidth`` (5 pt), which is what keeps the "cannot be mistaken for the marker"
-        /// argument intact — that argument rests on the whole construction (thin, neutral, under the
-        /// track, static), and the width only has to stay clearly out of the marker's league.
+        /// out of: Balance's centre and Pressure's origin. Drawn *under* the track in the neutral tick
+        /// tone rather than over it in the pacing colour, so a lone vertical mark on a 34 pt bar cannot
+        /// be mistaken for the Progress time marker: only its ends show, it never moves, and it carries
+        /// no colour. Kept **less than a third** of ``tickWidth`` (5 pt) for that reason.
         ///
         /// Half-point on purpose: the bar is drawn into a 2× menu-bar image, so 1.5 pt is a whole 3
         /// device pixels there, and the draw site pixel-snaps the tick's centre.
         static let centreTickWidth: CGFloat = 1.5
         /// Height of the **zero tick** — 1 pt taller than ``tickHeight``, so the ends showing from
         /// under the track stay legible at a fraction of the marker's width. Its own metric rather
-        /// than the marker's: the two shapes are sized for opposite jobs, and matching heights was only
-        /// ever a coincidence of the first draft.
+        /// than the marker's: the two shapes are sized for opposite jobs.
         static let centreTickHeight: CGFloat = 10
-        /// How much of ``brightAlpha`` the zero tick keeps — it is drawn **fainter than the mono text
-        /// beside it**, on both scales.
-        ///
-        /// The tick is scale furniture, not data: it says where the ribbon measures from and never
-        /// changes, so at the reset text's own opacity it competed for attention with the one thing on
-        /// the bar that does move. Fading it settles it into the background while leaving the ends
-        /// findable — the point is to be *available* when you look for the zero, not to announce it.
+        /// How much of ``brightAlpha`` the zero tick keeps — drawn **fainter than the mono text beside
+        /// it**, on both scales, so it settles into the background while leaving the ends findable: the
+        /// point is to be *available* when you look for the zero, not to announce it.
         ///
         /// A multiplier rather than its own absolute alpha, so the tick keeps tracking ``brightAlpha``
-        /// (measured against the system clock on both a light and a dark bar) instead of drifting from
-        /// it the next time that calibration moves.
+        /// instead of drifting from it the next time that calibration moves.
         static let zeroTickAlpha: CGFloat = 0.55
-        /// How far the transparent gutter under a yellow strip extends past it on each side (#326).
-        /// 1.25 pt against this 5 pt bar — the popup's 1.5 pt scaled to the shorter track.
+        /// How far the transparent gutter under a yellow strip extends past it on each side. 1.25 pt
+        /// against this 5 pt bar — the popup's 1.5 pt scaled to the shorter track.
         static let yellowGutter: CGFloat = 1.25
         /// Corner radius of each bar — **and** of the coloured strip drawn over it (`fillZone` clamps
-        /// to this rather than rounding a capsule, #326). The value itself is the shipped 1.5;
-        /// only the strip's sharing of it is new.
+        /// to this rather than rounding a capsule).
         static let barCorner: CGFloat = 1.5
         /// Point size of the ⚠️ error glyph (`exclamationmark.triangle.fill`). Tuned to read at the
         /// same weight as the idle `*` and the bars block.
         static let errorGlyphSize: CGFloat = 13
         /// Gap between the ⚠️ glyph and the (stale) bars block when both are drawn (30–60 min phase).
         static let errorGlyphGap: CGFloat = 4
-        /// Diameter of the leftmost service-status dot (issue #31), drawn only when a service is
-        /// non-operational. Small — a glance signal, not a primary element.
+        /// Diameter of the leftmost service-status dot, drawn only when a service is non-operational.
+        /// Small — a glance signal, not a primary element.
         static let statusDotDiameter: CGFloat = 6
         /// Gap between the service-status dot and the content to its right (bars / glyph).
         static let statusDotGap: CGFloat = 4
-        /// Point size of the money-credits currency glyph (`coloncurrencysign` ¤, #144). Tuned to read
-        /// at the same visual weight as the bars block and the ⚠️ glyph — a touch larger than the bars
-        /// are tall so the generic-currency mark stays legible at menu-bar size.
+        /// Point size of the money-credits currency glyph (`coloncurrencysign` ¤). Tuned to read at the
+        /// same visual weight as the bars block and the ⚠️ glyph.
         static let creditsIconSize: CGFloat = 12
         /// Gap after the money-credits icon. In the bars modes it is a leading element between the pause
-        /// glyph and the bars (#227), so this is the separation to the bars on its right; in the `.error`
-        /// state it is trailing and this is the separation to the content on its left.
+        /// glyph and the bars, so this is the separation to the bars on its right; in the `.error` state
+        /// it is trailing and this is the separation to the content on its left.
         static let creditsIconGap: CGFloat = 4
-        /// Point size of the red "pause" glyph (`pause.fill`, #199, #227) drawn as the **leftmost**
-        /// element when fully blocked. A touch smaller than the ⚠️ so it reads at about the same weight
-        /// as the two-bar block it precedes.
+        /// Point size of the red "pause" glyph (`pause.fill`) drawn as the **leftmost** element when
+        /// fully blocked. A touch smaller than the ⚠️ so it reads at about the same weight as the
+        /// two-bar block it precedes.
         static let pauseGlyphSize: CGFloat = 11
         /// Gap between the pause glyph and the element to its right (credits icon or bars).
         static let pauseGlyphGap: CGFloat = 3
-        /// Point size of the awaiting-input `hand.raised` indicator (#233), drawn as the **first
-        /// leading** element (before pause/credits/bars). Sized like the credits glyph so it reads at
-        /// the same weight as the other menu-bar decorations.
+        /// Point size of the awaiting-input `hand.raised` indicator, drawn as the **first leading**
+        /// element (before pause/credits/bars). Sized like the credits glyph.
         static let awaitingIconSize: CGFloat = 12
         /// Gap between the awaiting-input icon and the element to its right (pause / credits / bars).
-        /// A touch wider than the other decoration gaps so the hand doesn't crowd the next element.
         static let awaitingIconGap: CGFloat = 6
         /// How far below its resting position the awaiting hand sits when fully hidden (ADR-0073).
-        ///
-        /// The full item height rather than the measured symbol height: the ~13 pt glyph is centred
-        /// in a 22 pt row, so the distance from its resting top edge to the row's bottom is ≈17.5 pt
-        /// at most. 22 clears that with margin — anything short leaves a sliver of the fingertips
-        /// parked at the bottom edge, reading as a stray mark rather than an absent icon — and it is
-        /// one constant instead of a number derived from whatever SF Symbols reports today.
+        /// The full item height rather than the measured symbol height: the ~13 pt glyph is centred in
+        /// a 22 pt row, so the distance from its resting top edge to the row's bottom is ≈17.5 pt at
+        /// most — 22 clears that with margin.
         static let awaitingSlideTravel: CGFloat = height
     }
 
@@ -249,8 +224,7 @@ final class StatusItemView: NSView {
     // pacing/service buckets via `.systemGreen/.systemYellow/.systemOrange/.systemRed/.systemBlue`,
     // and the neutrals use the `*labelColor` family. The image draws through a per-appearance
     // handler (`snapshotImage`), so these flip light/dark and honour Increase Contrast automatically,
-    // like the battery/Wi-Fi icons — no fixed sRGB, no manual appearance detection, no statusline
-    // parity (the old xterm-256 mapping was dropped, ADR-0005 colour clause superseded).
+    // like the battery/Wi-Fi icons.
 
     @MainActor
     private enum Palette {
@@ -271,12 +245,11 @@ final class StatusItemView: NSView {
         /// Ring around the time-indicator marker so it stays distinct over any coloured zone —
         /// `.separatorColor`, so the ring flips with the bar (dark ring on a light bar and vice versa).
         static var indicatorStroke: NSColor { ColorRole.indicatorRing.defaultColor }
-        /// The **Balance** centre tick (#326) — the *calm fill's* own tone by default (``calmWhite`` =
+        /// The **Balance** centre tick — the *calm fill's* own tone by default (``calmWhite`` =
         /// `labelColor`, re-alpha'd through ``bright(_:)`` at the draw site, exactly as the calm bar
-        /// fill is). That is the menu bar's mono foreground: white on a dark bar, black on a light one,
-        /// flipping with the appearance. The zero is furniture of the scale, not a status, so it takes
-        /// the neutral foreground rather than a grey a step down from it. It keeps its own role because
-        /// it names a different element of the scale — the zero, not the calm fill (ADR-0089).
+        /// fill is): white on a dark bar, black on a light one. The zero is furniture of the scale, not
+        /// a status, so it takes the neutral foreground rather than a grey a step down from it. It
+        /// keeps its own role because it names a different element of the scale (ADR-0089).
         static var centreTick: NSColor { ColorRole.centreTick.defaultColor }
         /// The neutral grey track of a menu-bar bar — the whole-bar background, i.e. BOTH the `used`
         /// head and the future/unused tail on either side of the coloured pacing gap. `labelColor` at
@@ -286,16 +259,15 @@ final class StatusItemView: NSView {
         /// Idle glyph + reset label — follow the menu-bar foreground.
         static var foreground: NSColor { ColorRole.foreground.defaultColor }
 
-        /// The quiet-side neutral (#105): the soft pacing colours (idle green, on-pace green,
-        /// mild-ahead yellow) — and, since the time-indicator marker now shares its gap's colour, the
-        /// marker too — collapse to this when the user opts into a quieter menu bar. `labelColor`, the
-        /// same semantic foreground the reset label uses, so the calm signals read as the neutral
-        /// foreground and flip with the bar (a fixed light tone would vanish on a light bar).
+        /// The quiet-side neutral: the soft pacing colours (idle green, on-pace green, mild-ahead
+        /// yellow) — and, since the time-indicator marker shares its gap's colour, the marker too —
+        /// collapse to this when the user opts into a quieter menu bar. `labelColor`, the same semantic
+        /// foreground the reset label uses, so the calm signals flip with the bar.
         static var calmWhite: NSColor { ColorRole.calmWhite.defaultColor }
 
-        // Service-status dot (issue #31). The unified semantic hues (`.yellow/.orange/…`), shared with
-        // the popup service dots, so the dot flips light/dark and honours Increase Contrast.
-        // `operational` is never drawn (the dot appears only for a problem), so it is omitted.
+        // Service-status dot. The unified semantic hues (`.yellow/.orange/…`), shared with the popup
+        // service dots, so the dot flips light/dark and honours Increase Contrast. `operational` is
+        // never drawn (the dot appears only for a problem), so it is omitted.
         static var statusYellow: NSColor { ColorRole.yellow.defaultColor }
         static var statusOrange: NSColor { ColorRole.orange.defaultColor }
         static var statusRed:    NSColor { ColorRole.red.defaultColor }
@@ -303,8 +275,8 @@ final class StatusItemView: NSView {
         static var statusGray:   NSColor { ColorRole.gray.defaultColor }
 
         /// The red "pause" glyph drawn to the left of the bars/countdown when the user is fully blocked
-        /// (`CreditsPacing.isBlocked`) — the "no path to work" signal (#199, #227). The unified `red`
-        /// role, shared with the exhausted-limit bars and the blocking reset pill.
+        /// (`CreditsPacing.isBlocked`) — the "no path to work" signal. The unified `red` role, shared
+        /// with the exhausted-limit bars and the blocking reset pill.
         static var pauseRed: NSColor { ColorRole.red.defaultColor }
     }
 
@@ -356,7 +328,7 @@ final class StatusItemView: NSView {
     /// Every state takes its own semantic hue from one escalating scale — grey, yellow, orange, red —
     /// and all three surfaces that draw this dot (here, `PopupViewController.dotColor`, and the Legend
     /// page) agree on it. No setting reaches this function: `Colors tell me` governs the pacing bars
-    /// only (ADR-0105 §1, still current). `#410` changed which tone `.degraded` gets, not who decides it.
+    /// only (ADR-0105 §1, still current).
     private func statusDotColor(_ status: ServiceStatus) -> NSColor {
         let target = statusDotTarget(status)
         guard let colorAnimator else { return target }
@@ -369,15 +341,11 @@ final class StatusItemView: NSView {
     /// The dot's colour for a status, before the transition layer.
     private func statusDotTarget(_ status: ServiceStatus) -> NSColor {
         switch status {
-        // `degraded` was muted to the neutral from #381 until #410 (ADR-0111 supersedes ADR-0105 §3).
-        // The mute rested on "a yellow dot here is a state with no action attached", and three things
-        // sank it: `unknown` is grey and no more actionable, so the widget was not reserving colour for
-        // actionable states — it made one exception; the meaning is carried by the *scale*, and grey →
-        // yellow → orange → red only reads without a key because it is monotonic (drop the middle step
-        // and grey → orange says "fine, then suddenly bad", losing the slow-vs-broken distinction this
-        // dot exists to draw); and a degradation does have an action — check whether the slowness is
-        // theirs before spending an hour on your own code, the same class `partialOutage` prompts, one
-        // step milder. Unconditional, like every other case: this switch now has no exception at all.
+        // `degraded` takes its own yellow rather than muting to neutral (ADR-0111 supersedes
+        // ADR-0105 §3): the meaning is carried by the *scale*, and grey → yellow → orange → red only
+        // reads without a key because it is monotonic — dropping the middle step would make grey →
+        // orange say "fine, then suddenly bad", losing the slow-vs-broken distinction this dot exists
+        // to draw.
         case .degraded:         return accent(Palette.statusYellow)
         case .partialOutage:    return accent(Palette.statusOrange)
         case .majorOutage:      return accent(Palette.statusRed)
@@ -394,8 +362,7 @@ final class StatusItemView: NSView {
 
     /// Debug: big colour swatches instead of the widget (env `TOKENPACE_SWATCHES=1`) — draws the track
     /// and bright-tone candidate alphas as wide fills for precise eyedropping vs the system icons on the
-    /// real bar (the only reliable way to compare RGB — a screenshot on a wide-gamut display lies). Dev-
-    /// only; kept as a colour-tuning aid (the shipped widget never enters this branch).
+    /// real bar. Dev-only; the shipped widget never enters this branch.
     static let swatchMode = ProcessInfo.processInfo.environment["TOKENPACE_SWATCHES"] == "1"
 
     override var intrinsicContentSize: NSSize {
@@ -431,8 +398,8 @@ final class StatusItemView: NSView {
         }
         guard let layout else { return }
 
-        // The service-status dot (#31) is always the **rightmost** (trailing) element; its width is
-        // reserved from the right so the mode content keeps its leading position.
+        // The service-status dot is always the **rightmost** (trailing) element; its width is reserved
+        // from the right so the mode content keeps its leading position.
         var contentRect = rect
         if let problem = layout.serviceProblem {
             drawStatusDot(problem, in: contentRect)
@@ -440,9 +407,9 @@ final class StatusItemView: NSView {
             contentRect = NSRect(x: contentRect.minX, y: contentRect.minY,
                                  width: contentRect.width - inset, height: contentRect.height)
         }
-        // The money-credits icon (#144): in the bars modes it is a **leading** element between the pause
-        // glyph and the bars (drawn inside `drawExpanded`/`drawBlockedReset`, #227). In the diagnostic
-        // `.error` state there is no leading pause sequence, so it stays trailing (just left of the dot).
+        // The money-credits icon: in the bars modes it is a **leading** element between the pause glyph
+        // and the bars (drawn inside `drawExpanded`/`drawBlockedReset`). In the diagnostic `.error`
+        // state there is no leading pause sequence, so it stays trailing (just left of the dot).
         if case .error = layout.mode, let credits = layout.credits {
             drawCreditsIconTrailing(credits, in: contentRect)
             let inset = creditsIconWidth(for: credits.currency) + Metrics.creditsIconGap
@@ -462,8 +429,8 @@ final class StatusItemView: NSView {
         case let .error(fiveHour, sevenDay, reset, _):
             drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
         case .usagePollingOff:
-            // #341: `zzz` alone. The status dot above is deliberately still drawn — in this mode it
-            // is the item's only live signal, so suppressing it would leave a widget saying nothing.
+            // `zzz` alone. The status dot above is deliberately still drawn — in this mode it is the
+            // item's only live signal, so suppressing it would leave a widget saying nothing.
             drawGlyphAlone(WidgetGlyph.usageTrackingOff, accessibilityDescription: "usage monitoring off",
                            atX: contentRect.minX + Metrics.hPadding, in: contentRect)
         case .nothingMonitored:
@@ -481,15 +448,15 @@ final class StatusItemView: NSView {
     /// The leading-decoration origin for the bars modes (`.expanded`/`.blockedReset`): draw the pause
     /// glyph (when blocked) then the credits icon (when present), each advancing the origin, and return
     /// the x where the bars/countdown should start. Keeps the left-to-right order **pause → credits →
-    /// content** consistent across both modes (#199, #227).
+    /// content** consistent across both modes.
     private func drawLeadingDecorations(in rect: NSRect) -> CGFloat {
         var originX = rect.minX + Metrics.hPadding
-        // #233: the awaiting-input hand is the **first** leading element (left of pause/credits/bars).
+        // The awaiting-input hand is the **first** leading element (left of pause/credits/bars).
         //
-        // The origin advances whenever the **slot** is reserved, not whenever the glyph is drawn
-        // (#283) — the two conditions differ while nothing is waiting. Advancing only when the glyph
-        // is present would put the reserved width to the *right* of everything instead of to the left
-        // of it, so the bars would still shift on every change and the reservation would buy nothing.
+        // The origin advances whenever the **slot** is reserved, not whenever the glyph is drawn — the
+        // two conditions differ while nothing is waiting. Advancing only when the glyph is present
+        // would put the reserved width to the *right* of everything instead of to the left of it, so
+        // the bars would still shift on every change and the reservation would buy nothing.
         //
         // The step is the measured reserve (`awaitingIconWidth()`), the same number `itemWidth(for:)`
         // adds — never the drawn symbol's own width, so slot and glyph cannot drift apart by a
@@ -508,21 +475,13 @@ final class StatusItemView: NSView {
     }
 
     /// Whether the hand's **slot** is reserved — driven by the Appearance option alone, deliberately
-    /// ignoring whether anything is waiting right now (#283).
+    /// ignoring whether anything is waiting right now.
     ///
     /// The menu bar is right-aligned, so every width change shifts everything to its left, including
-    /// other apps' status items. Of the five data-dependent addends in ``itemWidth(for:)`` the hand
-    /// is the only high-frequency one — it toggles dozens of times a day, during ordinary work, and
-    /// carries no news about the widget's own layout. The other four fire once or twice per 5-hour
-    /// window and at the exact moment the user is already looking at the widget for that reason, so
-    /// their jump explains itself and stays as it is.
-    ///
-    /// So switching the feature on means "reserve the slot", not "the hand is on screen this second".
-    /// Users who keep the indicator off pay nothing.
-    ///
-    /// One flag since ADR-0090: the separate Appearance placement toggle is gone, so detecting waiting
-    /// sessions and showing them in the menu bar are the same decision. The reservation therefore keys
-    /// off the master switch alone — which is also the flag that makes the ≈18 pt worth paying for.
+    /// other apps' status items. Of the five data-dependent addends in ``itemWidth(for:)`` the hand is
+    /// the only high-frequency one — it toggles dozens of times a day during ordinary work and carries
+    /// no news about the widget's own layout. So switching the feature on means "reserve the slot",
+    /// not "the hand is on screen this second"; users who keep the indicator off pay nothing.
     ///
     /// ``isPreviewSpecimen`` opts out: a specimen renders one fixed frame, and this is the one width
     /// input that does not come from its `layout`.
@@ -535,15 +494,14 @@ final class StatusItemView: NSView {
     ///
     /// It buys exactly one behaviour: the awaiting-input slot is never reserved. That reservation is
     /// the sole width input read straight from `PersistedConfig` instead of from ``layout``
-    /// (``reservesAwaitingSlot``, #283), so a specimen built from a fixed frame would still change
-    /// width — and shift its content sideways past an invisible glyph — depending on a setting the
-    /// picker is not showing. Every other input is already carried by the layout, so nothing else
-    /// branches on this.
+    /// (``reservesAwaitingSlot``), so a specimen built from a fixed frame would still change width —
+    /// and shift its content sideways past an invisible glyph — depending on a setting the picker is
+    /// not showing.
     var isPreviewSpecimen = false
 
     /// Draw the small service-status dot at the **right edge** of `rect`, vertically centred — the
     /// trailing element of the widget. `hPadding` keeps it off the very edge, matching the bars'
-    /// inset. Drawn only when a service is non-operational (issue #31).
+    /// inset. Drawn only when a service is non-operational.
     private func drawStatusDot(_ status: ServiceStatus, in rect: NSRect) {
         let d = Metrics.statusDotDiameter
         let x = rect.maxX - Metrics.hPadding - d
@@ -553,22 +511,22 @@ final class StatusItemView: NSView {
         dot.fill()
     }
 
-    // MARK: Awaiting-input icon (#233)
+    // MARK: Awaiting-input icon
 
     /// Draw the `hand.raised` awaiting-input indicator in the reserved slot at **leading** `x` — the
     /// **first** leading decoration (before pause/credits/bars). Bare icon, no count (the count lives
     /// in the popup).
     ///
     /// Draws nothing when the glyph is fully hidden; the caller advances the origin by the reserved
-    /// width regardless (#283), so this returns nothing to place the next element by.
+    /// width regardless, so this returns nothing to place the next element by.
     ///
     /// The glyph slides in from below the widget's bottom edge and back down out of it (ADR-0073),
     /// clipped to its own slot. Its position comes from a presence factor the animator interpolates:
     /// 0 fully hidden, 1 at rest.
     private func drawAwaitingIcon(atX x: CGFloat, in rect: NSRect) {
         // Tint by urgency (soonest deletion across all awaiting sessions): red < 7d left, orange
-        // < 15d, neutral otherwise (#233/#234). accent(...) for the coloured states so they read at
-        // the same weight as the pause/credits glyphs; bright(label) for neutral.
+        // < 15d, neutral otherwise. accent(...) for the coloured states so they read at the same
+        // weight as the pause/credits glyphs; bright(label) for neutral.
         //
         // A hand on its way *out* has no urgency left in the layout — the count is already gone — so
         // it would grey out halfway down. The animator remembers the last one it was drawn with.
@@ -626,17 +584,17 @@ final class StatusItemView: NSView {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    // MARK: Money-credits icon (issue #144)
+    // MARK: Money-credits icon
 
     /// Draw the money-credits currency glyph at **leading** `x`, vertically centred on `rect`, and return
-    /// its right-edge x so the caller can place the bars/countdown beside it (#144, #227). In the bars
-    /// modes the icon sits between the pause glyph and the bars; the width is measured the same way
+    /// its right-edge x so the caller can place the bars/countdown beside it. In the bars modes the icon
+    /// sits between the pause glyph and the bars; the width is measured the same way
     /// ``creditsIconWidth(for:)`` reserves it. Returns `x` unchanged if the symbol can't be built.
     ///
     /// The glyph is **currency-specific** (``creditsSymbolName(for:)``): a known currency draws its own
     /// SF Symbol (`eurosign`/`dollarsign`/…), an unknown/empty code falls back to the generic
-    /// `coloncurrencysign` (¤) — never a hard-coded `$` (the currency is dynamic; EUR observed, #142).
-    /// Rendered as a **palette image** in the marker's pacing colour (``creditsIconColor(_:)``) — a system
+    /// `coloncurrencysign` (¤) — never a hard-coded `$` (the currency is dynamic; EUR observed). Rendered
+    /// as a **palette image** in the marker's pacing colour (``creditsIconColor(_:)``) — a system
     /// semantic colour resolved in the draw handler's appearance, matching the rest of the widget. Drawn
     /// with `respectFlipped: true` because this view is `isFlipped` (same as the ⚠️ glyph).
     @discardableResult
@@ -700,15 +658,9 @@ final class StatusItemView: NSView {
     /// - strongly ahead of pace → **orange**.
     /// - at the cap → **red** (`aheadColor`'s `usage >= 1` rung).
     ///
-    /// Calm mode (#105) still mutes the calm states to the calm white, which this scale already agrees
-    /// with — so the two paths cannot disagree.
+    /// Calm mode still mutes the calm states to the calm white, which this scale already agrees with —
+    /// so the two paths cannot disagree.
     private func creditsIconColor(_ credits: CreditsMarker) -> NSColor {
-        // No pacing-colour branch here since #381. The glyph's own scale is already **white → orange →
-        // red** (ADR-0068) — it has no green or yellow rung to mute — so the branch that read the setting
-        // returned the same `calmWhite` this function reaches anyway in every state but one: an
-        // **unlimited** cap (`bar == nil`), where it overrode the neutral foreground. That override was
-        // the only behaviour it had, and "money is moving" is not a pacing verdict for a bar-colour
-        // setting to quiet.
         guard let l = credits.bar else { return bright(Palette.foreground) }   // unlimited → neutral
         // At the cap → red. Otherwise only a *strong* ahead reads as orange; on-pace/behind and the
         // mild-ahead rung (which the bars paint yellow) both render white. The thresholds mirror
@@ -737,12 +689,10 @@ final class StatusItemView: NSView {
     ///
     /// Hosting the custom `NSView` as a button subview is unreliable (the system button owns its layout
     /// and paints over added subviews), so the robust path for fully custom menu-bar graphics is to hand
-    /// the button a ready image. This is the industry-standard technique for a menu-bar widget that
-    /// carries colour (Stats/iStat/AlDente all custom-draw with `NSColor.textColor`/`labelColor` for the
-    /// mono part and explicit colours for accents): true template vibrancy is unavailable for arbitrary
-    /// coloured geometry (`isTemplate` is all-or-nothing, and `wantsLayer`+overlay defeats vibrancy —
-    /// Apple forums thread/776799), so we approximate it with system semantic colours and compensate the
-    /// missing wallpaper-breathe with the mono-brightness slider / wallpaper calibration (ADR-0059).
+    /// the button a ready image — the same technique Stats/iStat/AlDente use: true template vibrancy is
+    /// unavailable for arbitrary coloured geometry (`isTemplate` is all-or-nothing), so we approximate it
+    /// with system semantic colours and compensate the missing wallpaper-breathe with the
+    /// mono-brightness slider / wallpaper calibration (ADR-0059).
     ///
     /// `isTemplate = false`: the widget carries real colour (pacing/service/idle) a template mask would
     /// strip.
@@ -751,11 +701,10 @@ final class StatusItemView: NSView {
     /// + `render` + `unlockFocus`) — NOT the lazy `NSImage(size:flipped:drawingHandler:)` form. The lazy
     /// handler runs *later*, when the status button paints, resolving dynamic colours against whatever
     /// appearance is current then (the vibrant menu-bar appearance, where e.g. `labelColor`'s alpha drops
-    /// 0.847 → 0.698) — so the mono tones came out wrong (text too light, `tertiaryLabelColor` track
-    /// mis-resolved). Drawing eagerly bakes every semantic colour against the button's *real*
-    /// `effectiveAppearance` the caller set, giving the same values as the system clock/moon. The caller
-    /// re-snapshots on a theme flip (its `effectiveAppearance` KVO) to rebake for the new appearance.
-    /// `flipped: true` matches this view's `isFlipped` so `render(in:)`'s top-left maths is unchanged.
+    /// 0.847 → 0.698) — so the mono tones came out wrong. Drawing eagerly bakes every semantic colour
+    /// against the button's *real* `effectiveAppearance` the caller set. The caller re-snapshots on a
+    /// theme flip (its `effectiveAppearance` KVO) to rebake for the new appearance. `flipped: true`
+    /// matches this view's `isFlipped` so `render(in:)`'s top-left maths is unchanged.
     func snapshotImage() -> NSImage {
         let size = intrinsicContentSize
         let image = NSImage(size: size)
@@ -770,9 +719,8 @@ final class StatusItemView: NSView {
     // MARK: Expanded
 
     private func drawExpanded(fiveHour: BarView?, sevenDay: BarView?, in rect: NSRect) {
-        // Leading decorations first (#199, #227): the red pause glyph (when blocked) then the credits
-        // icon (when present), each shifting the bars right past it — the same leading pattern the ⚠️
-        // error state uses. Order: pause → credits → bars.
+        // Leading decorations first: the red pause glyph (when blocked) then the credits icon (when
+        // present), each shifting the bars right past it. Order: pause → credits → bars.
         let originX = drawLeadingDecorations(in: rect)
         drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: nil, originX: originX, in: rect)
     }
@@ -788,7 +736,7 @@ final class StatusItemView: NSView {
     }
 
     /// Draw the red "pause" glyph at leading `x`, vertically centred on `rect`, and return its right-edge
-    /// x so the caller can place the next element beside it (#199, #227). A non-template palette image in
+    /// x so the caller can place the next element beside it. A non-template palette image in
     /// ``Palette/pauseRed``, drawn with `respectFlipped: true` (this view is `isFlipped`). Only reached
     /// when `layout.blockedPause` is set (fully blocked). If `pause.fill` is unavailable the caller falls
     /// back to `x` (glyph omitted).
@@ -827,13 +775,10 @@ final class StatusItemView: NSView {
     /// - **one** (the other was hidden while calm — ``TopBarHiding``, ADR-0086): that bar **alone**,
     ///   vertically centred on the item — so a single bar sits mid-height, not clinging to the top row.
     ///   The geometry depends on the *count*, not on which window survived, so a lone 7-day bar lands
-    ///   exactly where a lone 5-hour bar used to (#94).
+    ///   exactly where a lone 5-hour bar used to.
     ///
     /// Shared by ``drawExpanded(fiveHour:sevenDay:reset:in:)`` and the bars-beside-⚠️ error phase so
-    /// the geometry is identical; only the left origin differs (the error glyph shifts it right). The
-    /// error phase always passes both bars (they are diagnostic there, never hidden) and a non-nil
-    /// `reset`; in the normal expanded mode `nil` `reset` means the countdown was dropped per the
-    /// selection table (ADR-0029).
+    /// the geometry is identical; only the left origin differs (the error glyph shifts it right).
     private func drawBars(fiveHour: BarView?, sevenDay: BarView?, reset: String?,
                           originX: CGFloat, in rect: NSRect) {
         // Right edge of the bar column (same `barWidth` for one or two bars) — where the reset label
@@ -881,7 +826,7 @@ final class StatusItemView: NSView {
         }
     }
 
-    // MARK: Error (issue #12)
+    // MARK: Error
 
     /// Draw the error state: the "no data" glyph alone. Since ADR-0091 it never carries bars — data
     /// stale enough to reach this state is not shown at all — so `fiveHour`/`sevenDay`/`reset` are
@@ -930,7 +875,7 @@ final class StatusItemView: NSView {
     /// Draw a single glyph in the menu-bar foreground colour at `x` and return its right edge x.
     ///
     /// Factored out so every lone-glyph state — the no-data symbol, the ⚠️, and the two monitoring
-    /// states of #341 — shares one measurement and one drawing path. `atX` exists because the ⚠️ is not
+    /// states — shares one measurement and one drawing path. `atX` exists because the ⚠️ is not
     /// always leading: in ``drawUnknownReset(in:)`` it follows the pause or currency glyph, and hard-coding
     /// `rect.minX` would stack the two in the same place. The width counterpart is ``glyphWidth(_:)``,
     /// which must use the same `SymbolConfiguration` or the item will reserve a width it does not draw into.
@@ -962,35 +907,29 @@ final class StatusItemView: NSView {
     /// base zones (used + future/unused) share the solid ``PopupBarView/monochromeGrey`` with the popup,
     /// so the menu-bar bars read identically; only the pacing gap and dot carry colour.
     private func drawBar(_ bar: BarView, in rect: NSRect) {
-        // Idle 5h bar (#100, ADR-0027): no pacing zones — "no active session".
-        // The bar's `layout`/`indicator` are inert here.
+        // Idle 5h bar (ADR-0027): no pacing zones — "no active session". The bar's `layout`/`indicator`
+        // are inert here.
         //
-        // Idle is drawn the same way in **both** styles (#325): the bare grey track, plus the minimum
-        // pill at the left edge — the shape any zero-length ribbon draws. Progress adds its identifying
-        // time marker on top, parked at `timeFraction` = 0 (the window has just rolled), which covers
-        // the pill; that marker is the only difference between the two styles here.
-        //
-        // Progress used to fill the whole bar solid blue, which read exactly like a Pressure bar at
-        // *full* pressure — the loudest mark for the calmest state. Zero usage is zero on both scales.
-        // Mirror of `PopupBarView.draw`'s idle branch.
+        // Idle is drawn the same way in **both** styles: the bare grey track, plus the minimum pill at
+        // the left edge — the shape any zero-length ribbon draws. Progress adds its identifying time
+        // marker on top, parked at `timeFraction` = 0 (the window has just rolled), which covers the
+        // pill; that marker is the only difference between the two styles here. Mirror of
+        // `PopupBarView.draw`'s idle branch.
         if bar.idle {
-            // Idle bar fill (#100/#158): blocked → base track grey; ready+calm → quiet neutral;
-            // ready+normal → green (ADR-0105 retired the "ready to start" blue).
+            // Idle bar fill: blocked → base track grey; ready+calm → quiet neutral; ready+normal →
+            // green.
             //
             // Muted uses the same `calmWhite` neutral as every muted pacing bar, not a dimmer tone of
-            // its own (#307): idle sitting quieter than the quiet bars beside it made the "nothing is
+            // its own: idle sitting quieter than the quiet bars beside it made the "nothing is
             // happening" state read as "something is wrong with this bar". `bright()` is what makes it
             // the *same* tone — the neutral is `labelColor`, and every other muted surface here
-            // re-alphas it to `brightAlpha`; drawn raw, idle came out louder than its neighbours (#343).
-            // Only the muted branch is brightened: `unusedGrey` is a 22 %-alpha track colour, and
-            // re-alphaing it to 0.865 would render the *blocked* bar nearly opaque.
+            // re-alphas it to `brightAlpha`. Only the muted branch is brightened: `unusedGrey` is a
+            // 22 %-alpha track colour, and re-alphaing it to 0.865 would render the *blocked* bar
+            // nearly opaque.
             //
-            // **Always green when ready** (#381), where it used to be blue while the week had headroom.
-            // The blue said "ready to start, and there is quota to burn" — a second claim on top of
-            // "ready", carried by the same pill, needing `PacingModel.weeklyHasHeadroom` threaded through
-            // an inert layout to stay honest. It is dropped: idle answers one question, and the weekly
-            // gate still does its real job on the *active* bar's `blueAllowed` (ADR-0081). Grey still
-            // means blocked. The popup drops the same distinction, so the two surfaces agree.
+            // **Always green when ready.** Grey still means blocked. The popup drops the same
+            // distinction, so the two surfaces agree.
+            //
             // Under Pressure the quiet side is muted unconditionally (see `gapColorTarget`), and idle is
             // the quietest state there is — so the ready pill follows the same rule rather than reading a
             // setting the page does not show under that style.
@@ -1029,8 +968,8 @@ final class StatusItemView: NSView {
         let l = bar.layout
         let w = rect.width
 
-        // The zero tick goes down BEFORE the track (#326): the track then covers its middle and only
-        // the ends stand proud, which is what keeps it from reading as a Progress time marker. True of
+        // The zero tick goes down BEFORE the track: the track then covers its middle and only the ends
+        // stand proud, which is what keeps it from reading as a Progress time marker. True of
         // Pressure's origin tick for exactly the same reason it is of Balance's centre one.
         if barStyle.scale != .window { drawZeroTick(in: rect) }
 
@@ -1044,24 +983,21 @@ final class StatusItemView: NSView {
         NSGraphicsContext.saveGraphicsState()
         path.addClip()
 
-        // Pressure style (#224, rescaled in #307): a left-anchored ribbon coloured by the SAME pacing
-        // state colour a Progress gap would use (`calmedGapColor` — carries calm-muting / work-harder
-        // too), with no time-indicator marker. The ribbon's LENGTH is `BarLayout.pressureLength` —
-        // the gap measured against the time left before the reset, NOT the window-scale gap width
-        // Progress draws. So the two styles no longer show the same amount of colour: Pressure is
-        // wider exactly where the state is more urgent. Mirror of `PopupBarView.draw`'s Pressure branch.
-        // The `color-cycle` stub pins the strip's length so only the colour moves — see
-        // `frozenStripFraction`; it overrides the length, so the stub is unaffected by the rescale.
-        // The *style* still decides whether a marker follows, so Progress keeps its full anatomy under
-        // the stub instead of collapsing into Pressure.
-        // Balance (#326, ADR-0079): the ribbon runs from the bar's CENTRE to `0.5 + offset/2`, so its
+        // Pressure style: a left-anchored ribbon coloured by the SAME pacing state colour a Progress
+        // gap would use (`calmedGapColor` — carries calm-muting / work-harder too), with no
+        // time-indicator marker. The ribbon's LENGTH is `BarLayout.pressureLength` — the gap measured
+        // against the time left before the reset, NOT the window-scale gap width Progress draws. So the
+        // two styles no longer show the same amount of colour: Pressure is wider exactly where the
+        // state is more urgent. Mirror of `PopupBarView.draw`'s Pressure branch. The `color-cycle` stub
+        // pins the strip's length so only the colour moves — see `frozenStripFraction`.
+        //
+        // Balance (ADR-0079): the ribbon runs from the bar's CENTRE to `0.5 + offset/2`, so its
         // direction carries ahead-vs-behind and its length carries by how much. Same colour source as
         // every other style — this changes the geometry, never the verdict. The floor applies for the
         // same reason it does on the Pressure branch, but about the centre: `u == t` is a real,
-        // recurring state (and the exact one this style is built to show as "on pace"), so a
-        // degenerate span becomes a centred pill rather than a blank track. `pinsStart` stays off:
-        // both edges here are data, and the floor must grow symmetrically about the zero — pinning
-        // would shove the pill off-centre and make "dead on pace" read as a small lead.
+        // recurring state, so a degenerate span becomes a centred pill rather than a blank track.
+        // `pinsStart` stays off: both edges here are data, and the floor must grow symmetrically about
+        // the zero — pinning would shove the pill off-centre.
         if barStyle.scale == .centred {
             let offset = frozenStrip(for: bar).map { $0 * 2 - 1 } ?? l.balanceOffset
             let far = 0.5 + offset / 2
@@ -1073,15 +1009,12 @@ final class StatusItemView: NSView {
         }
 
         if !barStyle.showsTimeMarker {
-            // A **zero-length** ribbon still has to read as "zero", not as an empty track. Without a time
-            // marker this branch is the bar's only mark, so `stripRect`'s degenerate-span `nil` would
-            // leave the widget completely blank. Since ADR-0101 that is the common case rather than an
-            // edge one: the ribbon's zero is `t`, so **every** state at or behind pace floors to the
-            // pill — just over half the reachable space. The reset boundary is simply the loudest
-            // instance of it (`applyIdleGrace`/`suppress`, ADR-0041/0045, render 0 % against a freshly
-            // rolled `resets_at = now + 5h`, i.e. `usage == time == 0`). Progress is deliberately
-            // excluded: there an empty gap means "dead on pace" and the marker already carries the
-            // position.
+            // A **zero-length** ribbon still has to read as "zero", not as an empty track. Without a
+            // time marker this branch is the bar's only mark, so `stripRect`'s degenerate-span `nil`
+            // would leave the widget completely blank. Since ADR-0101 that is the common case rather
+            // than an edge one: the ribbon's zero is `t`, so **every** state at or behind pace floors to
+            // the pill. Progress is deliberately excluded: there an empty gap means "dead on pace" and
+            // the marker already carries the position.
             let ribbon = frozenStrip(for: bar) ?? l.pressureLength
             fillZone(from: 0, to: ribbon, in: rect, width: w,
                      color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true)
@@ -1100,8 +1033,8 @@ final class StatusItemView: NSView {
         let gapFrom = frozen != nil ? 0 : l.gapStart
         let gapTo = frozen ?? l.gapEnd
         // The gap's left edge is `usage` — pinned, so a gap narrower than the min-width floor grows
-        // rightwards instead of bleeding colour back over the already-spent zone (#323). Not applied
-        // under the stub, whose pinned `0…frozen` span is a ribbon from the origin.
+        // rightwards instead of bleeding colour back over the already-spent zone. Not applied under
+        // the stub, whose pinned `0…frozen` span is a ribbon from the origin.
         fillZone(from: gapFrom, to: gapTo, in: rect, width: w, color: gapColor, pinsStart: frozen == nil)
 
         NSGraphicsContext.restoreGraphicsState()
@@ -1116,48 +1049,39 @@ final class StatusItemView: NSView {
 
     /// The **zero tick**: a permanent 1 pt vertical mark at the zero the ribbon grows out of, in the
     /// neutral tick tone, drawn **under** the track so only its protruding ends show. Balance's zero is
-    /// the bar's midpoint (#326, ADR-0079); Pressure's is the left-anchored ribbon's own origin.
+    /// the bar's midpoint (ADR-0079); Pressure's is the left-anchored ribbon's own origin.
     ///
     /// Deliberately *not* built on ``drawTimeMarker(at:colour:in:)`` despite the similar shape — the
-    /// semantics are opposite, and every difference here is doing work. That marker is data (it moves
-    /// with `timeFraction`, takes the pacing colour, and sits on top with a `.copy` reset and flanking
-    /// outline); this is a fixed rule of the scale. Drawing it under the track in grey at a fifth the
-    /// width is what stops a lone vertical mark on a 34 pt bar from reading as Progress's marker —
-    /// the objection that kept ticks out of the menu bar entirely under Pressure (see
-    /// `PopupBarView.tickFractions`). That objection is answered by *construction*, not by omission,
-    /// which is what lets Pressure carry the mark too. It is drawn in **every** state of both styles,
-    /// idle included: a length needs something to be a length from.
+    /// semantics are opposite. That marker is data (it moves with `timeFraction`, takes the pacing
+    /// colour, and sits on top with a `.copy` reset and flanking outline); this is a fixed rule of the
+    /// scale. Drawing it under the track in grey at a fifth the width is what stops a lone vertical
+    /// mark on a 34 pt bar from reading as Progress's marker. It is drawn in **every** state of both
+    /// styles, idle included: a length needs something to be a length from.
     ///
     /// **Where Pressure's zero actually is.** Not `scaleX(0)`, and not the track's left edge: a
     /// zero-length ribbon is floored to the min-width pill, and that pill's left cap is then snapped
     /// flush to `rect.minX` by ``PopupBarView/pillRect(at:in:)``. Its drawn centre therefore sits half
     /// a pill-width in from the edge. Reading the position back out of `pillRect` keeps the tick under
-    /// the pill it marks however that snap resolves, instead of restating the arithmetic here and
-    /// drifting from it the next time the inset geometry moves (`minStripWidth` is the one knob).
+    /// the pill it marks however that snap resolves.
     private func drawZeroTick(in rect: NSRect) {
         // Balance measures from the middle; Pressure from the zero pill's centre.
         let cx: CGFloat = barStyle.scale == .centred
             ? PopupBarView.scaleX(0.5, in: rect).rounded()
             : (PopupBarView.pillRect(at: 0, in: rect)?.midX ?? PopupBarView.scaleX(0, in: rect)).rounded()
         // Only the zero, and on Pressure the zero *is* "exactly on pace" since ADR-0101. A second
-        // permanent tick here was never an option anyway: ⌥ never reaches this surface (the modifier
-        // is only observable while the menu is open, and then the reader is looking at the popup), and
-        // a permanent pair of teeth on a 34 pt bar is the noise the single mark was carefully
-        // constructed to avoid. The menu bar therefore carries the identifying half of the ruler; the
-        // explaining half lives in the dropdown, under ⌥ (`PopupBarView.drawTicks`).
+        // permanent tick here was never an option anyway: ⌥ never reaches this surface, and a permanent
+        // pair of teeth on a 34 pt bar is the noise the single mark was carefully constructed to avoid.
+        // The menu bar carries the identifying half of the ruler; the explaining half lives in the
+        // dropdown, under ⌥ (`PopupBarView.drawTicks`).
         let w = Metrics.centreTickWidth
         let h = Metrics.centreTickHeight
         // Neutral `centreTick` — never a pacing colour: this is scale furniture, not data. It defaults
         // to the calm fill's own tone (`calmWhite` = `labelColor`, re-alpha'd by `bright()` exactly as
-        // the calm bar fill is): the mono white-on-dark / black-on-light the menu bar already uses for
-        // everything that is foreground rather than status. Still its own role, so the tuner can pull
-        // it away from the calm fill.
+        // the calm bar fill is). Still its own role, so the tuner can pull it away from the calm fill.
         //
         // Then faded by `zeroTickAlpha` on top of that, so the mark reads quieter than the text beside
         // it. Applied here rather than in `bright()` — that alpha is calibrated against the system
-        // clock and is shared with the reset label and the ⚠️ glyph, which must not move with it. A
-        // tuner-supplied colour keeps its own alpha as the base, so pulling the role somewhere else
-        // still fades by the same proportion.
+        // clock and is shared with the reset label and the ⚠️ glyph, which must not move with it.
         let tickInk = bright(Palette.centreTick)
         tickInk.withAlphaComponent(tickInk.alphaComponent * Metrics.zeroTickAlpha).setFill()
         // Snap the LEFT EDGE to the 2× device grid rather than centring on the rounded `cx`. At a
@@ -1172,8 +1096,8 @@ final class StatusItemView: NSView {
     /// The time-indicator marker: a slim, lightly-rounded vertical bar rather than a dot — reads as a
     /// crisp position tick, standing proud of the bar on both sides.
     ///
-    /// Factored out because **idle draws it too** (#307): under Progress the marker is what identifies
-    /// the style, so an idle bar without it is indistinguishable from a Pressure bar at full pressure.
+    /// Factored out because **idle draws it too**: under Progress the marker is what identifies the
+    /// style, so an idle bar without it is indistinguishable from a Pressure bar at full pressure.
     /// There `fraction` is 0 — the window has just rolled, so no time has elapsed.
     private func drawTimeMarker(at fraction: Double, colour: NSColor, in rect: NSRect) {
         let cx = PopupBarView.scaleX(CGFloat(fraction), in: rect)
@@ -1203,8 +1127,8 @@ final class StatusItemView: NSView {
         strokeMarkerEdges(markerRect, in: rect, width: Metrics.tickStroke)
     }
 
-    /// The pacing-gap fill colour, with calm mode (#105) applied. Normally this is the on-pace green
-    /// or the graded ahead colour (`PopupBarView.aheadColor`). When `colorsTell.mutesCalm` is on, the **calm**
+    /// The pacing-gap fill colour, with calm mode applied. Normally this is the on-pace green or the
+    /// graded ahead colour (`PopupBarView.aheadColor`). When `colorsTell.mutesCalm` is on, the **calm**
     /// states (`BarLayout.isCalm`: on-pace green + mild-ahead yellow) mute to white; the strong warnings
     /// (orange/red) stay coloured.
     ///
@@ -1222,14 +1146,10 @@ final class StatusItemView: NSView {
         // Calm neutral is a bright tone (labelColor at the text opacity, via `bright`); the coloured
         // pacing gap is an accent (scaled by accentSaturation). Neither is the dimmed bar track.
 
-        // **Pressure mutes the whole quiet side, unconditionally** (#381): blue, green and yellow all
-        // draw white, whatever `colorsTell` says.
-        //
-        // This is what lets the "Colors tell me" row be disabled under Pressure and still read honestly:
-        // with every quiet state muted, `Slow down` is a true description of the bar, not a placeholder.
-        // *Length* was only half the story — the zero pill still took its **colour** from here, so before
-        // this rule a stored `slowDownOrSpeedUp` produced a blue pill under Pressure with no live control
-        // to explain it. Found in live verification, not by reasoning.
+        // **Pressure mutes the whole quiet side, unconditionally**: blue, green and yellow all draw
+        // white, whatever `colorsTell` says. This is what lets the "Colors tell me" row be disabled
+        // under Pressure and still read honestly: with every quiet state muted, `Slow down` is a true
+        // description of the bar, not a placeholder.
         //
         // Pressure is also where a coloured quiet state says least: with no ribbon to size, the hue is
         // the only channel left, and it is reporting a state the scale itself has decided not to draw.
@@ -1260,7 +1180,7 @@ final class StatusItemView: NSView {
     }
 
     /// Whether this strip is rendering the **yellow** (mild-lead) pacing colour, and so wants the
-    /// transparent gutter beneath it (#326).
+    /// transparent gutter beneath it.
     ///
     /// Returns `false` outright under calm colours: `mutesCalm` folds yellow into `calmWhite`, so there
     /// is no yellow left to rescue and cutting the track would only punch a hole under a neutral strip.
@@ -1269,7 +1189,7 @@ final class StatusItemView: NSView {
     /// are converted into one colour space first; a dynamic catalogue colour never compares equal to a
     /// resolved one directly.
     private func isYellow(_ colour: NSColor) -> Bool {
-        // Pressure mutes the whole quiet side (#381), so its mild-lead yellow never reaches the screen —
+        // Pressure mutes the whole quiet side, so its mild-lead yellow never reaches the screen —
         // stated here rather than left to the colour comparison below, which would also return `false`
         // but only by accident of the rendered tone.
         guard barStyle != .pressure else { return false }
@@ -1292,7 +1212,7 @@ final class StatusItemView: NSView {
     /// span already draws — used by the markerless (Simple/Mixed) ribbon, where the strip is the bar's
     /// only mark and `nil` would blank the widget. Off by default so Pace & Time's empty gap stays empty.
     /// `pinsStart` forwards to ``PopupBarView/stripRect(from:to:in:pinsStart:)`` and is set by the
-    /// Progress gap, whose left edge is `usage` and so must not drift leftwards under the marker (#323).
+    /// Progress gap, whose left edge is `usage` and so must not drift leftwards under the marker.
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor,
                           floorEmptyToPill: Bool = false, pinsStart: Bool = false,
                           anchoredAt anchor: Double? = nil) {
@@ -1304,11 +1224,11 @@ final class StatusItemView: NSView {
         // The strip takes the TRACK's corner radius, not a capsule's. `min(w,h)/2` rounds a 5 pt-tall
         // strip to 2.5 pt — visibly rounder than the `barCorner` 1.5 pt track it sits in, so a full-width
         // ribbon bulged past the track's own corners and a short one read as a lozenge on a rectangle.
-        // Two shapes in one bar should share one corner. The popup keeps its capsule: there the bar is
-        // 6 pt and the strip genuinely is a pill (`PopupBarView.draw`).
+        // The popup keeps its capsule: there the bar is 6 pt and the strip genuinely is a pill
+        // (`PopupBarView.draw`).
         let r = min(Metrics.barCorner, min(stripRect.width, stripRect.height) / 2)
-        // Knock a transparent gutter out of the grey track under a **yellow** strip (#326), mirroring
-        // the popup: yellow is the one pacing colour close enough in luminance to the track to lose its
+        // Knock a transparent gutter out of the grey track under a **yellow** strip, mirroring the
+        // popup: yellow is the one pacing colour close enough in luminance to the track to lose its
         // edge against it, so the wallpaper is let through on either side to separate the two. Narrower
         // here (1.25 pt) than the popup's 1.5, in proportion to the shorter 5 pt bar.
         //
@@ -1328,7 +1248,7 @@ final class StatusItemView: NSView {
         NSBezierPath(roundedRect: stripRect, xRadius: r, yRadius: r).fill()
     }
 
-    /// Draw the reset countdown text, centred inside its reserved slot (#303).
+    /// Draw the reset countdown text, centred inside its reserved slot.
     ///
     /// `slotX` is the slot's **left edge**, not the text's: the slot is a fixed ``resetLabelSlot`` wide
     /// whatever the label says, and the text is centred in it, so the spare space splits evenly either
@@ -1347,17 +1267,16 @@ final class StatusItemView: NSView {
         label.draw(at: NSPoint(x: x, y: rect.minY + (rect.height - size.height) / 2))
     }
 
-    /// Draw the blocked-state countdown **alone** (#194) — no bars, just the reset label at the left
-    /// inset, vertically centred. Reuses the same monospaced-digit font and foreground colour as
+    /// Draw the blocked-state countdown **alone** — no bars, just the reset label at the left inset,
+    /// vertically centred. Reuses the same monospaced-digit font and foreground colour as
     /// ``drawResetLabel(_:slotAt:in:)`` so the countdown looks identical whether or not the bars are
     /// hidden; `itemWidth` reserves the same fixed slot (via ``resetLabelWidth(_:)``) the bars mode does,
-    /// so the item keeps its width as the digit count changes (#303). The blocked mode carries no pacing
+    /// so the item keeps its width as the digit count changes. The blocked mode carries no pacing
     /// colour to mute, so `colorsTell` is irrelevant here — the label is always the neutral foreground.
     ///
     /// When `layout.blockedPause` is set (fully blocked), the red pause glyph is drawn first, then the
     /// credits icon (when present), and the countdown shifts right past them — the same leading pattern
-    /// the bars use in ``drawExpanded``, so the pause icon appears whether or not the bars are hidden
-    /// (#199, #227). Order: pause → credits → countdown.
+    /// the bars use in ``drawExpanded``. Order: pause → credits → countdown.
     private func drawBlockedReset(_ reset: String, in rect: NSRect) {
         let originX = drawLeadingDecorations(in: rect)
         drawResetLabel(reset, slotAt: originX, in: rect)
@@ -1369,17 +1288,17 @@ final class StatusItemView: NSView {
     /// the bars + label, widest for the ⚠️ + stale-bars phase (the glyph adds its own width). Driven
     /// dynamically so the item hugs exactly the content currently drawn.
     private func itemWidth(for layout: MenuBarLayout?) -> CGFloat {
-        // The service dot (#31) is always a **trailing** inset (dot + gap). The money-credits icon (#144)
-        // is a **leading** inset in the bars modes (between the pause glyph and the bars, #227) but a
-        // **trailing** inset in the diagnostic `.error`/cold-start states (no leading sequence there).
+        // The service dot is always a **trailing** inset (dot + gap). The money-credits icon is a
+        // **leading** inset in the bars modes (between the pause glyph and the bars) but a **trailing**
+        // inset in the diagnostic `.error`/cold-start states (no leading sequence there).
         let dotInset = layout?.serviceProblem != nil ? Metrics.statusDotDiameter + Metrics.statusDotGap : 0
         let creditsInset = layout?.credits.map { creditsIconWidth(for: $0.currency) + Metrics.creditsIconGap } ?? 0
-        // Leading red pause glyph (#199, #227) reserves its width + gap in both bars modes, mirroring the
-        // origin shift in `drawLeadingDecorations`; zero when not fully blocked.
+        // Leading red pause glyph reserves its width + gap in both bars modes, mirroring the origin
+        // shift in `drawLeadingDecorations`; zero when not fully blocked.
         let pauseInset = (layout?.blockedPause == true) ? pauseGlyphWidth() + Metrics.pauseGlyphGap : 0
-        // Awaiting-input hand (#233) is the first leading element in the bars modes. Reserved from the
-        // **option alone**, not from the live count (#283), so the widget keeps its width as sessions
-        // start and stop waiting. Mirrors the origin advance in `drawLeadingDecorations`.
+        // Awaiting-input hand is the first leading element in the bars modes. Reserved from the
+        // **option alone**, not from the live count, so the widget keeps its width as sessions start
+        // and stop waiting. Mirrors the origin advance in `drawLeadingDecorations`.
         let awaitingInset = reservesAwaitingSlot ? awaitingIconWidth() + Metrics.awaitingIconGap : 0
         // Leading decorations in the bars modes: awaiting hand → pause glyph → credits icon.
         let leadingInset = awaitingInset + pauseInset + creditsInset
@@ -1393,7 +1312,7 @@ final class StatusItemView: NSView {
             // draw into the same `barWidth` column.
             return dotInset + Metrics.hPadding + leadingInset + Metrics.barWidth + Metrics.hPadding
         case let .iconOnlyReset(reset, _):
-            // No bars (#194): the item hugs the leading decorations (pause + credits) plus the countdown.
+            // No bars: the item hugs the leading decorations (pause + credits) plus the countdown.
             return dotInset + Metrics.hPadding + leadingInset + resetLabelWidth(reset) + Metrics.hPadding
         case .exhaustedUnknownReset:
             // A lone ⚠️, same compact width as the other glyph-only states — no leading sequence, since
@@ -1404,7 +1323,7 @@ final class StatusItemView: NSView {
             // (no leading pause sequence in this state).
             return Metrics.height + dotInset + creditsInset
         case .usagePollingOff, .nothingMonitored, .weeklyResetUnknown:
-            // A lone glyph in all three (#341, ADR-0107) — same compact width as the error state. The
+            // A lone glyph in all three (ADR-0107) — same compact width as the error state. The
             // credits inset is structurally zero here (`make` suppresses the marker in these modes),
             // but it is kept in the sum so this branch cannot drift from the others.
             return Metrics.height + dotInset + creditsInset
@@ -1418,32 +1337,29 @@ final class StatusItemView: NSView {
     private static let resetLabelFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 
     /// Width reserved for the reset label — the **widest** string the formatter can produce, so the
-    /// item stops changing width as the digit count does (#303). Measured once, lazily, from
+    /// item stops changing width as the digit count does. Measured once, lazily, from
     /// ``resetLabelFont``, never hard-coded: a literal would silently stop matching the drawn text if
     /// the font or its size ever changed.
     ///
     /// Four probes cover the whole range because the font is monospaced-**digit**, so every digit is
     /// the same width — `00m`/`00h`/`00d` therefore stand in for every two-digit value, and `<1m` for
-    /// the only non-digit form. Sweeping all of `1…49m` / `1…22h` / `1…30d` yields the identical
-    /// number (24 pt) at ~500× the cost, so the probes are the whole set, not a sample of it.
+    /// the only non-digit form.
     ///
     /// Independent of display scale: text metrics are in **points**, so the backing scale factor
-    /// (1×/2×/3×) changes rasterisation, not width — verified identical across all three. Nothing to
-    /// recompute when the widget moves between a Retina and a non-Retina screen.
+    /// (1×/2×/3×) changes rasterisation, not width — verified identical across all three.
     private static let resetLabelSlot: CGFloat = ["<1m", "00m", "00h", "00d"]
         .map { measuredResetLabelWidth($0) }
         .max() ?? 24
 
-    /// Width the reserved slot gives a reset label. Constant at ``resetLabelSlot`` across every label
-    /// (#303) — `10h` → `9h` used to shrink the item by 7 pt, and the menu bar is right-aligned, so
-    /// every such swing shifted other apps' status items.
+    /// Width the reserved slot gives a reset label. Constant at ``resetLabelSlot`` across every label —
+    /// `10h` → `9h` used to shrink the item by 7 pt, and the menu bar is right-aligned, so every such
+    /// swing shifted other apps' status items.
     ///
     /// `max` rather than the bare slot as a guard against silent clipping: a future formatter change or
     /// a longer-horizon window could produce a string wider than the probes above, and this widens the
-    /// item — today's behaviour — instead of cutting the glyph off. No live case reaches it: a blocked
-    /// countdown resolves through `BlockingReset.forBlocked`, which needs *every* window exhausted, and
-    /// the 7-day window resets within 7 days (`7d`, 14 pt); even a credits/monthly reset tops out at
-    /// `30d` (21 pt).
+    /// item instead of cutting the glyph off. No live case reaches it today: a blocked countdown
+    /// resolves through `BlockingReset.forBlocked`, which needs *every* window exhausted, and the 7-day
+    /// window resets within 7 days (`7d`, 14 pt); even a credits/monthly reset tops out at `30d` (21 pt).
     private func resetLabelWidth(_ reset: String) -> CGFloat {
         max(Self.resetLabelSlot, Self.measuredResetLabelWidth(reset))
     }
@@ -1475,8 +1391,8 @@ final class StatusItemView: NSView {
         return ceil(symbol?.size.width ?? Metrics.pauseGlyphSize)
     }
 
-    /// The reserved width of the awaiting-input `hand.raised` icon (#233), measured the same way it is
-    /// drawn — so `itemWidth` reserves exactly what `drawAwaitingIcon` paints.
+    /// The reserved width of the awaiting-input `hand.raised` icon, measured the same way it is drawn
+    /// — so `itemWidth` reserves exactly what `drawAwaitingIcon` paints.
     private func awaitingIconWidth() -> CGFloat {
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.awaitingIconSize, weight: .semibold)
         let symbol = NSImage(systemSymbolName: "hand.raised", accessibilityDescription: nil)?

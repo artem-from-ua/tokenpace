@@ -6,8 +6,8 @@ import Security
 /// Claude Code OAuth credentials, read from the macOS Keychain.
 ///
 /// Mirrors the nested `claudeAiOauth` payload of the `"Claude Code-credentials"` generic-password
-/// item (SPEC "Token strategy", issue #8). Fields the agent does not consume directly
-/// (`scopes` / `subscriptionType` / `rateLimitTier`) are kept for diagnostics and the future popup
+/// item (SPEC "Token strategy"). Fields the agent does not consume directly
+/// (`scopes` / `subscriptionType` / `rateLimitTier`) are kept for diagnostics and the popup
 /// breakdown, but never drive logic.
 ///
 /// ```swift
@@ -61,10 +61,9 @@ public struct OAuthCredentials: Sendable, Equatable {
 
 /// The subset of ``OAuthCredentials`` the polling engine actually needs: the bearer token and its
 /// expiry — deliberately **without** the `refreshToken` (the secret never travels into the engine)
-/// or the diagnostic fields. Introduced with the Troubleshoot window (ADR-0020) so a single
-/// Keychain read hands the engine both the token *and* its `expiresAt`: the expiry drives the
-/// delegated-refresh decision (moved here from the provider) and feeds ``TokenDiagnostics`` — even
-/// for an already-expired token, the most valuable diagnostic case.
+/// or the diagnostic fields. A single Keychain read hands the engine both the token *and* its
+/// `expiresAt`: the expiry drives the delegated-refresh decision and feeds ``TokenDiagnostics`` —
+/// even for an already-expired token, the most valuable diagnostic case.
 ///
 /// The provider no longer judges expiry; ``isExpired(now:)`` is the same `expiresAt <= now`
 /// predicate as ``OAuthCredentials/isExpired(now:)``, applied by the engine.
@@ -72,7 +71,7 @@ public struct TokenCredentials: Sendable, Equatable {
     public let accessToken: String
     public let expiresAt: Date
     /// The plan tier from the Keychain payload (`subscriptionType`, e.g. `"max"`), or `nil` when
-    /// absent. **Not a secret** — a plan label, carried alongside `expiresAt` so the journal (#242)
+    /// absent. **Not a secret** — a plan label, carried alongside `expiresAt` so the journal
     /// and diagnostics can record which plan produced a reading (limits/pacing differ by plan).
     public let subscriptionType: String?
     /// The rate-limit tier (`rateLimitTier`, e.g. `"default_claude_max_5x"`), or `nil`. Not a secret.
@@ -116,11 +115,10 @@ public enum TokenError: Error, Equatable {
     /// ``TokenProvider/launchFailedStatus`` / ``TokenProvider/timedOutStatus``.
     case keychainError(OSStatus)
     /// Payload is not `Data` / not UTF-8 / not JSON / missing the `claudeAiOauth` wrapper /
-    /// missing a required field. (issue #8 acceptance: garbage → `malformedData`)
+    /// missing a required field.
     case malformedData
-    /// Credentials read fine but are expired. In this PR (read-only, no refresh) the agent must
-    /// **not** send the stale token to the API — it waits for Claude Code to write a fresh one.
-    /// PR 8b will attempt a fallback refresh before reaching this.
+    /// Credentials read fine but are expired. The agent must **not** send the stale token to the
+    /// API — it waits for Claude Code to write a fresh one, or triggers a delegated refresh first.
     case expired
 }
 
@@ -136,8 +134,8 @@ public enum TokenError: Error, Equatable {
 /// | ``decode(from:)`` | pure (`Data` → struct) | yes |
 /// | ``OAuthCredentials/isExpired(now:)`` / `isValid` | pure | yes |
 /// | ``parseSecretOutput(_:)`` / ``mapExitStatus(_:)`` | pure | yes |
-/// | ``readRawData()`` / ``credentials()`` | Keychain I/O (`security` CLI) | no (manual check, issue #8) |
-/// | fallback refresh | network | PR 8b (test account) |
+/// | ``readRawData()`` / ``credentials()`` | Keychain I/O (`security` CLI) | no (manual check) |
+/// | fallback refresh | network (`PollingEngine`) | no |
 ///
 /// ## Token strategy (SPEC "Token strategy")
 /// 1. Read from the Keychain; if `expiresAt` is in the future → hand back `accessToken` as is.
@@ -148,10 +146,10 @@ public enum TokenError: Error, Equatable {
 ///    Claude Code's stored pair and log the user out of the CLI.
 ///
 /// An expired token is **never** sent to the API (that would guarantee a 401 and burn rate-limit
-/// budget). Since ADR-0020 the provider no longer judges expiry: ``currentCredentials(now:)`` hands
-/// back the token **and** its `expiresAt` (readable even when stale, for diagnostics), and the
-/// polling engine decides — it short-circuits the network on an expired token and triggers the
-/// delegated refresh above. `TokenProvider` itself holds no timer and stays stateless.
+/// budget). The provider does not judge expiry: ``currentCredentials(now:)`` hands back the token
+/// **and** its `expiresAt` (readable even when stale, for diagnostics), and the polling engine
+/// decides — it short-circuits the network on an expired token and triggers the delegated refresh
+/// above. `TokenProvider` itself holds no timer and stays stateless.
 ///
 /// ## Privacy
 /// The token is **never** logged. `AppLogger.keychain` carries only `.public` diagnostics —
@@ -169,9 +167,9 @@ public enum TokenProvider {
 
     /// Read and decode the current credentials from the Keychain.
     ///
-    /// The ordinary path of issue #8: `SecItemCopyMatching` → ``decode(from:)``. This entry point
-    /// does **not** judge expiry — that decision is left to ``currentAccessToken(now:)`` or the
-    /// caller (`UsageClient` #9), so a stale-but-readable item still decodes successfully here.
+    /// The ordinary path: `SecItemCopyMatching` → ``decode(from:)``. This entry point does **not**
+    /// judge expiry — that decision is left to the caller (`PollingEngine`/`UsageClient`), so a
+    /// stale-but-readable item still decodes successfully here.
     ///
     /// - Throws: ``TokenError`` (`itemNotFound` / `accessDenied` / `keychainError` / `malformedData`).
     public static func credentials() throws -> OAuthCredentials {
@@ -182,11 +180,10 @@ public enum TokenProvider {
     // MARK: currentCredentials
 
     /// The current token plus its expiry, for the polling engine. Reads ``credentials()`` and
-    /// projects it onto ``TokenCredentials`` — it does **not** judge expiry (that decision moved to
-    /// the engine with ADR-0020, so `expiresAt` is available even for a stale token, the most
-    /// valuable diagnostic case). A stale-but-readable item therefore returns successfully here; the
-    /// engine calls ``TokenCredentials/isExpired(now:)`` and short-circuits the network + triggers
-    /// the delegated refresh (ADR-0017).
+    /// projects it onto ``TokenCredentials`` — it does **not** judge expiry, so `expiresAt` is
+    /// available even for a stale token, the most valuable diagnostic case. A stale-but-readable
+    /// item therefore returns successfully here; the engine calls ``TokenCredentials/isExpired(now:)``
+    /// and short-circuits the network + triggers the delegated refresh (ADR-0017).
     ///
     /// - Parameter now: accepted for signature symmetry with the rest of the codebase; unused here
     ///   now that expiry is judged downstream.
@@ -204,8 +201,7 @@ public enum TokenProvider {
     /// Parse the Keychain payload (`kSecValueData`) into ``OAuthCredentials``.
     ///
     /// A separate **pure** function on purpose: all format handling (the `claudeAiOauth` wrapper,
-    /// `expiresAt` ms→`Date`, absent optional fields) is unit-tested without the Keychain — the
-    /// core of the issue #8 acceptance criteria.
+    /// `expiresAt` ms→`Date`, absent optional fields) is unit-tested without the Keychain.
     ///
     /// Format (confirmed via `security find-generic-password`):
     /// ```json

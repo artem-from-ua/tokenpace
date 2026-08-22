@@ -2,29 +2,28 @@ import Foundation
 
 // MARK: - CreditsPacing
 
-/// Pure, AppKit-free pacing logic for the money-credits ("extra usage") state (#143).
+/// Pure, AppKit-free pacing logic for the money-credits ("extra usage") state.
 ///
 /// Turns a decoded ``SpendInfo`` into the two decisions the credits icon needs — **whether to show
 /// it** and **how to pace its colour** — without importing the view palette (ADR-0009). The menu bar
-/// / dropdown (#144/#145) map the resulting ``BarLayout`` to a colour with the **same**
+/// / dropdown map the resulting ``BarLayout`` to a colour with the **same**
 /// `PopupBarView.aheadColor(usage:time:)` used for the token bars, and format the amount label; this
 /// type owns only the arithmetic.
 ///
 /// ## Credits pace exactly like a token limit — usage vs. time
-/// The maintainer's rule: the credits icon colour is computed **the same way as the 5h/7d bars**, not
-/// with a bespoke "percent of the cap" threshold. That means a `usage`-vs-`time` gap, feeding the same
-/// ``BarLayout`` the token bars use, so `aheadColor` grades it identically:
-/// green (on pace / behind) → yellow (mildly ahead) → orange (well ahead) → **red only at the cap**.
+/// The credits icon colour is computed **the same way as the 5h/7d bars**, not with a bespoke
+/// "percent of the cap" threshold: a `usage`-vs-`time` gap, feeding the same ``BarLayout`` the token
+/// bars use, so `aheadColor` grades it identically: green (on pace / behind) → yellow (mildly
+/// ahead) → orange (well ahead) → **red only at the cap**.
 ///
 /// The two axes for credits:
 /// - **`usageFraction` = `used_credits / limit`** — the share of the money cap spent.
 /// - **`timeFraction` = the share of the calendar month elapsed** — the money window is the calendar
-///   month, resetting at **00:00 UTC on the 1st** (confirmed via Anthropic's Spend Limits API docs;
-///   the web UI's "Resets Aug 1"). The API delivers **no** `resets_at` for spend (spike #142:
-///   `spend`/`extra_usage` carry no time field, `daily`/`weekly` are null), so we derive the month
-///   fraction locally in UTC (see ``monthElapsedFraction(now:timeZone:)`` and ``resetTimeZone``).
+///   month, resetting at **00:00 UTC on the 1st** (Anthropic's Spend Limits API docs; the web UI's
+///   "Resets Aug 1"). The API delivers **no** `resets_at` for spend, so we derive the month fraction
+///   locally in UTC (see ``monthElapsedFraction(now:timeZone:)`` and ``resetTimeZone``).
 ///
-/// ## Decisions the maintainer already made (spike #142, do not revisit here)
+/// ## Fixed decisions (do not revisit here)
 /// - The icon trigger is `enabled == true` **OR** `spend_limit_reached == true` — never `enabled`
 ///   alone, because the server flips `enabled` to false at the exact moment the cap is hit.
 /// - The colour comes from the **same** `usage`-vs-`time` pacing as the token bars — never the server
@@ -39,7 +38,7 @@ public enum CreditsPacing {
     /// `true` when credits are enabled **or** the money cap has been reached. The `OR` is
     /// load-bearing: when the cap is exceeded the server sends `enabled: false` +
     /// `spend_limit_reached: true`, so testing `enabled` alone would drop the icon precisely when the
-    /// user has hit their money ceiling. See spike #142.
+    /// user has hit their money ceiling.
     ///
     /// This is **not** the full show decision on its own — the icon is additionally gated on at least
     /// one base limit being exhausted; see ``shouldShowIcon(_:baseLimitExhausted:)``.
@@ -56,17 +55,13 @@ public enum CreditsPacing {
     ///
     /// The base-limit predicate is passed in rather than derived here so the trigger stays a pure,
     /// one-line policy. ``anyBaseLimitExhausted(in:)`` computes a reasonable value from a snapshot's
-    /// `utilization` signals; the final wiring into the menu-bar show/hide flow lands in #144.
-    ///
-    /// - TODO(#144): confirm this gate against the live menu-bar "expanded vs hidden" logic — the
-    ///   base-limit source there may be richer (e.g. server `is_active` / `severity`) than the
-    ///   `utilization >= 100` heuristic ``anyBaseLimitExhausted(in:)`` uses today.
+    /// `utilization` signals.
     public static func shouldShowIcon(_ spend: SpendInfo, baseLimitExhausted: Bool) -> Bool {
         isActive(spend) && baseLimitExhausted
     }
 
-    /// Whether credits are **actively being spent right now** — the stricter predicate behind the popup's
-    /// blue "active" badge (#146).
+    /// Whether credits are **actively being spent right now** — the stricter predicate behind the
+    /// popup's blue "active" badge.
     ///
     /// Differs from ``shouldShowIcon(_:baseLimitExhausted:)`` in the over-limit case: the icon shows
     /// even when the money cap is hit (red, "you've hit the ceiling"), but the **badge must not** — once
@@ -80,7 +75,7 @@ public enum CreditsPacing {
     }
 
     /// Whether paid credits can **still cover** new work — the money escape hatch that keeps an
-    /// exhausted plan limit from actually blocking you (#158).
+    /// exhausted plan limit from actually blocking you.
     ///
     /// `true` only when a `spend` block is present, credits are **enabled**, and the money cap is **not
     /// yet reached** (`spend_limit_reached == false`). This is deliberately the base-limit-agnostic
@@ -100,9 +95,8 @@ public enum CreditsPacing {
     /// `utilization >= 100`.
     ///
     /// This lives here as the default source for ``shouldShowIcon(_:baseLimitExhausted:)`` so the
-    /// trigger is testable end-to-end today, but the exhaustion signal is deliberately isolated as
-    /// its own predicate (see the TODO on `shouldShowIcon`) — #144 may replace it with the menu bar's
-    /// own notion of "limit hit". The server caps `utilization` at 100, so `>=` (not `>`) is correct.
+    /// trigger is testable end-to-end, but the exhaustion signal is deliberately isolated as its own
+    /// predicate. The server caps `utilization` at 100, so `>=` (not `>`) is correct.
     public static func anyBaseLimitExhausted(in snapshot: UsageSnapshot) -> Bool {
         let windows: [Double] =
             [snapshot.fiveHour.utilization, snapshot.sevenDay.utilization]
@@ -129,8 +123,8 @@ public enum CreditsPacing {
         return fiveHourExhausted || snapshot.sevenDay.utilization >= 100
     }
 
-    /// Whether the user is **blocked** — no path left to do work right now (#158, #177). Blocked means
-    /// every way to start/continue is closed:
+    /// Whether the user is **blocked** — no path left to do work right now. Blocked means every way
+    /// to start/continue is closed:
     ///
     /// ```
     /// blocked = mainWindowExhausted  AND NOT creditsCanCover(spend)
@@ -152,7 +146,7 @@ public enum CreditsPacing {
     }
 
     /// Whether a **subscription** limit (5h **or** 7d) is exhausted **while paid credits are still
-    /// covering** the work — the "you can keep going, but only because you're paying for it" state (#193).
+    /// covering** the work — the "you can keep going, but only because you're paying for it" state.
     ///
     /// ```
     /// subscriptionExhaustedWhileCovered = mainWindowExhausted  AND  creditsCanCover(spend)
@@ -164,7 +158,7 @@ public enum CreditsPacing {
     /// tier). The two are mutually exclusive and never both `true`.
     ///
     /// The popup surfaces this as a **red** countdown to the blocking subscription limit's reset — the
-    /// moment the plan quota returns and credits stop being spent (#193). It is **not** blocked
+    /// moment the plan quota returns and credits stop being spent. It is **not** blocked
     /// (``WorkAvailability/canWork(_:)`` is `true` here), so it drives no "Back to work!" edge and no idle
     /// grey bar — only the red reset badge on the exhausted token row.
     public static func subscriptionExhaustedWhileCovered(in snapshot: UsageSnapshot) -> Bool {
@@ -208,9 +202,7 @@ public enum CreditsPacing {
         let pacing: PacingState = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead
         // Credits are out of the blue-zone scope: the money window is not a token limit, so "you are
         // far behind pace, push harder" is not advice that applies to spending. `blueAllowed: false`
-        // states that in the model rather than leaving it to the render layer — which is the pattern
-        // per-model rows were moved onto in #426, after the view-only version of that gate let the
-        // journal record blues the popup was painting green.
+        // states that in the model rather than leaving it to the render layer.
         // The window length is the 7-day one purely as a stable placeholder for the monthly window.
         return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
                          pacing: pacing, remainingSeconds: remaining,
@@ -232,9 +224,8 @@ public enum CreditsPacing {
     /// month rather than a fixed rolling window.
     ///
     /// The money limit resets at **00:00 UTC on the 1st of each calendar month** (see
-    /// ``resetTimeZone``; the web UI's "Resets Aug 1"), and the API carries no reset time for it
-    /// (spike #142), so we compute it locally: elapsed since the start of this UTC month divided by the
-    /// month's full length.
+    /// ``resetTimeZone``; the web UI's "Resets Aug 1"), and the API carries no reset time for it, so
+    /// we compute it locally: elapsed since the start of this UTC month divided by the month's full length.
     ///
     /// **Time zone is injected** (mirroring `ResetClock`) and defaults to ``resetTimeZone`` (UTC):
     /// "the 1st at 00:00" lands at a different instant per zone, shifting `timeFraction` by up to a
@@ -262,9 +253,9 @@ public enum CreditsPacing {
     /// The **instant** the current money window ends — `00:00` on the 1st of the *next* calendar
     /// month, in ``resetTimeZone`` (UTC) — i.e. the moment the monthly spend counter resets.
     ///
-    /// The dropdown's "resets in Nd/Nh" line (#145) needs an actual `Date` to feed the shared
-    /// relative-time formatter (`ResetClock.relativeRounded`), whereas ``monthElapsedFraction`` only
-    /// yields the *fraction* elapsed. This is that fraction's numerator boundary made explicit: the
+    /// The dropdown's "resets in Nd/Nh" line needs an actual `Date` to feed the shared relative-time
+    /// formatter (`ResetClock.relativeRounded`), whereas ``monthElapsedFraction`` only yields the
+    /// *fraction* elapsed. This is that fraction's numerator boundary made explicit: the
     /// same next-month `00:00` UTC computed in ``monthElapsedFraction`` (see ``resetTimeZone`` for why
     /// the reset is fixed to UTC, not the device zone). Returns `nil` only if the calendar can't
     /// resolve the boundary (never in practice) — the caller then simply omits the reset line.
@@ -301,8 +292,8 @@ public enum CreditsPacing {
     /// Those are two different jobs and they get two different zones on purpose:
     ///
     /// - *Which* month the bar covers is a property of the limit itself — the monthly cap resets at
-    ///   00:00 **UTC** on the 1st (spike #142), and ``monthElapsedFraction`` measures against exactly
-    ///   that. Deriving the window locally would slide the bar's own 0 and 1 by the device's offset.
+    ///   00:00 **UTC** on the 1st, and ``monthElapsedFraction`` measures against exactly that.
+    ///   Deriving the window locally would slide the bar's own 0 and 1 by the device's offset.
     /// - *When those boundaries fall for the reader* is a question about instants, and an instant is a
     ///   point everyone shares — so it is shown on the reader's own clock, the same convention
     ///   ``CreditsRow/resetLine`` follows. West of UTC the window opens on the previous local day, so a

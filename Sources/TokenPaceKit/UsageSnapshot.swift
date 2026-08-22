@@ -9,20 +9,19 @@ extension CodingUserInfoKey {
     /// ``UsageClient/decode(from:now:lastKnownSevenDayReset:)`` sets it; if absent, the decode falls
     /// back to `Date()`.
     ///
-    /// Only `seven_day` reconstructs (#100): the `five_hour` window opts out
-    /// (`reconstructionAllowed: false`), reporting the honest ``UsageSnapshot/sessionIdle`` state
-    /// instead — a five-hour window does not exist between sessions, so there is nothing to roll.
+    /// Only `seven_day` reconstructs: the `five_hour` window opts out (`reconstructionAllowed:
+    /// false`), reporting the honest ``UsageSnapshot/sessionIdle`` state instead — a five-hour
+    /// window does not exist between sessions, so there is nothing to roll.
     static let usageNow = CodingUserInfoKey(rawValue: "cc.usageNow")!
 
     /// Threads the last **server-supplied** `seven_day.resets_at` into ``UsageSnapshot/init(from:)``
     /// so the decoder can reconstruct the weekly reset during an API blackout instead of estimating
     /// it (ADR-0107).
     ///
-    /// The decoder is deliberately stateless — it sees one body plus whatever is injected here — so
-    /// this is the same seam `usageNow` uses rather than a new mechanism. The caller
-    /// (``PollingEngine``) is responsible for only ever passing a value the API actually sent:
-    /// feeding back a reconstructed one would compound its own error across a multi-hour blackout.
-    /// ``ResetSource/isUnrolledServerFact`` is what enforces that at the call site.
+    /// The decoder is deliberately stateless — it sees one body plus whatever is injected here. The
+    /// caller (``PollingEngine``) must only ever pass a value the API actually sent: feeding back a
+    /// reconstructed one would compound its own error across a multi-hour blackout.
+    /// ``ResetSource/isUnrolledServerFact`` enforces that at the call site.
     ///
     /// Absent (a cold start with nothing persisted) the decoder invents nothing and leaves
     /// `resets_at` empty — see ``ResetSource/unknown``.
@@ -36,7 +35,7 @@ extension CodingUserInfoKey {
 ///
 /// `resetsAt` is the **raw** API string (ISO-8601 with microseconds and a `+00:00`
 /// offset, e.g. `2026-06-21T05:30:00.619428+00:00`). It is deliberately **not** parsed
-/// here: date normalization lives in exactly one place, ``ResetClock/parse(_:)`` (#7),
+/// here: date normalization lives in exactly one place, ``ResetClock/parse(_:)``,
 /// so this layer stays a thin, allocation-free decode. Callers forward the string to
 /// `ResetClock.parse` when they need a `Date`.
 public struct UsageWindow: Sendable, Equatable, Decodable {
@@ -63,10 +62,10 @@ public struct UsageWindow: Sendable, Equatable, Decodable {
 
     /// Tolerant decode of a **present** window object. On a reset boundary the API may send a
     /// window with `utilization: null` (and occasionally a missing `resets_at`); decoding those as
-    /// required values is what crashed the whole snapshot (issue: false "Usage API unavailable").
-    /// Here `utilization` defaults to `0` (a just-reset window has zero usage) and `resets_at`
-    /// defaults to `""` (the snapshot layer then synthesizes a real one). A window object that is
-    /// entirely `null` is handled one level up, in ``UsageSnapshot/init(from:)``.
+    /// required values crashes the whole snapshot with a false "Usage API unavailable". Here
+    /// `utilization` defaults to `0` (a just-reset window has zero usage) and `resets_at` defaults
+    /// to `""` (the snapshot layer then synthesizes a real one). A window object that is entirely
+    /// `null` is handled one level up, in ``UsageSnapshot/init(from:)``.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.utilization = try container.decodeIfPresent(Double.self, forKey: .utilization) ?? 0
@@ -82,13 +81,13 @@ public struct UsageWindow: Sendable, Equatable, Decodable {
 
 /// One entry of the API `limits[]` array — the server-side pacing/severity signal.
 ///
-/// The server already computes a `severity` tier per active limit; it is kept for the
-/// popup (#11) to cross-check against the local ``PacingModel/limitIndicator(utilization:timePercent:)``
-/// formula. Like ``UsageWindow``, `resetsAt` stays a raw string for ``ResetClock``.
+/// The server already computes a `severity` tier per active limit; it is kept for the popup to
+/// cross-check against the local ``PacingModel/limitIndicator(utilization:timePercent:)`` formula.
+/// Like ``UsageWindow``, `resetsAt` stays a raw string for ``ResetClock``.
 ///
 /// `weekly_scoped` entries additionally carry a `scope` object naming the model they cap
 /// (`scope.model.display_name`, e.g. `"Fable"`). That name is the **only** identity the API gives
-/// for models without a top-level `seven_day_*` window (#65), so it is flattened into
+/// for models without a top-level `seven_day_*` window, so it is flattened into
 /// ``modelDisplayName``; the rest of `scope` (`model.id`, `surface`) stays ignored.
 public struct UsageLimit: Sendable, Equatable, Decodable {
     public let kind: String
@@ -136,8 +135,8 @@ public struct UsageLimit: Sendable, Equatable, Decodable {
     }
 
     /// Tolerant decode: every field defaults rather than failing. Beyond the `resets_at` fallback
-    /// role for ``UsageSnapshot``'s reset-boundary synthesis, `limits[]` now also carries the
-    /// per-model weekly limits (`weekly_scoped` + `scope.model.display_name`, #65) — so a `null`
+    /// role for ``UsageSnapshot``'s reset-boundary synthesis, `limits[]` also carries the per-model
+    /// weekly limits (`weekly_scoped` + `scope.model.display_name`) — so a `null`
     /// `percent`/`severity`/`is_active` on one entry must never fail the whole snapshot. The
     /// `scope` decode is `try?`-wrapped: a plain `decodeIfPresent` **throws** on a type mismatch
     /// (e.g. `scope` arriving as a string), and a malformed scope must degrade to `nil`, not kill
@@ -163,12 +162,12 @@ public struct UsageLimit: Sendable, Equatable, Decodable {
 /// The API sends money as an **integer minor unit** plus its currency and exponent — e.g.
 /// `{"amount_minor":1077,"currency":"EUR","exponent":2}` is €10.77. We keep that integer form
 /// verbatim rather than collapsing it to a `Double`: floating point cannot represent every decimal
-/// cent exactly, and this value feeds a money label. The currency is **not** hard-coded to USD — the
-/// spike (#142) observed EUR — so it travels with the amount.
+/// cent exactly, and this value feeds a money label. The currency is **not** hard-coded to USD (EUR
+/// is observed too), so it travels with the amount.
 ///
 /// `majorUnitValue` reconstitutes the human amount (`amount_minor / 10^exponent`) as a `Double`
-/// **only** for pacing arithmetic (fraction against a limit); the display layer (#144/#145) should
-/// format from the integer + exponent to avoid rounding the label.
+/// **only** for pacing arithmetic (fraction against a limit); the display layer should format from
+/// the integer + exponent to avoid rounding the label.
 public struct Money: Sendable, Equatable, Decodable {
     /// The amount in the currency's minor unit (e.g. cents): `1077` == €10.77 at `exponent: 2`.
     public let amountMinor: Int
@@ -215,7 +214,7 @@ public struct Money: Sendable, Equatable, Decodable {
 // MARK: - SpendInfo
 
 /// The "extra usage" money-credits state of one poll — the paid overspend that covers you past the
-/// plan limits (Settings → *Usage credits*). Introduced by the spike (#142); rendered by #144/#145.
+/// plan limits (Settings → *Usage credits*).
 ///
 /// The API delivers this across **two parallel blocks**, and this type merges the useful half of
 /// each (the raw blocks are private decode helpers below):
@@ -225,11 +224,11 @@ public struct Money: Sendable, Equatable, Decodable {
 ///   over-limit signal the icon trigger needs), plus `currency` / `decimal_places` and the
 ///   `used_credits` scalar (the same amount as `spend.used`, kept as a cross-check / fallback).
 ///
-/// **Deliberately not modeled** (spike findings, #142):
-/// - The server `spend.severity` — the maintainer decided the icon colour is computed the same way as
-///   the token bars (usage vs. time, ``CreditsPacing/barLayout(for:now:timeZone:)``), never the server tier.
-/// - `spend.balance` / `spend.auto_reload` — Current balance is **not** delivered by this endpoint
-///   (null in every observed state); balance-relative pacing is a future feature, out of scope.
+/// **Deliberately not modeled:**
+/// - The server `spend.severity` — the icon colour is computed the same way as the token bars
+///   (usage vs. time, ``CreditsPacing/barLayout(for:now:timeZone:)``), never the server tier.
+/// - `spend.balance` / `spend.auto_reload` — current balance is **not** delivered by this endpoint
+///   (null in every observed state); balance-relative pacing is out of scope.
 ///
 /// Every field is optional-friendly and defaults so an unknown/partial credits payload never fails
 /// the snapshot (the two blocks are auxiliary to the core windows).
@@ -356,13 +355,12 @@ public struct SpendInfo: Sendable, Equatable {
 /// ``UsageError/decode`` by ``UsageClient/decode(from:)``).
 ///
 /// `sevenDayOpus` / `sevenDaySonnet` are optional — the API omits them or sends `null`
-/// when that model was not used in the window (issue #9 acceptance: "must not crash"). Both
-/// an explicit `null` and an absent key decode to `nil` via the synthesized
-/// `decodeIfPresent`.
+/// when that model was not used in the window. Both an explicit `null` and an absent key
+/// decode to `nil` via the synthesized `decodeIfPresent`.
 ///
-/// `spend` / `extra_usage` carry the money-credits state (#143) merged into the optional
-/// ``spend`` field (``SpendInfo``). They stay **optional**: a pre-credits payload has neither
-/// block, so `spend` decodes to `nil` and the (many) existing fixtures keep passing.
+/// `spend` / `extra_usage` carry the money-credits state merged into the optional ``spend``
+/// field (``SpendInfo``). They stay **optional**: a pre-credits payload has neither block, so
+/// `spend` decodes to `nil` and the (many) existing fixtures keep passing.
 ///
 /// The custom ``init(from:)`` hardens `limits`: an omitted array decodes to `[]` rather
 /// than failing the whole snapshot. The memberwise ``init(fiveHour:sevenDay:sevenDayOpus:sevenDaySonnet:limits:sessionIdle:spend:)``
@@ -374,39 +372,37 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     public let sevenDaySonnet: UsageWindow?
     public let limits: [UsageLimit]
     /// Whether the 5-hour window does **not** exist server-side right now — the honest "no active
-    /// session" state (#100). Set when the `five_hour` window arrives without a usable `resets_at`
-    /// **and** no `limits[]` entry supplies one either: the 5h window is *created* by the first token
-    /// spend and *does not exist* until then (verified server mechanics — see ADR-0027), so a missing
-    /// reset means "ready to start", not a reset boundary. When `true`, `fiveHour` is
-    /// `UsageWindow(utilization: 0, resetsAt: "")` and the UI renders a green "ready to start"
-    /// bar with **no synthesized phantom reset** — the bug this flag fixes. `false` on every normal
-    /// snapshot (an active 5h window, or a genuine reset-boundary `null` that `limits[]` still
-    /// backfills). Applies only to `five_hour`; the 7-day window keeps its local-estimate fallback.
+    /// session" state. Set when the `five_hour` window arrives without a usable `resets_at` **and**
+    /// no `limits[]` entry supplies one either: the 5h window is *created* by the first token spend
+    /// and *does not exist* until then (ADR-0027), so a missing reset means "ready to start", not a
+    /// reset boundary. When `true`, `fiveHour` is `UsageWindow(utilization: 0, resetsAt: "")` and
+    /// the UI renders a green "ready to start" bar with **no synthesized phantom reset**. `false` on
+    /// every normal snapshot (an active 5h window, or a genuine reset-boundary `null` that
+    /// `limits[]` still backfills). Applies only to `five_hour`; the 7-day window keeps its
+    /// local-estimate fallback.
     public let sessionIdle: Bool
-    /// The money-credits ("extra usage") state (#143), merged from the `spend` + `extra_usage`
-    /// blocks. `nil` on a pre-credits payload where neither block is present — the (many) legacy
-    /// fixtures rely on that default. Consumed by ``CreditsPacing`` (#144/#145 render it).
+    /// The money-credits ("extra usage") state, merged from the `spend` + `extra_usage` blocks.
+    /// `nil` on a pre-credits payload where neither block is present — the (many) legacy fixtures
+    /// rely on that default. Consumed by ``CreditsPacing``.
     public let spend: SpendInfo?
     /// Where ``sevenDay``'s `resets_at` came from (ADR-0107) — a server field, a `limits[]` entry, a
     /// reconstruction from the last known reset, or nothing at all.
     ///
     /// Carried on the snapshot rather than recomputed downstream because **only the decoder knows**:
-    /// by the time a renderer sees the date, a reconstructed one is indistinguishable from a real
-    /// one — which is the point, but it means the provenance has to travel with it.
+    /// by the time a renderer sees the date, a reconstructed one is indistinguishable from a real one.
     ///
     /// Two consumers depend on it. ``PollingEngine`` reads ``ResetSource/isUnrolledServerFact`` to
     /// decide whether this reset may become the anchor for future reconstructions (feeding a derived
-    /// value back would compound its own error). The journal records it as `resetSrc`, next to but
-    /// deliberately separate from `utilSrc` — the two describe different axes and are populated in
-    /// six of their eight combinations on live data.
+    /// value back would compound its own error). The journal records it as `resetSrc`, separate from
+    /// `utilSrc` — the two describe different axes.
     ///
-    /// The memberwise init defaults this to ``ResetSource/server`` so the ~90 synthetic fixtures
-    /// stay unchanged — a hand-built window's date came from whoever wrote the literal, and
-    /// provenance is meaningless there. **The four production sites that rebuild a real snapshot**
+    /// The memberwise init defaults this to ``ResetSource/server`` so synthetic fixtures stay
+    /// unchanged — a hand-built window's date came from whoever wrote the literal, and provenance is
+    /// meaningless there. **Every production site that rebuilds a real snapshot**
     /// (``WeeklyUtilization/applied(to:)``, ``ResetClock/optimisticReset(_:now:)``, the polling
-    /// engine's idle-grace suppression, and the colour-cycle stub) must forward it explicitly: the
-    /// default is exactly what would let one of them silently relabel a reconstruction as a server
-    /// fact. `snapshotRebuildersPreserveResetSource` in `ResetReconstructionTests` guards that.
+    /// engine's idle-grace suppression, the colour-cycle stub) must forward it explicitly: the
+    /// default would otherwise let one of them silently relabel a reconstruction as a server fact.
+    /// `snapshotRebuildersPreserveResetSource` in `ResetReconstructionTests` guards that.
     public let sevenDayResetSource: ResetSource
 
     private enum CodingKeys: String, CodingKey {
@@ -443,7 +439,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     /// server reports real usage (`utilization > 0`) yet the window's `resets_at` string is present but
     /// unparseable (`ResetClock.parse == nil`). Such a 200 body is malformed, so both the menu bar (⚠️
     /// error mode) and the popup (a red warning banner) surface it as an API error rather than a
-    /// fabricated countdown / `resetting…` (#167, ADR-0043). The single source of truth for the check,
+    /// fabricated countdown / `resetting…` (ADR-0043). The single source of truth for the check,
     /// shared by `MenuBarLayout` and `PopupLayout`.
     ///
     /// Deliberately **not** an error for: a **zero-usage** window (nothing to reset yet), the
@@ -477,10 +473,10 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
 
         // The two core windows are required by the model, but on a reset boundary the API may send
         // them as `null` (or with `utilization: null`). Synthesize a fresh zero-usage window in that
-        // case instead of failing the whole snapshot (which surfaced as a false "Usage API
-        // unavailable"). See `Self.window(...)`.
+        // case instead of failing the whole snapshot with a false "Usage API unavailable". See
+        // `Self.window(...)`.
         //
-        // `five_hour` is special (#100): when its reset is unavailable **and** `limits[]` backfills
+        // `five_hour` is special: when its reset is unavailable **and** `limits[]` backfills
         // nothing, the window does not exist server-side (no active session), so `window(...)` reports
         // `sessionIdle: true` and returns a `resetsAt: ""` window rather than a synthesized `now + 5h`
         // phantom. `reconstructionAllowed: false` disables the roll-forward rung for it: a window that
@@ -511,8 +507,8 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         self.sevenDaySonnet = try Self.subWindow(
             in: container, key: .sevenDaySonnet, parentResetsAt: sevenDay.resetsAt)
 
-        // Money-credits state (#143): merge the two parallel blocks. `decodeIfPresent` on each keeps
-        // a pre-credits payload (neither block) → `spend == nil`, so legacy fixtures are unaffected.
+        // Money-credits state: merge the two parallel blocks. `decodeIfPresent` on each keeps a
+        // pre-credits payload (neither block) → `spend == nil`, so legacy fixtures are unaffected.
         let spendBlock = try container.decodeIfPresent(SpendInfo.SpendBlock.self, forKey: .spend)
         let extraUsage = try container.decodeIfPresent(SpendInfo.ExtraUsageBlock.self, forKey: .extraUsage)
         self.spend = SpendInfo.merged(spend: spendBlock, extraUsage: extraUsage)
@@ -551,20 +547,18 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     ///    anchor was injected (ADR-0107);
     /// 4. nothing at all: `resets_at` stays empty and the source is ``ResetSource/unknown``.
     ///
-    /// Rung 3 replaced a local `now + duration` estimate that was recomputed every poll and therefore
-    /// drifted forward with the clock, holding `elapsedFraction` at exactly 0 for the 4-6 hours the
-    /// weekly blackout lasts. Rolling the previous reset instead lands within 0.25 s of the value the
-    /// server eventually sends. Rung 4 is the honest end of the chain: with no anchor there is
-    /// nothing to roll, and inventing a date is what this change exists to stop.
+    /// Rung 3 rolls the previous reset forward, landing within 0.25 s of the value the server
+    /// eventually sends, rather than drifting `elapsedFraction` to 0 for the whole blackout. Rung 4
+    /// is the honest end of the chain: with no anchor there is nothing to roll, and no date is invented.
     ///
-    /// `reconstructionAllowed` splits the two core windows (#100):
+    /// `reconstructionAllowed` splits the two core windows:
     /// - `seven_day` (`true`): the weekly window is a real rolling period, so a known reset plus a
     ///   whole number of periods is a sound reconstruction.
     /// - `five_hour` (`false`): the 5h window is *created by the first token spend* and does not exist
     ///   before then. An exhausted chain therefore means "no active session", not a reset boundary:
     ///   the method returns `(UsageWindow(utilization: <decoded ?? 0>, resetsAt: ""), sessionIdle: true)`
     ///   with **no** reconstruction and **no** log — the honest idle state the UI renders as a green
-    ///   "ready to start" bar. This is what removes the drifting phantom `now + 5h` reset.
+    ///   "ready to start" bar, with no drifting phantom `now + 5h` reset.
     ///
     /// - Returns: the resolved window, `sessionIdle` (`true` only in the `five_hour` exhausted-chain
     ///   case above), and which rung supplied the date — the honesty carrier the journal and the UI
@@ -633,7 +627,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
 
 // MARK: - ScopedModelWindow
 
-/// One per-model weekly limit extracted from a `weekly_scoped` entry of `limits[]` (#65) —
+/// One per-model weekly limit extracted from a `weekly_scoped` entry of `limits[]` —
 /// the shape ``PopupLayout`` renders as a bare `"<name>"` row (7-day paced, no suffix). A struct (not a
 /// tuple) so test fixtures can compare whole arrays via `Equatable`.
 public struct ScopedModelWindow: Sendable, Equatable {
@@ -651,7 +645,7 @@ public struct ScopedModelWindow: Sendable, Equatable {
 
 extension UsageSnapshot {
     /// Per-model weekly limits that exist **only** as `weekly_scoped` entries of `limits[]`
-    /// (e.g. Fable, which has no top-level `seven_day_fable` window — #65), in API order.
+    /// (e.g. Fable, which has no top-level `seven_day_fable` window), in API order.
     ///
     /// Entries whose model name matches a **present** legacy sub-window (`seven_day_opus`/
     /// `seven_day_sonnet`) are skipped, case-insensitively: live bodies carry Sonnet in *both*

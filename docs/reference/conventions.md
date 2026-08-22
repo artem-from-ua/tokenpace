@@ -340,3 +340,54 @@ run** — they are all for diagnostics, screenshots or walking a UI flow.
   existing one, follows [writing-adrs.md](../guides/writing-adrs.md) — the numbering, the
   frontmatter, the postscript, and the one-row index entry it must produce.
 - A new convention or tool → update this file.
+
+### Comments are priced per read
+
+**Length is a cost, not a virtue** ([ADR-0122](../adr/0122-comments-are-read-every-session.md)).
+Comments are 47% of the lines under `Sources/` and **64% of the bytes** — ~312 000 tokens against
+~172 000 of code. Every session that opens a file pays for all of it, usually while looking for
+something else: `PacingModel.swift` is 82% comment, `MenuBarLayout.swift` 78%. Write the shortest
+comment that answers what the next editor must know.
+
+**Deleting beats rewording.** A pass over 37 sites that rewrote history into the present tense
+while preserving length changed total volume by ~0.05%. The win is in paragraphs removed.
+
+**Origin stories go outright.** Where the code came from — a bash prototype, an earlier module —
+cannot be acted on: `PacingModel.elapsedFraction` cited `statusline.sh` lines 266–287, and that
+file exists neither in the repo nor in its git history. Keep the boundary rules such a comment
+states; drop the provenance around them.
+
+### Comments and docs are written in the present tense
+
+**A comment states what holds now and what the next editor must not break — not what the code used
+to do.** The past tense arrives honestly: a comment written *during* a change explains it as "this
+used to be X", which is commit-message language. The commit passes; the sentence stays, and it
+becomes a third copy of a fact already held by git history and, usually, by an ADR. Copies drift —
+that is how the ADR index came to spell one status eleven ways
+([#488](https://github.com/artem-from-ua/tokenpace/pull/488)).
+
+When you catch yourself writing *used to* / *previously* / *was removed*, **rewrite the sentence in
+the present tense**:
+
+- A fact survives → keep the fact, drop the history. "Both used to start at x=0, so a 9-pt dot and a
+  15-pt glyph had centres 3 pt apart" → "Starting both at x=0 would leave a 9-pt dot and a 15-pt
+  glyph with centres 3 pt apart." Same length, and it now warns instead of reminiscing.
+- Nothing survives → drop the sentence. A rejected alternative belongs in the ADR that rejected it.
+
+### An ADR reference is a footnote, not the explanation
+
+**Write the reason so it stands on its own; the `ADR-NNNN` after it is where to read more, never
+what makes the sentence mean something.** "Centred on the dot's axis (ADR-0094)" tells the next
+editor nothing they can act on. "A 9 pt dot and a 15 pt glyph put their centres 3 pt apart, enough
+to read as a misaligned column" is checkable against the code, and stays true whatever the ADR
+corpus does next.
+
+That last part is the point. ADRs get superseded, often in pieces — 0027 by six later records, 0009
+and 0020 in part, 0013 and 0086 in full — and **nothing warns a comment that its citation moved**.
+This codebase already carries 45 references to fully superseded ADRs and over a hundred to
+partially superseded ones. A comment leaning on the link is wrong the moment that happens and gives
+no sign; a comment carrying its own reason merely loses a convenience.
+
+The one thing always worth writing is the case where **the obvious move is wrong and the code cannot
+show it** — `setButtonType(.momentaryPushIn)`, because `.momentaryChange` restores the image on
+mouse-up and silently wipes the checkmark. That is a warning, not a memory.

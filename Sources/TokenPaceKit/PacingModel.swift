@@ -4,10 +4,9 @@ import Foundation
 
 /// A sliding usage window whose elapsed fraction drives pacing.
 ///
-/// Durations match the Anthropic usage API windows ported from `statusline.sh`
-/// (`fiveHour` = 18 000 s, `sevenDay` = 604 800 s). The per-model sub-windows
-/// `seven_day_opus` and `seven_day_sonnet` share the seven-day duration, so they
-/// reuse `.sevenDay`.
+/// Durations match the Anthropic usage API windows (`fiveHour` = 18 000 s, `sevenDay` = 604 800 s).
+/// The per-model sub-windows `seven_day_opus` and `seven_day_sonnet` share the seven-day duration,
+/// so they reuse `.sevenDay`.
 public enum LimitWindow: Sendable, Equatable, Hashable {
     case fiveHour
     case sevenDay
@@ -24,7 +23,6 @@ public enum LimitWindow: Sendable, Equatable, Hashable {
     }
 
     /// Window length in whole seconds — the denominator for elapsed-time pacing.
-    /// Matches the `window_seconds` argument of `calc_time_pct` in `statusline.sh`.
     public var durationSeconds: Int {
         switch self {
         case .fiveHour: return 18_000
@@ -61,11 +59,10 @@ public enum LimitWindow: Sendable, Equatable, Hashable {
 
 /// Whether usage is running ahead of or at/under the linear time pace.
 ///
-/// Maps downstream (in `StatusItemView`, issue #10) to bar-gap colors — not here.
+/// Maps downstream (in `StatusItemView`) to bar-gap colors — not here.
 /// - ``ahead``: usage exceeds elapsed time (`usagePct > timePct`). Rendered red.
 /// - ``onPaceOrBehind``: usage is at or below elapsed time (`timePct >= usagePct`).
-///   Rendered green. **The exact-equality tie (`usage == time`) lands here**, matching
-///   the `u_blocks <= t_blocks` branch in `statusline.sh`'s `build_progress_bar`.
+///   Rendered green. **The exact-equality tie (`usage == time`) lands here.**
 public enum PacingState: Sendable, Equatable {
     /// Usage exceeds elapsed time — burning budget faster than the linear norm (bad).
     case ahead
@@ -77,12 +74,8 @@ public enum PacingState: Sendable, Equatable {
 // MARK: - LimitIndicator
 
 /// Whether a limit's usage window is **exhausted** — the one distinction the UI still draws from the
-/// integer usage percent (the popup's "limit reached" wording).
-///
-/// Originally a three-tier port of `get_limit_indicator` from `statusline.sh`, but the middle
-/// `.warning` band (a `⚠` glyph for "> 90 % used before 90 % of the window elapsed") was dropped: the
-/// dynamic pacing colour (green→yellow→orange→red, ADR-0044) now carries the "how far ahead" signal on
-/// its own, and TokenPace has outgrown statusline parity. What remains is a two-state exhausted flag.
+/// integer usage percent (the popup's "limit reached" wording). A two-state exhausted flag: the
+/// dynamic pacing colour (green→yellow→orange→red, ADR-0044) carries the "how far ahead" signal.
 public enum LimitIndicator: Sendable, Equatable {
     /// Usage limit is exhausted (`utilization` truncated to 100). The popup reads "limit reached".
     case critical
@@ -95,10 +88,9 @@ public enum LimitIndicator: Sendable, Equatable {
 /// Continuous, pixel-drawable layout of one pacing bar. All fractions are in **[0, 1]**.
 ///
 /// The view renders three contiguous zones left→right:
-/// 1. **used**: `[0, usageFraction)` — gray (`dark_gray` 236 in statusline)
-/// 2. **gap**: between usage and time edges — green if `pacing == .onPaceOrBehind`,
-///    red if `.ahead` (`bright_green` 71 / `bright_red` 167)
-/// 3. **future**: `[max(usage, time), 1]` — blue (`dark_blue` 23)
+/// 1. **used**: `[0, usageFraction)` — gray
+/// 2. **gap**: between usage and time edges — green if `pacing == .onPaceOrBehind`, red if `.ahead`
+/// 3. **future**: `[max(usage, time), 1]` — blue
 ///
 /// A thin indicator tick sits at `timeFraction` (the elapsed-time edge).
 ///
@@ -353,7 +345,7 @@ public enum PacingSeverity: Sendable, Equatable {
 
 // MARK: - PacingModel
 
-/// Pure pacing arithmetic ported from the Claude Code statusline (`statusline.sh`).
+/// Pure pacing arithmetic.
 ///
 /// All entry points are **stateless and deterministic**: every method takes an
 /// explicit `now: Date` so tests need no clock mocking. The type is isolated from
@@ -364,35 +356,17 @@ public enum PacingSeverity: Sendable, Equatable {
 /// - `barLayout` keeps `utilization` as a **continuous** fraction [0, 1] for
 ///   pixel-accurate rendering.
 /// - `limitIndicator` and `elapsedFraction`-derived time use **integer percent**
-///   comparison, matching statusline's integer arithmetic for point-to-point parity.
-///   Do not "fix" these into a single unit — the asymmetry is load-bearing.
-///
-/// ## Relationship to `statusline.sh`
-/// | bash function | Swift entry point |
-/// |---|---|
-/// | `calc_time_pct` | `elapsedFraction(resetsAt:now:window:)` |
-/// | `get_limit_indicator` | `limitIndicator(utilization:timePercent:)` |
-/// | `build_progress_bar` zones | `barLayout(utilization:resetsAt:now:window:)` |
-/// | `build_progress_bar` block math | `blockIndex(fraction:cells:)` (popup-only) |
+///   comparison. Do not "fix" these into a single unit — the asymmetry is load-bearing.
 public enum PacingModel {
 
     // MARK: elapsedFraction
 
     /// Fraction of the window already elapsed, in [0, 1].
     ///
-    /// **Port of `calc_time_pct`** — but returns a continuous `Double` instead of an
-    /// integer percent, because the menu bar renders pixel-accurately. The difference
-    /// from bash's floor division is < 1 % and does not affect indicator thresholds
-    /// (those are computed from integer percents separately).
-    ///
-    /// Boundary rules, ported 1:1 from `statusline.sh` lines 266–287:
+    /// Boundary rules:
     /// - `resetsAt ≤ now` (reset is now or in the past) → `1.0`
     /// - remaining ≥ window duration (clock skew / future reset) → `0.0`
     /// - otherwise: `elapsed / durationSeconds`, clamped to [0, 1]
-    ///
-    /// The "empty reset" branch from bash (`parse_reset_epoch` returning empty) is not
-    /// applicable here: `resetsAt` is a non-optional `Date` — parsing of the raw API
-    /// string (microseconds + `+00:00` suffix) is handled upstream (issue #7).
     public static func elapsedFraction(resetsAt: Date, now: Date, window: LimitWindow) -> Double {
         let remaining = resetsAt.timeIntervalSince(now) // seconds (Double)
         if remaining <= 0 { return 1.0 }
@@ -405,11 +379,9 @@ public enum PacingModel {
 
     /// Whether a limit's usage window is **exhausted** (`.critical`) or not (`.neutral`).
     ///
-    /// The usage percent is truncated to an integer before the `== 100` test (`${x%.*}` in the
-    /// original bash), so **precision contract:** `99.9999` truncates to `99` and is NOT `.critical`.
-    /// Do not add an epsilon tolerance. The former `.warning` band (`> 90 %` before `90 %` of the
-    /// window elapsed) was removed with the statusline parity it came from — the pacing colour now
-    /// carries that signal (ADR-0044).
+    /// The usage percent is truncated to an integer before the `== 100` test, so **precision
+    /// contract:** `99.9999` truncates to `99` and is NOT `.critical`. Do not add an epsilon
+    /// tolerance. The pacing colour carries the "how far ahead" signal (ADR-0044).
     ///
     /// - Parameter utilization: API `utilization` field, a percent in [0, 100] (e.g. `13.0`).
     ///   Must be finite and ≥ 0.
@@ -594,8 +566,7 @@ public enum PacingModel {
     ///
     /// **Intentional unit split:**
     /// - `usageFraction` in `BarLayout` is continuous (no truncation) — pixel rendering.
-    /// - `pacing` uses a `>=` comparison on the raw fractions, matching the
-    ///   `u_blocks <= t_blocks` dispatch in `statusline.sh` (the equality tie → green).
+    /// - `pacing` uses a `>=` comparison on the raw fractions (the equality tie → green).
     ///
     /// - Parameters:
     ///   - utilization: API `utilization`, percent in [0, 100].
@@ -677,21 +648,18 @@ public enum PacingModel {
 
     // MARK: blockIndex (popup-only derivative)
 
-    /// Quantises a fraction [0, 1] into a block index for an `n`-cell rendering,
-    /// using the statusline's round-half-up rule: `(pct × n + 50) / 100`.
+    /// Quantises a fraction [0, 1] into a block index for an `n`-cell rendering, using a
+    /// round-half-up rule: `(pct × n + 50) / 100`.
     ///
-    /// **Reserved for popup block-marker rendering (issue #11).** The menu-bar bar is
-    /// pixel-accurate and does NOT call this. Keeping it here ports the complete block
-    /// arithmetic from `statusline.sh`'s `build_progress_bar` (lines 101–121) and
-    /// satisfies the bash-parity acceptance criterion for issue #6.
+    /// **Reserved for popup block-marker rendering.** The menu-bar bar is pixel-accurate and does
+    /// NOT call this.
     ///
     /// - Parameters:
     ///   - fraction: A value in [0, 1]; clamped before computation.
-    ///   - cells: Total number of cells (e.g. 30 for the 5h bar, 28 for 7d in statusline).
+    ///   - cells: Total number of cells.
     /// - Returns: Block index in [0, cells].
     public static func blockIndex(fraction: Double, cells: Int) -> Int {
         let pct = min(100, max(0, fraction * 100))
-        // Equivalent to bash integer `(pct * cells + 50) / 100` — round-half-up.
-        return Int((pct * Double(cells) + 50) / 100)
+        return Int((pct * Double(cells) + 50) / 100)   // round-half-up
     }
 }

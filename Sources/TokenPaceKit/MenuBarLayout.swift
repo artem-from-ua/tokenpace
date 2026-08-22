@@ -68,8 +68,7 @@ public struct BarView: Sendable, Equatable {
 /// Cases:
 /// - ``expanded(fiveHour:sevenDay:)``: the normal widget — two stacked bars (5h top, 7d bottom) and
 ///   **no countdown**, ever (ADR-0091). Shown whenever work is running on the subscription, at any
-///   `utilization` below the cap — the widget never collapses to a compact glyph (ADR-0015 supersedes
-///   the earlier idle mode).
+///   `utilization` below the cap — the widget never collapses to a compact glyph (ADR-0015).
 /// - ``error(fiveHour:sevenDay:reset:which:)``: there is no usable data to show — polling has been
 ///   failing long enough to surface a ⚠️ glyph (issue #12), **or** it is a cold start before the
 ///   first poll resolves (e.g. token expired, API unreachable). The bars are **optional**: present
@@ -368,8 +367,8 @@ public struct MenuBarLayout: Sendable, Equatable {
         //
         // **No bars, unconditionally** — and, since ADR-0091, with no escape hatch: a broken
         // `resets_at` yields `.exhaustedUnknownReset` rather than falling through to the bars path.
-        // Falling through used to be how the data error surfaced, but it drew a red 100 % bar to do
-        // it, which is exactly what "an exhausted window is never a bar" forbids.
+        // Falling through would draw a red 100 % bar to surface the data error, which is exactly what
+        // "an exhausted window is never a bar" forbids.
         if CreditsPacing.isBlocked(in: snapshot) {
             return MenuBarLayout(mode: blockedResetMode(for: snapshot, now: now)
                 ?? .exhaustedUnknownReset(which: exhaustedWindowWithoutReset(in: snapshot)))
@@ -547,11 +546,11 @@ public struct MenuBarLayout: Sendable, Equatable {
             }
         }()
         // The pause icon and the currency icon are **mutually exclusive** (ADR-0090, restoring the
-        // invariant `ui-state-truth.md` already claimed). They could previously draw side by side when
-        // the money cap was hit: `isActive` is `enabled || spend_limit_reached`, so the icon showed,
-        // while `creditsCanCover` is `enabled && !spend_limit_reached`, so the user was also blocked.
-        // Two icons then answered "can we work?" with contradictory halves — the pause wins, because
-        // "no path to work" is the answer and a red ¤ is a detail of *why*.
+        // invariant `ui-state-truth.md` already claimed). Without that rule they could draw side by
+        // side when the money cap is hit: `isActive` is `enabled || spend_limit_reached`, so the icon
+        // would show, while `creditsCanCover` is `enabled && !spend_limit_reached`, so the user would
+        // also be blocked. Two icons would then answer "can we work?" with contradictory halves — the
+        // pause wins, because "no path to work" is the answer and a red ¤ is a detail of *why*.
         //
         // The currency icon is suppressed in `.exhaustedUnknownReset` for the same reason the pause is
         // (above): a glyph that states the situation, beside a ⚠️ that disowns it, reads as a broken
@@ -613,10 +612,10 @@ public struct MenuBarLayout: Sendable, Equatable {
 
         // Past the grace window: the bare ⚠️, with no bars and no countdown (ADR-0091).
         //
-        // There used to be a middle phase here — ⚠️ *beside* the last bars, rebuilt through
-        // `expandedBars` — meant as diagnostics. It is gone: bars whose data may be a quarter of an
-        // hour old invite exactly the reading they cannot support ("this is where I stand"), and the
-        // popup already explains the failure in words. Showing nothing is the honest answer.
+        // Deliberately not ⚠️ *beside* the last bars rebuilt through `expandedBars`: bars whose data
+        // may be a quarter of an hour old invite exactly the reading they cannot support ("this is
+        // where I stand"), and the popup already explains the failure in words. Showing nothing is the
+        // honest answer.
         return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
     }
 

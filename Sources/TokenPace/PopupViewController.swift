@@ -65,23 +65,19 @@ final class PopupBarView: NSView {
         }
     }
 
-    // No `weeklyHeadroom` here since #381: the idle "ready" fill is green whatever the week is doing, so
-    // the bar no longer needs the weekly verdict alongside its inert layout.
+    // The idle "ready" fill is green whatever the week is doing, so the bar takes no weekly verdict
+    // of its own (ADR-0105). Which rows may render blue is decided by `BarLayout.blueAllowed`
+    // (ADR-0115) — never by a view-side flag keyed on row index, because the model cannot see one
+    // and would record a blue the popup is painting green.
 
-    // No `isBaseLimit` here since #426: "only base 5h/7d rows render blue" was a view-side flag set by
-    // row index, invisible to the model — so `PacingBucket` recorded scoped blues the popup was
-    // painting green. The rule now lives on `BarLayout.blueAllowed` (reason 2 there), which every
-    // surface already reads, so the bars need no second gate of their own.
-
-    /// Bar presentation style for **this surface** (#224, per-surface since #329) — fed from
-    /// `PersistedConfig.dropdownStyle` and pushed in from `PopupViewController.addBar`.
-    /// ``BarStyle/progress`` draws the gap + time-indicator marker + gap dividers;
-    /// ``BarStyle/pressure`` a left-anchored ribbon; ``BarStyle/balance`` a centre-anchored one. The
-    /// last two keep the under-bar tick ruler but have no marker or dividers.
+    /// Bar presentation style for **this surface** — fed from `PersistedConfig.dropdownStyle` and
+    /// pushed in from `PopupViewController.addBar`. ``BarStyle/progress`` draws the gap +
+    /// time-indicator marker + gap dividers; ``BarStyle/pressure`` a left-anchored ribbon;
+    /// ``BarStyle/balance`` a centre-anchored one. The last two keep the under-bar tick ruler but have
+    /// no marker or dividers.
     ///
-    /// Independent of `StatusItemView.barStyle` since #329 — the user picks each surface separately,
-    /// so the two are expected to differ. What keeps the draw paths honest is that both branch on
-    /// `BarStyle.scale`, not on the case.
+    /// Independent of `StatusItemView.barStyle` — the user picks each surface separately. Both draw
+    /// paths branch on `BarStyle.scale`, not on the case.
     var barStyle: BarStyle = .progress {
         didSet {
             guard barStyle != oldValue else { return }
@@ -132,16 +128,16 @@ final class PopupBarView: NSView {
     ///
     /// Both halves come from the same fact — this bar's window is a calendar month, not a rolling limit
     /// window — so they are driven by one property rather than by two independently-settable flags that
-    /// could disagree. `nil` leaves every existing bar exactly as it was.
+    /// could disagree.
     var monthBounds: (start: String, end: String)?
 
     private enum Metrics {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
-        /// Corner radius of the track **and** of the coloured strip laid over it (#326). Nudged up from
-        /// the shipped 2 on a 6 pt bar; the strip and the idle pill now take this value instead of
-        /// rounding as capsules (`min(w,h)/2` = 3), so two shapes stacked in one bar share one corner.
-        /// The menu bar keeps its own 1.5 — the two surfaces are tuned separately.
+        /// Corner radius of the track **and** of the coloured strip laid over it (#326). The strip and
+        /// the idle pill take this value instead of rounding as capsules (`min(w,h)/2` = 3), so two
+        /// shapes stacked in one bar share one corner. The menu bar keeps its own 1.5 — the two
+        /// surfaces are tuned separately.
         static let corner: CGFloat = 2.25
         /// Width of the time-indicator marker — a slim vertical bar, narrower than the old dot so it
         /// reads as a crisp position tick rather than a blob.
@@ -189,14 +185,11 @@ final class PopupBarView: NSView {
         /// Total view height: the **marker** and nothing more. The marker is centred on the bar and so
         /// overhangs it by `(indicatorHeight − barHeight)/2` on each side; that is the whole reserve.
         ///
-        /// The tick ruler is deliberately **not** reserved for (#388). It used to add `tickGap +
-        /// tickLength` on top of the marker, which bought 7 pt of empty strip under every bar — and
-        /// two of the three styles draw no ruler at all (ADR-0098), so on those the strip was pure
-        /// air. Because a bar sits at the end of each limit block, that air read as extra space
-        /// *between blocks*: the gap under "Claude" measured its honest `sectionSpacing`, while the
-        /// gap between blocks measured `limitSpacing` **plus** the reserve — 10 pt of setting looking
-        /// like 25. The ticks now draw into the marker's own bottom overhang, where they are thin
-        /// enough (2 pt wide, `tertiaryLabelColor`) to need no clearance of their own.
+        /// The tick ruler is deliberately **not** reserved for (#388): it draws into the marker's own
+        /// bottom overhang, being thin enough (2 pt wide, `tertiaryLabelColor`) to need no clearance.
+        /// Reserving `tickGap + tickLength` on top would put an empty strip under every bar — dead air
+        /// in the two styles that draw no ruler at all (ADR-0098) — and because a bar ends each limit
+        /// block, that strip reads as space *between blocks*, making a 10 pt `limitSpacing` measure 25.
         static let height: CGFloat = indicatorHeight
     }
 
@@ -324,16 +317,14 @@ final class PopupBarView: NSView {
         /// The monochrome base-zone grey (the bar's `used` + future/unused zones). **Popup-only**: a tone
         /// **half-way between** `tertiaryLabelColor` and the dimmest `quaternaryLabelColor` — dimmer than
         /// the menu bar's `barTrack` (`labelColor@0.22`) so the popup track recedes into the NSMenu
-        /// material, but not as dark as full quaternary (#224). The menu-bar widget keeps its own
-        /// `barTrack` tone unchanged — only this popup surface is quieter.
+        /// material, but not as dark as full quaternary. The menu-bar widget keeps its own `barTrack`
+        /// tone unchanged — only this popup surface is quieter.
         ///
         /// A **dynamic** `NSColor(name:)` whose blend is computed **inside**
-        /// `performAsCurrentDrawingAppearance`, so it re-resolves per appearance and flips light/dark —
-        /// exactly like ``PopupViewController/defaultDimmedLabel``. A plain `.blended(...)` (even from a
-        /// computed `var`) bakes in whatever appearance was current at the call site: under an NSMenu-hosted
-        /// view the drawing appearance is not reliably current when `draw()` reads it, so the light theme
-        /// rendered the dark tone (and vice-versa). `blended` returns non-nil for these dynamic label
-        /// colours in a real drawing context; the `?? tertiary` fallback keeps it total.
+        /// `performAsCurrentDrawingAppearance`, so it re-resolves per appearance and flips light/dark. A
+        /// plain `.blended(...)` bakes in whatever appearance was current at the call site: under an
+        /// NSMenu-hosted view the drawing appearance is not reliably current when `draw()` reads it, so
+        /// the light theme rendered the dark tone (and vice-versa).
         static let monochromeGrey = NSColor(name: nil) { appearance in
             var mixed: NSColor = .tertiaryLabelColor
             appearance.performAsCurrentDrawingAppearance {
@@ -346,9 +337,8 @@ final class PopupBarView: NSView {
 
     // MARK: - Shipped colour defaults
 
-    // The one remaining per-appearance provider backing `ColorRole.defaultColor`. The semantic hues and
-    // greys are now plain system/semantic colours resolved directly in `ColorRole.defaultColor`; only
-    // `defaultDimmedLabel` (below) still computes a per-appearance blend, so it stays a provider.
+    // `defaultDimmedLabel` (below) is the only color here that still needs a per-appearance provider —
+    // every other role resolves directly in `ColorRole.defaultColor`.
 
     /// The grey both bar base zones (`used` + future/unused tail) render in — the **popup-only** tone
     /// half-way between tertiary and quaternary label (quieter than the menu bar's `barTrack`), where
@@ -360,15 +350,10 @@ final class PopupBarView: NSView {
     /// Overrides the track tone for **this** bar, or `nil` to use ``monochromeGrey``.
     ///
     /// Exists for the Legend page (#261) and nothing else. The popup's grey is tuned to be barely
-    /// there: it sits on a vibrant card among rows of text, where the track's job is to be the absence
-    /// of colour rather than a shape in its own right. On a Settings form the same tone all but
-    /// disappears — the plate behind it is flatter and lighter, and the bar is no longer surrounded by
-    /// content telling the reader where it is. A legend whose specimen is hard to see fails at the one
-    /// thing it exists for.
-    ///
-    /// A per-instance override rather than a brighter shared constant, because the popup is right for
-    /// the popup: raising the shipped grey would repaint every live bar to fix a page none of them are
-    /// on.
+    /// there, sitting on a vibrant card among rows of text — on a flat Settings form the same tone all
+    /// but disappears, and a legend whose specimen is hard to see fails at the one thing it exists for.
+    /// A per-instance override rather than a brighter shared constant, since raising the shipped grey
+    /// would repaint every live bar to fix a page none of them are on.
     var trackTint: NSColor?
 
     /// The tone this bar's base zones actually draw in.
@@ -376,9 +361,8 @@ final class PopupBarView: NSView {
 
     /// Scales the time marker's halo for **this** bar. `1` is the shipped glow.
     ///
-    /// Also for the Legend page, and for the same reason as ``trackTint``: the popup's glow is tuned
-    /// against a vibrant card, where a marker has to lift off a busy surface. On a flat Settings form
-    /// it blooms instead — the halo reads as part of the mark, and the diagram's callout then points at
+    /// Also for the Legend page, for the same reason as ``trackTint``: on a flat Settings form the
+    /// glow blooms instead of lifting off a busy surface, and the diagram's callout then points at
     /// something fuzzier than the 7 pt it is naming.
     var markerGlowScale: CGFloat = 1
 
@@ -387,10 +371,9 @@ final class PopupBarView: NSView {
 
     /// Scales the **coloured strip's** ambient halo for this bar. `1` is the shipped glow.
     ///
-    /// The companion to ``markerGlowScale``, and set for the same reason on the same surface: the
-    /// popup's halo is tuned against a vibrant card, where the ribbon has to lift off a busy
-    /// material. A Settings form is flat and opaque, so the same halo reads as bloom rather than
-    /// lift — the specimen looks softer than the bar it is a picture of.
+    /// The companion to ``markerGlowScale``, set for the same reason on the same surface: a flat
+    /// Settings form reads the same halo as bloom rather than lift, so the specimen looks softer than
+    /// the bar it is a picture of.
     ///
     /// Scales the **strength**, not the radius. Both were tried and they are not interchangeable:
     /// tightening the radius keeps the halo as bright as ever and merely shrinks it, which reads as
@@ -434,22 +417,13 @@ final class PopupBarView: NSView {
         // identifying time marker on top, parked at `timeFraction` = 0 (the window has just rolled, so
         // no time has elapsed); the marker covers the pill, so the two styles differ only by that mark.
         //
-        // Progress used to fill the whole track solid blue, which read as a Pressure bar at *full*
-        // pressure — the loudest possible mark for the calmest possible state, and the exact confusion
-        // the per-style shapes were meant to prevent. Zero usage is zero on both scales, so zero is what
-        // both draw.
+        // Zero usage is zero on both scales, so zero is what both draw: a filled track would read as a
+        // Pressure bar at *full* pressure — the loudest mark for the calmest state.
         if idle {
-            // Blocked idle (#158) → grey (no path to start); otherwise green (ADR-0105).
-            // Grey (blocked) is an already-translucent neutral — leave it; only the blue hue is tinted (#188).
-            // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
-            // because it is derived from this same colour.
-            // Two-way since #381: grey when blocked (no path to start), **green** whenever ready. It was
-            // three-way (#331 follow-up), with blue standing for "ready, and the week has quota to burn"
-            // — a second claim layered onto "ready" and carried by the same pill, which needed
-            // `PacingModel.weeklyHasHeadroom` threaded through an inert row to stay honest. The claim is
-            // dropped rather than moved: idle answers one question. The weekly gate still does its real
-            // work on every *active* row's `blueAllowed` (ADR-0081), and the menu bar drops the same
-            // distinction in the same release, so the two surfaces cannot disagree about idle.
+            // Grey when blocked (#158, no path to start), otherwise green (ADR-0105) — idle answers only
+            // that one question; the weekly quota signal lives in every *active* row's `blueAllowed`
+            // (ADR-0081) instead. Animated so idle→active reads as a fade (ADR-0070); the glow follows
+            // automatically because it is derived from this same colour.
             let idleTarget = blocked ? trackColour : ColorRole.green.defaultColor
             let idleColor = blocked ? idleTarget : animated(idleTarget, part: .fill)
             // The zero tick goes down BEFORE the track: the track then covers its middle and only the
@@ -686,11 +660,10 @@ final class PopupBarView: NSView {
     /// The minimum width of the coloured strip — so a near-zero span renders as a rounded "pill"
     /// (a short capsule with fully-rounded ends) rather than a hairline sliver.
     ///
-    /// Was a flat ¾ of the bar height; **narrowed by 1 pt** (#326) so the smallest mark reads as a
-    /// mark rather than a blob. That makes the pill 2.75 pt on the 5 pt menu-bar track and 3.5 pt on
-    /// the 6 pt popup one — no longer a fixed ratio of the height, which is deliberate: the floor
-    /// exists to keep a tiny span *visible*, and visibility does not scale with the bar the way its
-    /// corner radius does.
+    /// ¾ of the bar height **less 1 pt** (#326), so the smallest mark reads as a mark rather than a
+    /// blob: 2.75 pt on the 5 pt menu-bar track, 3.5 pt on the 6 pt popup one. The `- 1` breaks the
+    /// fixed ratio deliberately — the floor exists to keep a tiny span *visible*, and visibility does
+    /// not scale with the bar the way its corner radius does.
     ///
     /// This is the single knob for the whole inset geometry, not just the floor: ``scaleX`` insets the
     /// 0..1 scale by half of it at each end, so every fraction on both surfaces — strips, pills, the
@@ -821,14 +794,7 @@ final class PopupBarView: NSView {
     ///   Pressure's zero is `0` and Balance's is `0.5` (``zeroTickFraction``) — that mark is also what
     ///   tells the two styles apart at a glance, and it is the same one the menu bar draws
     ///   (`StatusItemView.drawZeroTick`); that surface carries only the identifying half, since ⌥
-    ///   cannot reach it. Pressure once marked `0.20` here, back when its zero sat left of `t`; since
-    ///   ADR-0101 the scale's zero *is* `u == t`, so the two marks would coincide even if it had not
-    ///   already been dropped.
-    ///
-    /// The original objection to a tick under Pressure — a lone vertical tooth is exactly what the
-    /// Progress time marker looks like, so the styles would stop being distinguishable — is answered by
-    /// **construction** rather than by omission: a fifth the width, in the neutral tick tone, drawn
-    /// *under* the track so only its ends show, and never moving.
+    ///   cannot reach it.
     ///
     /// - **Credits** (``monthBounds`` set) draws **no teeth at all** — its month ruler is the pair of
     ///   captions alone (``drawBoundaryCaptions(in:)``). Interior subdivisions are wrong there (months
@@ -844,10 +810,7 @@ final class PopupBarView: NSView {
         if monthBounds != nil { return [] }
         switch effectiveScale {
         // Neither marker-less style carries a tooth here: both are marked by their **zero** alone
-        // (``zeroTickFraction``), captioned `0` under ⌥. Pressure's old 0.20 "exactly on pace" landmark
-        // was dropped by ADR-0098 — a second unlabelled tooth a few points from a labelled zero read as
-        // a stray mark — and ADR-0101 moved the scale's zero onto `u == t`, so that landmark is now the
-        // zero itself rather than a separate position.
+        // (``zeroTickFraction``), captioned `0` under ⌥.
         case .remaining, .centred: return []
         case .window:
             guard subdivisions >= 2 else { return [] }
@@ -925,13 +888,6 @@ final class PopupBarView: NSView {
     /// *without* teeth, so gating them on a non-empty tooth list would erase the whole ruler.
     private func drawTicks(in barRect: NSRect) {
         guard optionHeld else { return }                   // the explanatory half is ⌥-on-demand
-        // Captions retired (#396): the `0` under the zero tick and the credits bar's `Jan 1` / `Feb 1`
-        // month ends. Both spelled out what their own mark already showed — the tick *is* the zero, and
-        // a bar whose window is the calendar month has its dates on the reset line right above it. They
-        // also sat below the bar, which is where the next section's title begins, so under ⌥ the rows
-        // gained a half-line of text each and the popup's rhythm changed with the modifier.
-        //
-        // The teeth stay: they subdivide the window, which nothing else in the row states.
         for f in tickFractions { drawTick(at: f, in: barRect) }
     }
 
@@ -994,9 +950,8 @@ final class PopupBarView: NSView {
     /// The threshold is `PacingModel.aheadThreshold(timeFraction:)` = `0.16 · (1 − time)` — 16 pts of
     /// slack early in a window, shrinking to 0 at the end. Shared with `BarLayout.severity` (Kit) so
     /// colour and severity never drift; the `< threshold` comparison is strict (a lead exactly at the
-    /// threshold is orange).
-    /// The ahead-of-pace grade, shared by both surfaces: they now resolve the same unified
-    /// `red`/`yellow`/`orange` roles, so the menu-bar bar and popup bar always agree.
+    /// threshold is orange). Both surfaces resolve the same unified `red`/`yellow`/`orange` roles, so
+    /// the menu-bar bar and popup bar always agree.
     static func aheadColor(usage: Double, time: Double, remainingSeconds: TimeInterval) -> NSColor {
         let red = ColorRole.red.defaultColor
         let yellow = ColorRole.yellow.defaultColor
@@ -1030,14 +985,14 @@ final class PopupBarView: NSView {
             ? ColorRole.blue.defaultColor : green
     }
 
-    /// Glow radii (#188 follow-up): a soft coloured halo (ambient) behind the coloured pacing strip, the
-    /// time marker, and the service-status dots so they lift off the card.
-    /// Bar strip glow: a large, soft, low-intensity halo. The idle strip shares these parameters.
-    /// How far the transparent gutter under a yellow strip extends past it on each side (#326).
-    /// Tuned live from 0.5 pt (a hairline, it vanished) through 2 pt: 1.5 pt — three physical pixels
-    /// on a Retina display — is the settled width. A `labelColor` backing plate was tried at this spot
-    /// and rejected: the transparent cut is what was wanted, letting the panel itself separate the
-    /// strip from the track.
+    // Glow radii: a soft coloured halo (ambient) behind the coloured pacing strip, the time marker, and
+    // the service-status dots so they lift off the card. Bar strip glow: a large, soft, low-intensity
+    // halo. The idle strip shares these parameters.
+
+    /// How far the transparent gutter under a yellow strip extends past it on each side (#326). 1.5 pt
+    /// — three physical pixels on a Retina display — is the settled width. A `labelColor` backing plate
+    /// was tried at this spot and rejected: the transparent cut is what was wanted, letting the panel
+    /// itself separate the strip from the track.
     private static let yellowGutter: CGFloat = 1.5
 
     /// Whether this strip is rendering the **yellow** (mild-lead) pacing colour, and so wants the
@@ -1060,29 +1015,18 @@ final class PopupBarView: NSView {
     private static let gapGlowRadius: CGFloat = 21
     private static let gapGlowStrength: CGFloat = 0.35
 
-    /// Glow for a **Pressure ribbon that has collapsed to its zero pill** (#381) — stronger and tighter
-    /// than the ambient one above.
+    /// Glow for a **Pressure ribbon that has collapsed to its zero pill** — stronger and tighter than
+    /// the ambient one above. Pressure's quiet states draw the same minimum pill, which has almost no
+    /// area to carry colour, so the ambient 21 pt halo (calibrated for a full-size ribbon) reads as a
+    /// faint smudge on it. A tighter radius with more strength keeps the halo inside the bar's own
+    /// height and makes the pill read as a lit dot. Only the quiet colours get this — orange and red
+    /// already have ribbon length of their own.
     ///
-    /// Pressure measures against the time left, so every quiet state — the far-behind blue and the
-    /// on-pace green alike — draws the same minimum pill: the scale deliberately spends no width on the
-    /// side where there is nothing to act on. That leaves the pill with almost no area to carry its
-    /// colour, and the ambient 21 pt halo is calibrated for a ribbon many times that size, so on a pill
-    /// it reads as a faint smudge rather than as the mark's own light.
-    ///
-    /// A **tighter** radius with **more** strength is what recovers it: the halo stays inside the bar's
-    /// own height instead of bleeding across the card, and the pill reads as a lit dot. Only the quiet
-    /// colours get this — orange and red already have ribbon length of their own, and lighting them
-    /// further would raise a warning's volume rather than restore a quiet mark's legibility.
-    /// The three glow passes for a collapsed Pressure pill, laid down widest-first.
-    ///
-    /// Three rather than one because `withGlow` sets a **shadow alpha**, and `strength` clamps at 1: once
-    /// there, a bigger number buys nothing and the only way left to add light is another pass. Each one
-    /// composites over the last, so the halo builds where they overlap — brightest against the pill,
-    /// falling off outward, which is how a light source actually behaves.
-    ///
-    /// The radii are a spread, not three tries at one value: the wide pass fills the bar's height with
-    /// colour, the mid pass gives the falloff a body, and the tight pass puts a hot core right at the
-    /// pill's edge so the mark reads as lit rather than as a blur with a dot inside it.
+    /// Three passes, laid down widest-first, because `withGlow` sets a shadow alpha and `strength`
+    /// clamps at 1 — the only way to add more light past that is another pass, compositing over the
+    /// last so the halo builds brightest against the pill and falls off outward. The radii are a
+    /// spread, not three tries at one value: the wide pass fills the bar's height with colour, the mid
+    /// pass gives the falloff a body, the tight pass puts a hot core right at the pill's edge.
     private static let pillGlowRadius: CGFloat = 10
     private static let pillMidGlowRadius: CGFloat = 22
     private static let pillHaloRadius: CGFloat = 40
@@ -1290,7 +1234,7 @@ final class SubscribeRowView: NSView {
         addSubview(label)
 
         // The icon is **centred on the status dots' axis**, not flush with the row's leading edge.
-        // Both used to start at x=0, but a 9-pt dot and a 15-pt glyph then have centres 3 pt apart —
+        // Starting both at x=0 would leave a 9-pt dot and a 15-pt glyph with centres 3 pt apart —
         // enough to read as a misaligned column down the left of the section. Centring on the dot's
         // midpoint puts the bell directly under them whatever the glyph's own width turns out to be.
         //
@@ -1350,19 +1294,15 @@ final class SubscribeRowView: NSView {
 /// rather than a full pill (#224) — and the fill CGColor is re-resolved in `updateLayer()` because
 /// CGColor is not appearance-dynamic (the standard layer-backed dark/light trap).
 ///
-/// Since #254 this is the popup's **only** filled badge: the credits "in use" marker moved to the
-/// knocked-out glyph of ``KnockoutGlyphBadge``, so a solid fill now means exactly one thing — the
-/// reset that unblocks work.
-/// The badge **draws its own text** rather than hosting an `NSTextField`, so the padding around the
-/// text is one `NSTextField` whose cell insets its own drawing rect (#158 follow-up).
+/// The popup's **only** filled badge: a solid fill means exactly one thing — the reset that unblocks
+/// work. The credits "in use" marker is a knocked-out glyph instead (``KnockoutGlyphBadge``).
 ///
-/// The badge is **a label with padding and a filled background**, so it is built as one — not as a
-/// label positioned inside a container, and not as a view that draws the string itself. Both of those
-/// were tried here and both put the padding at the mercy of a rounding step: a hosted field rounds its
-/// width up to a backing pixel before the centring splits what is left, so the padding drifts with the
-/// string, and since the badge is pinned to the row's trailing edge, holding ⌥ swaps a short string for
-/// a long one and the text steps sideways. Hand-drawing moves the same remainder elsewhere rather than
-/// removing it.
+/// The badge is **a label with padding and a filled background**, built as one `NSTextField` whose
+/// cell insets its own drawing rect — not a label positioned inside a container, and not a view that
+/// draws the string itself. Both of those were tried and both put the padding at the mercy of a
+/// rounding step: a hosted field rounds its width up to a backing pixel before the centring splits
+/// what is left, so the padding drifts with the string, and since the badge is pinned to the row's
+/// trailing edge, holding ⌥ swaps a short string for a long one and the text steps sideways.
 ///
 /// ``PillCell`` narrows the rect the text is laid out in, which is the AppKit-sanctioned way to pad a
 /// cell's content. One text object, laid out once, with the framework resolving the rounding.
@@ -1501,15 +1441,7 @@ final class PillView: NSTextField {
 }
 
 /// Applies ``PillView``'s padding the way AppKit intends: by narrowing the rect the cell lays its text
-/// out in, rather than by positioning a separate label inside a container.
-///
-/// This matters beyond tidiness. Hosting an `NSTextField` inside a plain `NSView` and pinning it with
-/// constraints makes the field round its own width up to a backing pixel *first*, after which the
-/// leftover — different for every string — is split by the centring inside the field. The padding then
-/// drifts with the text, and because the badge is pinned to the row's trailing edge, holding ⌥ swaps a
-/// short string for a long one and the text visibly steps sideways. Drawing the string by hand instead
-/// trades that for the same problem in a different place. Letting the cell inset its own drawing rect
-/// keeps one text object, laid out once, with AppKit resolving the rounding.
+/// out in, rather than by positioning a separate label inside a container (see ``PillView`` for why).
 final class PillCell: NSTextFieldCell {
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
         super.drawingRect(forBounds: rect.insetBy(dx: PillView.hInset, dy: PillView.vInset))
@@ -1593,9 +1525,8 @@ final class PopupViewController: NSViewController {
     /// rows are replaced by the incident list (ADR-0071 §2), which is a different question about the
     /// same moment, not more detail about the same answer. A component that is `operational` draws no
     /// row in either ⌥ state; the only thing that puts one on screen is a problem or a recovery inside
-    /// `recoveryWindow`. (This comment used to claim ⌥ expanded the list to every component, which was
-    /// the pre-#279 behaviour and would make ⌥ a level-of-detail control — exactly what ADR-0071 §2
-    /// says it is not.)
+    /// `recoveryWindow`. Expanding the list to every component would make ⌥ a level-of-detail control
+    /// — exactly what ADR-0071 §2 says it is not.
     ///
     /// It is also the escape hatch for the two ``PopupSectionVisibility`` groups: in `.nonCalm` it
     /// reveals a calm group, and in `.optionOnly` it is the *only* thing that reveals one.
@@ -1656,14 +1587,13 @@ final class PopupViewController: NSViewController {
     /// The popup's fixed width — **the** number, read by ``Metrics/width`` here and by
     /// `SettingsPreviewWindowController.Metrics.nominalWidth` for the live preview window (#396).
     ///
-    /// Both used to carry their own `312` literal, which could drift apart silently: the preview would
-    /// simply open at a different width than the popup it previews. Deriving both from this one
-    /// constant makes that impossible.
+    /// Both derive from this one constant rather than carrying a literal each: two literals drift
+    /// apart silently, and the preview then opens at a different width than the popup it previews.
     ///
     /// The inner content column every fixed-width row measures against is ``Metrics/contentWidth`` =
-    /// `width − 2·cardInset − 2·hPadding` = 380 − 28 − 32 = **320 pt**. Widened from 312/252 (#396) so
-    /// the credits header fits without shortening the pacing phrases, which are shared verbatim with
-    /// the token rows.
+    /// `width − 2·cardInset − 2·hPadding` = 380 − 28 − 32 = **320 pt**, wide enough (#396) for the
+    /// credits header without shortening the pacing phrases, which are shared verbatim with the
+    /// token rows.
     ///
     /// Sized against `Extra usage progress … [active] well ahead of pace` — **307 pt** at 13 pt, the
     /// widest line that *must* fit. The **detail** line can exceed it (`spent $5,000.00 of $5,000.00`
@@ -1738,12 +1668,10 @@ final class PopupViewController: NSViewController {
         static let topPadding: CGFloat = 16
         /// Bottom **inner** padding — space between the last bar and the card's bottom edge.
         ///
-        /// Was 12, trimmed to 8 in #396 when the ⌥ captions came out, then back to 14 in #388: both
-        /// earlier numbers were chosen while each bar still carried 7 pt of tick-ruler reserve below it,
-        /// so the *rendered* bottom margin was 15–19 pt however the constant read. Removing the reserve
-        /// dropped it to a real 8 and the last row sat on the card's edge. 14 restores the old optical
-        /// margin and makes it the same value as `limitSpacing`, so the space below the last bar matches
-        /// the space between bars.
+        /// Equal to `limitSpacing`, so the space below the last bar matches the space between bars.
+        /// The number is a rendered margin, not a nominal one: bars carry no tick-ruler reserve under
+        /// them (#388), so whatever this constant reads is what the eye gets — a smaller value puts
+        /// the last row on the card's edge.
         static let bottomPadding: CGFloat = 14
         static let rowSpacing: CGFloat = 3
         /// Indent of an awaiting **session** row under its project heading (#438). Applied as a left
@@ -1762,11 +1690,10 @@ final class PopupViewController: NSViewController {
         static let sectionSpacing: CGFloat = 14
         /// Gap **between limit blocks** (after each section's bar) — the same 14 pt the header takes.
         ///
-        /// It used to be 10, "a touch tighter than `sectionSpacing` so the limit list reads as a group".
-        /// That reasoning measured the wrong thing: every bar view reserved 7 pt under itself for a tick
-        /// ruler two of the three styles never draw, so the gap between blocks *rendered* as ~25 pt while
-        /// the gap under "Claude" rendered as its honest 14. The list read looser than the header, not
-        /// tighter. With the reserve gone (#388) the two are set equal and finally look it.
+        /// Equal to `sectionSpacing` rather than tighter: with no tick-ruler reserve under the bars
+        /// (#388) the constant is what renders, so equal values finally look equal. Tightening this
+        /// number to make the limit list read as a group is the move to resist — it measures the
+        /// nominal gap while the eye measures the rendered one.
         static let limitSpacing: CGFloat = 14
         static let textSize: CGFloat = dropdownTextSize
         /// Diameter of the service-status glow dot (#188) and the gap between it and the component name.
@@ -1838,9 +1765,9 @@ final class PopupViewController: NSViewController {
     /// `nil` until `loadView` builds it, like `cardView`.
     private var optionHintLabel: NSTextField?
 
-    /// The bottom constraint that holds while the hint is hidden — the card owns the container's bottom,
-    /// which is the layout as it stood before #475. Swapped against ``hintBottomConstraints`` rather
-    /// than toggled by height, so a hidden hint costs no vertical space at all.
+    /// The bottom constraint that holds while the hint is hidden: the card owns the container's bottom.
+    /// Swapped against ``hintBottomConstraints`` rather than toggled by height, so a hidden hint costs
+    /// no vertical space at all.
     private var cardBottomConstraint: NSLayoutConstraint?
 
     /// The bottom constraints that hold while the hint is shown: the card stops at the hint, and the
@@ -1863,9 +1790,8 @@ final class PopupViewController: NSViewController {
     ///
     /// Only the bottom margin depends on it. In the menu, what sits under the card varies — the ⌥
     /// caption, the native items, or nothing at all — so the popup has to size that gap itself. The
-    /// preview's window frames the card on its own (`SettingsPreviewWindowController.Metrics.belowCard`)
-    /// and must keep doing exactly that, so it opts out and keeps the historical trimmed value the
-    /// window's own margin is measured against.
+    /// preview's window frames the card on its own (`SettingsPreviewWindowController.Metrics.belowCard`),
+    /// so it opts out and keeps the trimmed value the window's own margin is measured against.
     var hostedInMenu = true {
         didSet {
             guard isViewLoaded, hostedInMenu != oldValue else { return }
@@ -2086,15 +2012,11 @@ final class PopupViewController: NSViewController {
         optionHintLabel = hint
 
         // Two ways to end the popup, swapped by `applyOptionHintVisibility`: the card owns the bottom
-        // when the caption is away, the caption owns it when it is there.
+        // when the caption is away, the caption owns it when it is there. The card's own constant is not
+        // fixed — see `cardBottomConstant`.
         //
-        // The card's own constant is not fixed — see `cardBottomConstant`. With the caption gone and the
-        // action items ⌥-hidden (#475), nothing follows the plate at all, and the margin trimmed for a
-        // neighbour that no longer exists left it sitting almost on the popup's edge.
-        //
-        // #454: both hang off the **GitHub** plate now, which is the last thing in the column. When
-        // GitHub is off that plate collapses to zero height and sits flush under Claude's card, so
-        // the measured margins below are unchanged from the single-plate era.
+        // Both anchor to the **GitHub** plate, the last thing in the column. When GitHub is off, that
+        // plate collapses to zero height and sits flush under Claude's card.
         let cardBottom = container.bottomAnchor.constraint(
             equalTo: githubCard.bottomAnchor, constant: cardBottomConstant)
         cardBottomConstraint = cardBottom
@@ -2206,7 +2128,7 @@ final class PopupViewController: NSViewController {
     /// Show or hide the ⌥ hint and swap which view owns the container's bottom edge.
     ///
     /// Hidden is the *absence* of the row, not an empty one: the card's own bottom constraint comes back,
-    /// so a popup with the hint off measures exactly as it did before #475. `NSMenu` re-measures nothing
+    /// so a popup with the hint off takes up no height for it. `NSMenu` re-measures nothing
     /// on its own, so the caller re-fits the hosted view afterwards (`AppDelegate`), and the Settings
     /// preview resizes its window.
     private func applyOptionHintVisibility() {
@@ -2284,8 +2206,7 @@ final class PopupViewController: NSViewController {
     /// hiding a calm state would leave an enabled provider looking identical to a disabled one. The
     /// header dot is what the calm state says.
     ///
-    /// When the provider is off the plate collapses to zero height and the rows are cleared, so the
-    /// popup ends at Claude's card exactly as it did before this feature existed.
+    /// When the provider is off the plate collapses to zero height and the rows are cleared.
     private func rebuildGitHubPlate(_ layout: PopupLayout) {
         githubStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
@@ -2721,8 +2642,8 @@ final class PopupViewController: NSViewController {
         guard let bar = credits.bar, let limit = credits.limit else {
             // Unlimited: no cap, so no bar, no pacing verdict and no reset — but the row keeps the
             // section's shape (#396): a header naming the state, then the amount on its own second
-            // line, where every other section puts its numbers. It used to be a single line with the
-            // amount standing in for a status, which made the one row without a cap the one row with a
+            // line, where every other section puts its numbers. Folding it into one line with the
+            // amount standing in for a status would make the one row without a cap the one row with a
             // different anatomy.
             //
             // No style word: there is no bar here, so there is no scale to name.
@@ -2751,9 +2672,8 @@ final class PopupViewController: NSViewController {
             // (ADR-0092), so it captions itself `progress` even in a column of Pressure bars. That
             // mismatch is the caption's whole reason for existing.
             style: barStyleCaption(monthBounds: true),
-            // The state badge sits in the **trailing** half, qualifying the status word (#396). It used
-            // to ride beside the title, where it named the money but sat next to the row's name rather
-            // than next to anything about money — and only ever appeared for one of the three states.
+            // The state badge sits in the **trailing** half, qualifying the status word (#396) rather
+            // than the title — it names something about the money, not about the row.
             stateBadge: creditsStateBadge(credits, bar: bar))
         // Both halves grow under ⌥ at once — exact cents on the left, the "resets in" lead-in on the
         // right — and the credits amounts are the popup's widest left half to begin with, so this is
@@ -2911,10 +2831,6 @@ final class PopupViewController: NSViewController {
 
     /// A `hand.raised` icon + count chip (#233), the icon tinted by `tint`, the count kept neutral
     /// (uncoloured). A count of `1` renders as the bare hand — one hand already says "one".
-    ///
-    /// It once took a `showCountForOne` flag, because the per-project ⌥ rows wanted `1✋` spelled out
-    /// to line up against `2✋`. Those rows are gone (#438): a session row's hand is always exactly one
-    /// session, so no caller has a count to spell.
     private func makeHandChip(count: Int, tint: NSColor) -> NSStackView {
         let size = Metrics.textSize
         let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
@@ -2961,10 +2877,10 @@ final class PopupViewController: NSViewController {
     /// One project **heading** in the ⌥ awaiting breakdown (#233, #438): the project name alone, with
     /// nothing on the right.
     ///
-    /// It used to carry a hand chip per non-empty time-to-deletion bucket (`1✋ 2✋`). Those chips were
-    /// an aggregate of the very sessions that now each get their own row below, so keeping both would
-    /// state the same fact twice — once as a number the eye has to decode, once as the named lines it
-    /// summarizes. The heading is now a pure grouping label; every hand hangs off a session.
+    /// The heading is a pure grouping label; every hand hangs off a session. A hand chip per
+    /// time-to-deletion bucket (`1✋ 2✋`) would aggregate the very sessions listed below it, stating
+    /// the same fact twice — once as a number the eye has to decode, once as the named lines it
+    /// summarizes.
     ///
     /// A plain `addArrangedSubview` would leave the label sized to its text rather than to
     /// ``Metrics/contentWidth``; it lands in the same place today (the stack is `.leading`-aligned)
@@ -3020,14 +2936,13 @@ final class PopupViewController: NSViewController {
         // would pull the hand off the column every other row's trailing element aligns to.
         (row as? NSStackView)?.edgeInsets = NSEdgeInsets(
             top: 0, left: Metrics.awaitingSessionIndent, bottom: 0, right: 0)
-        // The full name survives truncation here, and the bucket phrase replaces the tooltip the
-        // per-bucket chips used to carry.
+        // The full name survives truncation here, and the bucket phrase keeps the deletion window
+        // reachable without a chip stating it.
         row.toolTip = "\(session.name ?? Self.unnamedSessionText)\n\(Self.awaitingBucketPhrase(session.urgency))"
         return row
     }
 
-    /// How long this session has before Claude Code's cleanup deletes it, as the tooltip phrase the
-    /// per-bucket chips used to show (#233).
+    /// How long this session has before Claude Code's cleanup deletes it, as a tooltip phrase (#233).
     private static func awaitingBucketPhrase(_ urgency: AwaitingUrgency) -> String {
         switch urgency {
         case .red: return "<7d till deletion"
@@ -3050,11 +2965,11 @@ final class PopupViewController: NSViewController {
     /// covering an exhausted plan limit (`CreditsRow.inUse`): a `label`-coloured plaque carrying the
     /// currency glyph, or the word ``inUseWord`` under ⌥ (#254).
     ///
-    /// Replaces the solid red `active` pill this badge used to be (#224). Crossing onto paid credit is a
-    /// *mode change* worth flagging, but a red fill made it a *severity*: it took the same token as the
-    /// blocking-reset badge — the one badge that means "you are stopped" — and it fired at its loudest at
-    /// €0.00 spent, leaving nothing louder for the cap. A neutral plaque states the mode without claiming
-    /// the row is blocked, and reuses the menu bar's own currency glyph
+    /// Deliberately **not** a red fill (#224). Crossing onto paid credit is a *mode change* worth
+    /// flagging, but red makes it a *severity*: it takes the same token as the blocking-reset badge —
+    /// the one badge that means "you are stopped" — and fires at its loudest at €0.00 spent, leaving
+    /// nothing louder for the cap. A neutral plaque states the mode without claiming the row is
+    /// blocked, and reuses the menu bar's own currency glyph
     /// (``StatusItemView/creditsSymbolName(for:)``) so both surfaces mark this feature with one symbol.
     ///
     /// Under ⌥ the glyph gives way to the word: the plaque is a *mode* marker, and a currency sign only
@@ -3064,10 +2979,9 @@ final class PopupViewController: NSViewController {
     /// **Same anatomy as the reset badge.** Both are ``PillView``, so they share a height and a
     /// silhouette; the content is painted in ``NSColor/cardPlateFillOpaque`` — the card's own colour with
     /// no alpha — which reads as cut out of the plaque while remaining an ordinary dynamic colour that
-    /// flips with the theme. It used to be a literal hole punched through a mask, which needed its own
-    /// view class, its own ink-measuring geometry and a rebuild on every appearance change; the three
-    /// badges also came out three different heights (18.0 / 17.5–20.5 / 14.0 pt) because each sized
-    /// itself to its own content.
+    /// flips with the theme. A literal hole punched through a mask would need its own view class, its
+    /// own ink-measuring geometry and a rebuild on every appearance change — and badges that each size
+    /// themselves to their own content come out at different heights (18.0 / 17.5–20.5 / 14.0 pt).
     private func makeInUseMarker(currency: String) -> NSView {
         // The word takes the reset badge's own font — same size, same weight — so the two badges read as
         // one component with different contents rather than two similar-looking things. The glyph keeps
@@ -3075,12 +2989,12 @@ final class PopupViewController: NSViewController {
         let font = Self.pillFont
         // Neutral grey fill, label-coloured content (#396).
         //
-        // The plaque used to be filled with `labelColor` and knocked its glyph out in the card's own
-        // colour. Filled that strongly it read as loud as the blocking-reset badge beside it, putting
-        // "money is moving" — a fact — in the same visual class as "you are blocked". The fill is now
-        // the bar track's grey, and with it the knockout stops making sense: cutting a hole through a
-        // light grey shows the card at nearly the same tone, so the glyph fades instead of reading.
-        // Ordinary `label` ink on grey is the same relationship every other row has with the card.
+        // Not a `labelColor` fill with the glyph knocked out in the card's colour: filled that strongly
+        // the plaque reads as loud as the blocking-reset badge beside it, putting "money is moving" — a
+        // fact — in the same visual class as "you are blocked". On the bar track's grey a knockout would
+        // not work anyway, since a hole through light grey shows the card at nearly the same tone and
+        // the glyph fades. Ordinary `label` ink on grey is the relationship every other row has with
+        // the card.
         let badge: PillView = optionHeld
             ? PillView(text: Self.inUseWord, font: font, textColor: ColorRole.label.defaultColor,
                        fill: { ColorRole.barTrack.defaultColor })
@@ -3096,8 +3010,8 @@ final class PopupViewController: NSViewController {
     /// The word knocked out of the "in use" marker under ⌥, in place of the currency glyph.
     static let inUseWord = "active"
 
-    /// Hover text for the "in use" marker — the words the old `active` badge used to spell out, stating
-    /// explicitly that the spending is happening *right now*.
+    /// Hover text for the "in use" marker, stating explicitly that the spending is happening
+    /// *right now*.
     static let inUseHint = "Currently spending Extra usage credits — your plan limit is exhausted"
 
     /// VoiceOver label for the "in use" marker.
@@ -3378,12 +3292,12 @@ final class PopupViewController: NSViewController {
     /// The badge is **not** shifted past the content column: its capsule ends where every other row's
     /// text ends.
     ///
-    /// An earlier version pushed it out so the badge's *text* would share the column with the plain
-    /// resets, letting the capsule overhang. That reads wrong — the filled shape is the widest thing on
-    /// the row, so its edge sticking out past the text above it looks like a layout error rather than a
-    /// deliberate bleed. Aligning the capsule instead leaves the badge's text slightly inside the
-    /// column, which is what padding on a filled shape is supposed to look like. Every 2 pt of shift
-    /// moves the capsule 4 px past the column (measured), so the value is zero.
+    /// Pushing it out so the badge's *text* shares the column with the plain resets, letting the capsule
+    /// overhang, reads wrong: the filled shape is the widest thing on the row, so an edge sticking out
+    /// past the text above it looks like a layout error rather than a deliberate bleed. Aligning the
+    /// capsule instead leaves the badge's text slightly inside the column, which is what padding on a
+    /// filled shape is supposed to look like. Every 2 pt of shift moves the capsule 4 px past the
+    /// column (measured), so the value is zero.
     private static let badgeColumnOvershoot: CGFloat = 0
 
     /// A label that **wraps** onto multiple lines instead of clipping — for the error detail, whose
@@ -3481,9 +3395,9 @@ final class PopupViewController: NSViewController {
         view.monthBounds = monthBounds
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
-        // Every bar is the same height, credits included (#396). The credits row used to be taller by a
-        // text line to make room for its `Jan 1` / `Feb 1` captions; those are gone, and reserving their
-        // box would leave the section standing on a gap no other row has.
+        // Every bar is the same height, credits included (#396): the credits row carries no `Jan 1` /
+        // `Feb 1` captions, and reserving a text line for them would leave the section standing on a
+        // gap no other row has.
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
         stack.addArrangedSubview(view)
         // Between-section gap after every bar except the last (the last sits above the menu separator).
@@ -3560,9 +3474,9 @@ final class PopupViewController: NSViewController {
     /// animator on every update (ADR-0070) rather than being baked once — so a status change fades
     /// and a light/dark flip repaints correctly.
     ///
-    /// `animatorKey` distinguishes one dot's animation from another's. It used to be the display
-    /// label, which meant two rows sharing a label would also share an animation; the incident rows
-    /// pass their incident id, so each animates on its own.
+    /// `animatorKey` distinguishes one dot's animation from another's, so it must be unique per row —
+    /// keyed on the display label, two rows sharing a label would share an animation. The incident
+    /// rows pass their incident id.
     private func makeStatusDot(status: ServiceStatus, animatorKey: String) -> GlowDotView {
         let dot = GlowDotView()
         let animator = colorAnimator
@@ -3987,8 +3901,7 @@ final class PopupViewController: NSViewController {
     /// Index of the **7-day** row in `PopupLayout.rows`. The layout always emits the two base windows
     /// first — `0` = 5-hour, `1` = 7-day — with the per-model rows appended after; the same ordering is
     /// stated in Kit as `PopupLayout.baseRowCount` / `perModelRowsStart`, which is what to keep this in
-    /// step with. (A second reader of it, the `isBaseLimit: index <= 1` blue gate, was retired in #426
-    /// when that rule moved onto `BarLayout.blueAllowed`.)
+    /// step with.
     static let sevenDayRowIndex = 1
 
     /// The ⌥ stand-by line: `"stand by 3h for green"` — how long to stop spending for this
@@ -4092,13 +4005,8 @@ final class PopupViewController: NSViewController {
     /// Pacing/severity in words. Severity (critical/warning) wins over the plain pacing direction. When
     /// ahead of pace, the wording grades with the gap colour (see ``PopupBarView/aheadColor``): a lead
     /// that reads orange (`≥` the dynamic threshold, or `≤ 20 min` to reset) is "well ahead of pace"; a
-    /// smaller one (yellow) stays "ahead of pace".
-    ///
-    /// The pacing colour (green→yellow→orange→red) now carries the "how far ahead" signal on its own,
-    /// so we no longer append a `⚠` glyph in the `.warning` band (usage > 90 % before 90 % of the
-    /// window elapsed) — that was a statusline carry-over, and our bar has outgrown it. `.warning` and
-    /// `.neutral` now read the same "(well) ahead of pace" wording; only the exhausted rung (`.critical`,
-    /// `usage == 100`) still gets its own "limit reached".
+    /// smaller one (yellow) stays "ahead of pace". `.warning` and `.neutral` read the same "(well) ahead
+    /// of pace" wording; only the exhausted rung (`.critical`, `usage == 100`) gets "limit reached".
     private static func statusText(_ row: LimitRow) -> String {
         // Idle 5-hour row (#100): "ready to start" instead of a pacing phrase — there is no active
         // window to pace. When that idle state is also blocked (#158 — 7d exhausted, credits cannot
@@ -4203,13 +4111,10 @@ final class PopupViewController: NSViewController {
     /// locale- and currency-dependent (`10,77 kr`, `12.00 UAH`) and the font follows the system text
     /// size — no constant could stand in for either.
     ///
-    /// Measured widths at 13 pt against the **320 pt** column (#396; the figures below were calibrated
-    /// against 268 when the mirrors still disagreed with the real 252 — both are gone):
+    /// Measured widths at 13 pt against the **320 pt** column (#396):
     /// - `20% used` + `resets in 2h at 02:50` → 198 pt — every token row fits with room to spare.
     /// - `€10.8 of €15` + `5d on Friday` → 162 pt — the resting credits line always fits.
-    /// - `spent €10.77 of €15.00` + `resets in 5d on Friday` → 281 pt — **now fits.** At 252 this
-    ///   ordinary ⌥ line was dropped; the wider column is what buys it back, which is half the point
-    ///   of widening (#396).
+    /// - `spent €10.77 of €15.00` + `resets in 5d on Friday` → 281 pt — fits.
     /// - `spent €1,234.56 of €2,000.00` + `resets in 5d on Friday` → 322 pt — still fits at 330.
     /// - `spent $5,000.00 of $5,000.00` + `resets in 20d next Wednesday` → 376 pt — the gate's remaining
     ///   job: a four-figure cap with the longest reset phrase still overflows and drops the reset.
@@ -4221,9 +4126,8 @@ final class PopupViewController: NSViewController {
     }
 
     /// The **unlimited** row's amount line: `"spent €10.8"` — the spent amount with the verb leading,
-    /// no cap and no reset (there is nothing to pace against). Since #396 this is the row's own second
-    /// line rather than a status standing in the header's right half, so it lines up with
-    /// ``creditsAmountText(spent:limit:verbose:)`` on every capped row.
+    /// no cap and no reset (there is nothing to pace against). The row's own second line, so it lines up
+    /// with ``creditsAmountText(spent:limit:verbose:)`` on every capped row.
     ///
     /// Same ⌥ precision gate as that one: three significant digits at rest, exact under Option — and
     /// the same leading `spent`, so the word does not jump from the end of the line to the front when

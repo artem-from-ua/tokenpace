@@ -16,52 +16,27 @@ public struct NearestReset: Sendable, Equatable {
 
 // MARK: - ResetClock
 
-/// Pure parsing and formatting of limit-reset times, ported from the Claude Code
-/// statusline (`statusline.sh`) with the SPEC-mandated absolute-time divergence.
+/// Pure parsing and formatting of limit-reset times.
 ///
-/// Like `PacingModel`, every entry point is **stateless and deterministic**: the current
-/// instant, locale, and time zone are injected as parameters (locale/zone default to
-/// `.current`) so tests need no clock or environment mocking. The type is isolated from
-/// network, Keychain, and AppKit — it consumes raw API strings / `Date`s and returns plain
-/// Swift values.
-///
-/// ## Relationship to `statusline.sh`
-/// | bash function | Swift entry point |
-/// |---|---|
-/// | `parse_reset_epoch` | ``parse(_:)`` |
-/// | `format_time_remaining` | ``timeToReset(resetsAt:now:)`` |
-/// | (nearest-of-two selection, inline in statusline) | ``nearestReset(fiveHour:sevenDay:)`` |
-///
-/// ## Divergences from statusline (ADR-0006, superseded by ADR-0074)
-/// `format_time_remaining` prints a relative duration with per-window `threshold_hours` (2 h / 48 h)
-/// and a coarse `~Nh`/`~Nd` far band. TokenPace instead:
-/// - uses **one** single-unit, nearest-rounded duration everywhere (``relativeRounded``) — no
-///   per-window thresholds, and no absolute wall-clock band on the menu bar (#284, ADR-0069). The
-///   clock survives only as the popup's trailing qualifier (`"20h at 03:00"`, ``resetLine``);
-/// - renders any sub-minute remainder as `"<1m"` rather than a seconds value (#36 follow-up — the
-///   menu bar's ~30 s re-render cadence makes a per-second countdown jump raggedly);
-/// - has no "reset now / unknown" state: a past-boundary window is rolled forward before formatting,
-///   and a missing/unparseable `resets_at` becomes the menu bar's ⚠️ error state (#167, ADR-0043).
+/// Every entry point is **stateless and deterministic**: the current instant, locale, and time
+/// zone are injected as parameters (locale/zone default to `.current`) so tests need no clock or
+/// environment mocking. The type is isolated from network, Keychain, and AppKit — it consumes raw
+/// API strings / `Date`s and returns plain Swift values.
 public enum ResetClock {
 
     // MARK: parse
 
     /// Parse the API `resets_at` string into an absolute `Date`.
     ///
-    /// **Port of `parse_reset_epoch`** (`statusline.sh` lines 205–218). The API emits
-    /// ISO-8601 with **microsecond** fractional seconds and a `+00:00` offset, e.g.
-    /// `2026-06-21T05:30:00.619428+00:00`. `ISO8601DateFormatter.withFractionalSeconds`
-    /// only handles **milliseconds** (3 digits) and rejects the 6-digit form, so — exactly
-    /// like the bash `sed 's/\.[0-9]*+00:00$//'` — the fractional component is stripped
-    /// before parsing. Sub-second precision is irrelevant at the app's minute-resolution
-    /// display.
+    /// The API emits ISO-8601 with **microsecond** fractional seconds and an offset, e.g.
+    /// `2026-06-21T05:30:00.619428+00:00`. `ISO8601DateFormatter.withFractionalSeconds` only
+    /// handles **milliseconds** (3 digits) and rejects the 6-digit form, so the fractional
+    /// component is stripped before parsing; sub-second precision is irrelevant at the app's
+    /// minute-resolution display. The offset is parsed from the string, so the result is a
+    /// correct absolute instant for any offset (`+00:00`, `Z`, or a non-UTC `+02:00`).
     ///
-    /// The offset is parsed from the string, so the result is a correct absolute instant
-    /// for any offset (`+00:00`, `Z`, or a non-UTC `+02:00`) — more robust than the bash,
-    /// which assumes UTC after stripping.
-    ///
-    /// Returns `nil` for `nil` / empty / `"null"` / otherwise-malformed input, matching the
-    /// bash "echo empty string" failure path. Callers treat `nil` as "no reset known".
+    /// Returns `nil` for `nil` / empty / `"null"` / otherwise-malformed input. Callers treat
+    /// `nil` as "no reset known".
     ///
     /// - Parameter resetsAt: Raw `five_hour.resets_at` / `seven_day.resets_at` (may be `nil`).
     public static func parse(_ resetsAt: String?) -> Date? {
@@ -140,61 +115,32 @@ public enum ResetClock {
     /// renders the same number on both surfaces in the same minute. The popup differs only by its
     /// appended qualifier (`"5h at 20:40"` vs the menu bar's bare `"5h"`).
     ///
-    /// **The 90-minute absolute/relative threshold is gone** (#284, ADR-0074, superseding ADR-0006).
-    /// It used to switch the label to a wall-clock `"20:40"` past 90 minutes, which made the two
-    /// surfaces disagree about the same reset, and made the item jump 6 pt wide as a reset crossed the
-    /// band (`1h29m` 37.2 pt → `20:40` 31.3 pt — the "label crossing a format band" cause named in
-    /// #283). Without the threshold the format never changes: only the unit does (`m` → `h` → `d`),
-    /// and the widest label anywhere narrows to 23.6 pt (`"10m"`).
-    ///
-    /// The wall-clock anchor survives in the popup, where there is room for it — and `"20:40"` on the
-    /// menu bar was never complete anyway, since it did not say *which day*.
-    ///
     /// A **non-positive** `remaining` has no state of its own: the render pipeline rolls any window
     /// past its boundary forward before formatting (`ResetClock.optimisticReset`, applied on every
-    /// render — #167, ADR-0043), so a reset "at or past now" cannot reach here in the normal flow. On
-    /// genuinely degenerate input `relativeRounded` returns `nil` and this falls back to `"<1m"`
-    /// ("about to reset") rather than a removed `.resetNow`.
+    /// render), so a reset "at or past now" cannot reach here in the normal flow. On genuinely
+    /// degenerate input `relativeRounded` returns `nil` and this falls back to `"<1m"`.
     ///
     /// - Parameters:
     ///   - resetsAt: The reset instant (typically ``NearestReset/resetsAt``).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
-    /// - Returns: A ready-to-draw label. No `locale`/`timeZone`: a bare duration is locale-invariant
-    ///   (they were only ever needed by the removed wall-clock branch).
+    /// - Returns: A ready-to-draw label. No `locale`/`timeZone`: a bare duration is locale-invariant.
     public static func timeToReset(resetsAt: Date, now: Date) -> String {
         relativeRounded(resetsAt: resetsAt, now: now) ?? "<1m"
     }
 
-    // `resetDisplay` — the "parse both, pick the nearest, format it" convenience — was removed with
-    // ADR-0091. Its only caller was the menu bar's `.expanded` countdown, and the countdown now
-    // accompanies the bars-less modes alone, where the reset is chosen by `BlockingReset` (which window
-    // is *blocking*) rather than by nearness. Keeping an unused nearest-of-two formatter around invites
-    // exactly the reimplementation the rule retired. `nearestReset` itself stays — `nextResetInstant`
-    // still schedules the optimistic-reset timer off it.
-
     // MARK: - Shared countdown core (both surfaces)
 
-    /// A **single-unit, rounded** relative countdown (#11, #38): one of `"1m"`, `"20m"`, `"3h"`,
-    /// `"3d"` — the unit picked by how far off the reset is, the magnitude **rounded to the nearest**
-    /// unit.
+    /// A **single-unit, rounded** relative countdown: one of `"1m"`, `"20m"`, `"3h"`, `"3d"` — the
+    /// unit picked by how far off the reset is, the magnitude rounded to the nearest unit.
     ///
-    /// **The single source of the number on both surfaces** (#284, ADR-0074): the numeric core of the
-    /// popup's ``resetLine(resetsAt:now:locale:timeZone:)`` and the whole of the menu bar's
+    /// The single source of the number on both surfaces: the numeric core of the popup's
+    /// ``resetLine(resetsAt:now:locale:timeZone:)`` and the whole of the menu bar's
     /// ``timeToReset(resetsAt:now:)``. That shared origin is what guarantees one reset instant reads
     /// the same in the bar and in the popup at the same time — the popup only appends a qualifier.
     ///
-    /// Bands (remaining time → output):
-    /// - `≤ 0`          → `nil` (reset now/past — the caller renders a stale signal)
-    /// - `< 60 s`       → `"<1m"` (sub-minute — never a seconds value, matching the menu bar)
-    /// - `< 50 min`     → `"\(round(min))m"` — nearest whole minute
-    /// - `< 23 h`       → `"\(round(hours))h"` — nearest whole hour
-    /// - otherwise      → `"\(round(days))d"` — nearest whole day
-    ///
-    /// The 50-min and 23-h cut-offs (rather than 60/24) leave headroom so rounding never prints a
-    /// value that reads as the next unit — e.g. 55 min rounds to `1h`, not `60m`; 23.5 h → `1d`.
-    ///
-    /// Unlike `timeToReset`, this never switches to an absolute clock — the absolute "at hh:mm" and
-    /// "on <weekday>" qualifiers are assembled by ``resetLine(resetsAt:now:locale:timeZone:)``.
+    /// Never switches to an absolute clock — the "at hh:mm" and "on <weekday>" qualifiers are
+    /// assembled by ``resetLine(resetsAt:now:locale:timeZone:)``. See ``rounded(duration:)`` for the
+    /// band table.
     public static func relativeRounded(resetsAt: Date, now: Date) -> String? {
         rounded(duration: resetsAt.timeIntervalSince(now))
     }
@@ -202,11 +148,9 @@ public enum ResetClock {
     /// The band table itself, over a **bare duration** rather than a pair of dates: `"<1m"`, `"45m"`,
     /// `"5h"`, `"4d"`.
     ///
-    /// Split out of ``relativeRounded(resetsAt:now:)`` (which is now a one-line wrapper over it) so a
-    /// span that is not a countdown to an instant — the stand-by pause of
-    /// ``PacingModel/standBySecondsForGreen(_:)`` — renders in the **same** format without inventing a
-    /// second one. ADR-0074 makes one duration format the rule across both surfaces; a caller holding
-    /// seconds should not have to fabricate a `Date` to reach it.
+    /// Split out of ``relativeRounded(resetsAt:now:)`` so a span that is not a countdown to an
+    /// instant — the stand-by pause of ``PacingModel/standBySecondsForGreen(_:)`` — renders in the
+    /// same format without a caller having to fabricate a `Date`.
     ///
     /// Bands (duration → output):
     /// - `≤ 0`          → `nil` (nothing to count)
@@ -232,9 +176,9 @@ public enum ResetClock {
 
     /// The complete popup reset line — **one unified format for every limit** (the token 5h / 7d /
     /// per-model windows *and* the Extra-usage credits row), so the dropdown never shows two different
-    /// shapes for "time until reset" (#167). Every line opens with ``resetLinePrefix``; the rounded
-    /// number comes from ``relativeRounded``; a qualifier (weekday or clock) is appended by how far off
-    /// the reset is, in **local** time.
+    /// shapes for "time until reset". Every line opens with ``resetLinePrefix``; the rounded number
+    /// comes from ``relativeRounded``; a qualifier (weekday or clock) is appended by how far off the
+    /// reset is, in **local** time.
     ///
     /// Bands (by actual remaining time — the number rounds independently, so the two may diverge by a
     /// unit at a boundary, which is acceptable), shown here in their `verbose` form:
@@ -245,15 +189,11 @@ public enum ResetClock {
     /// - `r ≤ 0`            → `nil` (reset now/past — the caller renders its "resetting…" fallback)
     ///
     /// Without `verbose` the prefix is dropped and only the qualifier remains — `"15d"`,
-    /// `"5d on Friday"`, `"20h at 03:00"`. That is the resting state: the words are an ⌥ detail, so the
-    /// steady-state line stays as narrow as it was before the prefix existed.
+    /// `"5d on Friday"`, `"20h at 03:00"`. That is the resting state: the words are an ⌥ detail.
     ///
-    /// The `≤ 24 h` band covers both the `Nh` and `Nm` cases automatically — `relativeRounded` picks
-    /// the unit; the `at <time>` qualifier is the same for both. The weekday is the fixed **English**
-    /// name (never localised), while the clock respects the locale's 12/24h convention; both are
-    /// computed in `timeZone` (default `.current`), so a `00:00 UTC` credits reset reads as the user's
-    /// local day and time. See ADR-0009 (pure/shell split): the whole line is assembled here; the shell
-    /// only prepends nothing and falls back to `"resetting…"` on `nil`.
+    /// The weekday is the fixed **English** name (never localised); the clock respects the locale's
+    /// 12/24h convention. Both are computed in `timeZone` (default `.current`), so a `00:00 UTC`
+    /// credits reset reads as the user's local day and time.
     ///
     /// - Parameters:
     ///   - resetsAt: The reset instant.
@@ -360,12 +300,10 @@ public enum ResetClock {
     /// How far into the future an anchor may still sit and be treated as **already elapsed**.
     ///
     /// The server reports resets with microsecond precision, and the first poll after a reset
-    /// regularly lands in the same second: measured on live journals the anchor was 0.31 s and
-    /// 0.33 s in the future at that moment (2026-08-18 and 08-11). Without a tolerance those polls
-    /// take the "still future, nothing to roll" path and the bar announces a reset 0.3 s away
-    /// instead of 7 days — pinning the marker to **100 %**, a worse lie than the zero this whole
-    /// mechanism replaces. Verified across both journals: without the tolerance the reconstruction
-    /// misses by exactly one week; with anything from 1 s upward it lands within 0.25 s.
+    /// regularly lands within a fraction of a second of it. Without a tolerance those polls take
+    /// the "still future, nothing to roll" path and the bar announces a reset a fraction of a
+    /// second away instead of 7 days — pinning the marker to **100%**, a worse lie than the zero
+    /// this whole mechanism replaces.
     ///
     /// The tolerance is **one-sided** — it shifts the "now" line forward, it does not open a
     /// symmetric window around it. `abs(anchor - now) < resetGrace` would be a different function
@@ -381,21 +319,18 @@ public enum ResetClock {
 
     /// Roll a **known-real** reset instant forward by whole windows until it lands after `now`.
     ///
-    /// The reconstruction behind ADR-0107: when the API goes quiet about `seven_day.resets_at`, the
-    /// previous reset plus a whole number of window lengths is a far better answer than `now +
-    /// duration`. Weekly resets keep the same weekday and the same wall-clock instant **in UTC**,
-    /// so this lands within a fraction of a second — measured ±0.25 s across three blackouts on a
-    /// Max 5x journal and two on a Pro journal, whose grid is a different weekday and hour entirely.
+    /// When the API goes quiet about `seven_day.resets_at`, the previous reset plus a whole number
+    /// of window lengths is a far better answer than `now + duration`: weekly resets keep the same
+    /// weekday and wall-clock instant **in UTC**, so this lands within a fraction of a second.
     ///
     /// **Deliberately `TimeInterval` arithmetic, never `Calendar`.** A `Date` is an absolute instant
     /// with no time zone, and UTC has no DST, so adding 604 800 s to a Tuesday 07:00:00 UTC yields
     /// Tuesday 07:00:00 UTC forever. `Calendar.date(byAdding:)` would honour `Calendar.timeZone`
-    /// (`.current` by default), where the night of a DST transition is 23 or 25 hours long — the
-    /// exact one-hour drift this function must not have. The local *rendering* of the result still
-    /// shifts across a transition, which is correct: the real server reset shifts the same way.
+    /// (`.current` by default), where a DST-transition night is 23 or 25 hours long — the exact
+    /// one-hour drift this function must not have. The local *rendering* of the result still shifts
+    /// across a transition, which is correct: the real server reset shifts the same way.
     ///
-    /// The step count is closed-form rather than a loop, so a month-long absence and a two-year one
-    /// cost the same single multiplication — and a corrupt anchor cannot spin.
+    /// The step count is closed-form rather than a loop, so a corrupt anchor cannot spin.
     ///
     /// - Parameters:
     ///   - anchor: A reset instant the **server** actually supplied. Passing a value this app
@@ -445,30 +380,26 @@ public enum ResetClock {
 
     /// Apply a **local, optimistic reset** to a snapshot the instant a window's reset boundary passes,
     /// so a countdown never computes a non-positive remaining while the menu bar waits for the forced
-    /// API refresh to land. Applied both on the exact `resetTimer` fire **and** on every render (#167,
-    /// ADR-0043), so no timer race can surface a "reset now" placeholder. Each window whose parsed
-    /// `resets_at` is at or past `now` is reset
-    /// to zero usage and rolled forward to its next window; a window still in the future is left
-    /// untouched. The result is a temporary local overlay — the next **successful** API response
-    /// overwrites it wholesale (the API is the source of truth, even if usage is still non-zero there).
+    /// API refresh to land. Applied both on the exact `resetTimer` fire and on every render, so no
+    /// timer race can surface a "reset now" placeholder. Each window whose parsed `resets_at` is at
+    /// or past `now` is reset to zero usage and rolled forward to its next window; a window still in
+    /// the future is left untouched. The result is a temporary local overlay — the next **successful**
+    /// API response overwrites it wholesale.
     ///
-    /// Per-window rules (issue #36):
+    /// Per-window rules:
     /// - **5h:** if the snapshot is ``UsageSnapshot/sessionIdle`` the window is left idle
-    ///   (`utilization: 0`, `resets_at: ""`) — an idle 5h session has no reset to cross, and stays
-    ///   "ready to start". Otherwise, when its reset has passed, `utilization → 0` and a fresh
-    ///   `resets_at = now + 5h` is **synthesized**. This synthesis is a deliberate divergence from the
-    ///   decoder's `localEstimateAllowed: false` opt-out (#100 / ADR-0027): here the 5h window was
-    ///   *active* (not idle), so its reset genuinely rolls into a new active window — see ADR-0030.
+    ///   (`utilization: 0`, `resets_at: ""`) — an idle 5h session has no reset to cross. Otherwise,
+    ///   when its reset has passed, `utilization → 0` and a fresh `resets_at = now + 5h` is
+    ///   synthesized.
     /// - **7d:** when its reset has passed, `utilization → 0` and `resets_at = now + 7d`. The weekly
     ///   window always exists, so there is no idle case.
     /// - **Sub-windows** (`sevenDayOpus` / `sevenDaySonnet`): reset **only** when the 7d window itself
     ///   reset, sharing its new `resets_at` — they ride the weekly cadence.
     /// - **`limits`** are kept as-is: the overlay is transient and the next successful poll replaces
-    ///   the whole snapshot, so synthesizing limit resets would be wasted (and self-correcting) work.
+    ///   the whole snapshot.
     ///
-    /// Driven purely off `now` vs each window's `resets_at` (not a "which timer fired" parameter), so a
-    /// near-simultaneous 5h+7d reset, or slight timer skew, resets exactly the windows that have
-    /// actually crossed their boundary.
+    /// Driven purely off `now` vs each window's `resets_at`, so a near-simultaneous 5h+7d reset, or
+    /// slight timer skew, resets exactly the windows that have actually crossed their boundary.
     ///
     /// - Parameters:
     ///   - snapshot: The last-known snapshot to roll forward.
@@ -530,13 +461,11 @@ public enum ResetClock {
 
     /// Render a `Date` as an ISO-8601 string (`.withInternetDateTime`, UTC, no fractional seconds) so a
     /// synthesized `resets_at` round-trips through ``parse(_:)`` identically to a real API one. Mirrors
-    /// the decode layer's private helper of the same name. The optimistic path (ADR-0030) and the
-    /// reset-boundary grace suppress (ADR-0045) both synthesize a rolled-forward `resets_at` and must
-    /// serialize it the same way.
+    /// the decode layer's private helper of the same name.
     ///
-    /// `public` since ADR-0107: the shell persists the reconstruction anchor as a `resets_at` string
+    /// `public` because the shell persists the reconstruction anchor as a `resets_at` string
     /// (`PersistedConfig.lastSevenDayReset`), and it has to be the *same* string shape the parser
-    /// accepts — a second date format for one stored value is how round-trips start disagreeing.
+    /// accepts.
     public static func isoString(from date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.timeZone = TimeZone(secondsFromGMT: 0)

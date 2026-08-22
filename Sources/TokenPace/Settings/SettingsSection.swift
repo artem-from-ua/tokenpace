@@ -17,13 +17,10 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     /// surfaces as child pages drilled into from it.
     case appearance = 2
     case notifications = 3
-    // Raw value `4` belonged to `Extra features`, retired in #341. It is deliberately **not** reused:
-    // documented verification recipes and dev-hook invocations still carry it, and pointing an old
-    // `TOKENPACE_SETTINGS_SECTION=4` at some unrelated pane would be a recipe that lies rather than
-    // fails.
-    // Raw values `5` and `6` belonged to the `Menu bar` and `Dropdown` **sections**. They are child
-    // pages of `Appearance` now, so their dev-hook indices live on `SettingsChildPage` instead —
-    // and, for the same reason as `4`, are not reused here.
+    // Raw values `4`, `5`, `6` are retired and deliberately **not** reused: documented verification
+    // recipes and dev-hook invocations still carry them, and pointing an old
+    // `TOKENPACE_SETTINGS_SECTION=N` at some unrelated pane would be a recipe that lies rather than
+    // fails. `5`/`6` (`Menu bar`/`Dropdown`) now live as `SettingsChildPage` indices instead.
     /// What TokenPace monitors, per provider (#341) — a parent page whose provider rows drill into
     /// their own child pages.
     case providers = 7
@@ -50,19 +47,13 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     /// `General` and `Providers` as the app-wide pair, then `Appearance` and `Notifications`.
     ///
     /// `Providers` sits beside `General` because it answers the same class of question — what the app
-    /// does, rather than how it looks. It replaces `Extra features` (#341), which was a drawer with no
-    /// organising principle: the things in it had nothing in common except not fitting elsewhere.
+    /// does, rather than how it looks.
     ///
-    /// `Menu bar` and `Dropdown` are **not** rows here any more: they are child pages of `Appearance`,
-    /// reached by drilling in from it. #333 split them out of `Appearance` into sidebar rows of their
-    /// own on the grounds that the sidebar had room; what that actually produced was three sibling rows
-    /// whose kinship only a divider expressed, and a top-level list where two of five rows configured
-    /// halves of the same thing. Nesting says it structurally instead — the sidebar names the topic,
-    /// the page names its surfaces.
+    /// `Menu bar` and `Dropdown` are **not** rows here: they are child pages of `Appearance`, reached
+    /// by drilling in from it — the sidebar names the topic, the page names its surfaces.
     ///
-    /// `Notifications` shares the group with `Appearance` rather than sitting alone below it: with the
-    /// surfaces nested away, both remaining rows answer "how does the app present itself", and the
-    /// divider that used to separate them was drawing a distinction the two no longer carry.
+    /// `Notifications` shares the group with `Appearance`: both remaining rows answer "how does the
+    /// app present itself".
     static let groups: [[SettingsSection]] = [
         [.about],
         [.general, .providers],
@@ -70,17 +61,10 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     ]
 
     /// Nine throwaway rows appended after `Notifications` when `TOKENPACE_SIDEBAR_FILLER` is set —
-    /// the last group, wherever that happens to be.
-    ///
-    /// The sidebar is otherwise too short to scroll at any supported window height, so the separator
-    /// that is *supposed* to appear under the titlebar when the list scrolls under it cannot be
-    /// exercised — and neither can the bug where it appears on a plain window drag instead (#312
-    /// follow-up). These rows give the list something to scroll.
-    ///
-    /// Behind an environment flag rather than a build flag so it can be switched on for one launch
-    /// without touching the shipping list: `SettingsSection` is also the source of truth for the
-    /// `TOKENPACE_SETTINGS_SECTION` dev-hook indices, and the filler deliberately takes raw values
-    /// above every real pane so those indices keep pointing at the same panes.
+    /// the last group, wherever that happens to be. The sidebar is otherwise too short to scroll at
+    /// any supported window height; these rows give the list something to scroll so the titlebar
+    /// separator can be exercised. Raw values sit above every real pane so the `TOKENPACE_SETTINGS_SECTION`
+    /// dev-hook indices keep pointing at the same panes with or without the flag.
     static let filler: [SettingsSection] =
         ProcessInfo.processInfo.environment["TOKENPACE_SIDEBAR_FILLER"] == nil
             ? []
@@ -129,10 +113,8 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         case .appearance: return "paintbrush.fill"
         case .notifications: return "bell.badge.fill"
         // Providers are the services TokenPace plugs into — a puzzle piece slotting in, not the
-        // cloud they happen to run on: what the page configures is the connection, and more pieces
-        // fit later. Verified to resolve on macOS 15 with `NSImage(systemSymbolName:)`, which returns
-        // nil for a name that does not exist (that check is how we learned `zzz.circle` is not a
-        // symbol, #341).
+        // cloud they happen to run on. Verified to resolve on macOS 15 with
+        // `NSImage(systemSymbolName:)`, which returns nil for a name that does not exist.
         case .providers: return "puzzlepiece.extension.fill"
         default: return "circle.dashed"
         }
@@ -162,9 +144,7 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         case .appearance: return CapsuleTint(dark: 0x23A238, light: 0x4DB45C)
         case .notifications: return CapsuleTint(dark: 0xFB4439, light: 0xFB7A71)
         // The same measured gray as `General`, on purpose: both are app-wide settings rather than one
-        // of the UI surfaces, and the sidebar says so by giving them one capsule colour. This replaces
-        // the purple inherited from the retired Extra features chip (#341), which was a starting value
-        // metered off a different System Settings pane and never re-checked for this one.
+        // of the UI surfaces, and the sidebar says so by giving them one capsule colour.
         case .providers: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
         default: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
         }

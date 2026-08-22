@@ -65,12 +65,9 @@ itself carries no smooth motion** — that has to be reconstructed from another 
 
 ## Workaround: weekly pace is reconstructed from the five-hour counter
 
-> **Implemented** for every consumer —
-> [#386](https://github.com/artem-from-ua/tokenpace/issues/386) /
-> [PR #390](https://github.com/artem-from-ua/tokenpace/pull/390), version 0.104.0. The decision is
+> Implemented for every consumer. The decision is
 > [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md); the
-> algorithm is [design/weekly-interpolation.md](../design/weekly-interpolation.md). The issue itself
-> still holds the consumer audit: which spots were affected, which weren't.
+> algorithm is [design/weekly-interpolation.md](../design/weekly-interpolation.md).
 
 7d quantization isn't insurmountable. `h5_util` has a step of **3 min** instead of 101 min, and both
 counters measure the same spend — so the weekly scale can be read **through the five-hour one**.
@@ -111,9 +108,6 @@ staying still is 16 consecutive records; the maximum is 366.
 
 ### Caveats without which the reconstruction lies
 
-Each of these is already accounted for in the implementation — the list stays here to explain
-**why** it's built the way it is, and as a checklist for any future work with these series.
-
 - **`h5_util` isn't cumulative** — it resets on each of ~33.6 resets per week. Only **positive
   increments** can be taken; a drop means a reset, not quota returning.
 - **N is a property of the plan, not a constant.** It depends on the plan tier, the model mix, and
@@ -132,11 +126,10 @@ Each of these is already accounted for in the implementation — the list stays 
 
 ## What this means for the UI
 
-> **The reconstruction is implemented** ([#386](https://github.com/artem-from-ua/tokenpace/issues/386),
-> [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md), algorithm —
-> [design/weekly-interpolation.md](../design/weekly-interpolation.md)). The app hands the UI the
-> **reconstructed** weekly value, so the constraints below split into two states: what's true for
-> the **raw** `util`, and what changed after reconstruction.
+> The app hands the UI the **reconstructed** weekly value
+> ([ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md), algorithm
+> in [design/weekly-interpolation.md](../design/weekly-interpolation.md)), so the constraints below
+> split into two states: what's true for the **raw** `util`, and what changed after reconstruction.
 
 ### Still true after reconstruction
 
@@ -225,12 +218,9 @@ are the old local fallback `ResetClock.nextReset` (`now + 7d`, rounded up by `ce
 
 This distinction is a reliable signal: across 5,029 + 862 records, there's no overlap at all. But it
 has to be checked against the **raw line**: `ResetClock.parse` discards the fractional part, so after
-parsing, a genuine reset looks synthesized.
-
-> #389 attributes this drift to the server ("the server itself drifts the date forward by ~10 minutes
-> per poll," 35 of 37 changes on Max) — that's wrong, and after
-> [ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md) the source of the
-> noise disappeared along with the fallback.
+parsing, a genuine reset looks synthesized. The drift was never server-side; after
+[ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md) the local fallback that
+produced it is gone.
 
 ## How to re-verify
 

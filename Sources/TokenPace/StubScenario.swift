@@ -4,29 +4,22 @@ import TokenPaceKit
 /// Every `TOKENPACE_STUB` data-source scenario, as a flat catalogue the dev tools (#187) can enumerate,
 /// describe, and switch between live. Each case carries the exact env id (`rawValue`), a human label,
 /// a one-line note of what it verifies, and the transport it drives — so the launch-time env path and
-/// the Development-tools dropdown share **one** source of truth (no duplicated case list).
+/// the Development-tools dropdown share **one** source of truth.
 ///
-/// A `CaseIterable` registry with computed display metadata. The `rawValue`
-/// of every case is the literal string a user would pass in `TOKENPACE_STUB=…`, so
+/// The `rawValue` of every case is the literal string passed in `TOKENPACE_STUB=…`, so
 /// `StubScenario(rawValue:)` round-trips env compatibility for free. ``realNetwork`` (`"real"`) is the
 /// no-stub production path: the real usage API over `URLSession.shared`.
 ///
-/// Env resolution goes through ``resolve(env:isAppBundle:)`` — **never** `init(rawValue:)` directly.
-/// A bare `init(rawValue:)` cannot tell "nothing was asked for" from "something bogus was asked for",
-/// and collapsing the latter into the live network is exactly the #267 bug: a run meant to be stubbed
-/// silently polled the real API and read the real `~/.claude` trees.
-///
-/// The `summary` strings are lifted from the inline stub docs in `startPolling` and the
-/// `docs/guides/ui-verification.md` table — keep them in sync with the `StubUsageTransport.Mode`
-/// bodies when a scenario's behaviour changes.
+/// Env resolution goes through ``resolve(env:isAppBundle:)`` — **never** `init(rawValue:)` directly. A
+/// bare `init(rawValue:)` cannot tell "nothing was asked for" from "something bogus was asked for",
+/// and collapsing the latter into the live network means a run meant to be stubbed silently polls the
+/// real API and reads the real `~/.claude` trees.
 enum StubScenario: String, CaseIterable {
 
     /// No stub — the production path: real usage API over the live network, Keychain token, live
-    /// refresher. Selecting this from the dropdown tears down the stub pipeline and polls the real API.
-    ///
-    /// Its id is a **non-empty** `"real"` on purpose (#267): while the empty string meant "live", an
-    /// absent `TOKENPACE_STUB` and an explicit request for the live network were indistinguishable, so
-    /// a typo'd id fell through to production data. Live is now something you have to ask for by name.
+    /// refresher. Its id is a **non-empty** `"real"` on purpose: an absent `TOKENPACE_STUB` and an
+    /// explicit request for the live network must stay distinguishable, so a typo'd id cannot fall
+    /// through to production data.
     case realNetwork = "real"
 
     case climbing = "1"
@@ -61,9 +54,8 @@ enum StubScenario: String, CaseIterable {
     case edgeExtremes = "edge-extremes"
     case calmDegraded = "calm-degraded"
     case allGreen = "all-green"
-    // GitHub provider (#454). The first three isolate its own section; the fourth is the one that
-    // only exists because there are two providers — the interesting bugs live in the interaction,
-    // not in either provider alone.
+    // GitHub provider (#454): the first three isolate its own section; the fourth exists because
+    // there are two providers — the interesting bugs live in the interaction.
     case githubGreen = "github-green"
     case githubDegraded = "github-degraded"
     case githubOutage = "github-outage"
@@ -99,50 +91,33 @@ enum StubScenario: String, CaseIterable {
     /// The outcome of reading `TOKENPACE_STUB`: which scenario to run, whether the choice was made
     /// **explicitly**, and the bogus value if one was supplied.
     struct Resolution: Equatable {
-        /// The scenario to drive the data source with.
         let scenario: StubScenario
 
         /// Whether this scenario was *asked for* — a recognized `TOKENPACE_STUB` value, or a plain
-        /// `.app` launch with no env at all (production's normal mode). False only when we fell back
-        /// after a bad value, or when a dev build defaulted to the screenshot frame.
-        ///
-        /// Gates the awaiting-input watcher (#259): it reads the **live** `~/.claude` trees, so it must
-        /// never come up on a live network nobody deliberately selected.
+        /// `.app` launch with no env at all. False only after a bad value, or a dev build defaulting
+        /// to the screenshot frame. Gates the awaiting-input watcher (#259): it reads the **live**
+        /// `~/.claude` trees, so it must never come up on a live network nobody deliberately selected.
         let isExplicit: Bool
 
-        /// The unrecognized `TOKENPACE_STUB` value that triggered the fallback, or `nil` on every
-        /// normal path. Non-nil means the caller should warn — the run is *not* what was requested.
+        /// The unrecognized `TOKENPACE_STUB` value that triggered the fallback, or `nil`. Non-nil
+        /// means the caller should warn.
         let unknownValue: String?
     }
 
-    /// Every id a maintainer can actually pass in `TOKENPACE_STUB=…`, in registry order — built from
-    /// `allCases`, so it can never drift from the enum.
+    /// Built from `allCases`, so it can never drift from the enum.
     static var validIDs: [String] {
-        // Debug-only guard on the registry's own shape: an empty or duplicated id makes "absent env"
-        // and "this id" the same string, which is precisely how #267 happened. The unit tests cover the
-        // rule (`StubResolutionTests`) but live in the Kit target and can't see this enum — so the
-        // registry itself is checked here, where it is defined. Compiled out of release builds.
+        // Debug-only guard: an empty or duplicated id makes "absent env" and "this id" the same
+        // string. Checked here since the registry is defined here and the Kit-side unit test
+        // (`StubResolutionTests`) can't see this enum. Compiled out of release builds.
         assert(StubResolution.idsAreResolvable(allCases.map(\.rawValue)),
                "StubScenario ids must be non-empty and unique — an empty id resurrects #267")
         return allCases.map(\.id)
     }
 
-    /// Map a raw `TOKENPACE_STUB` value onto the scenario to run.
-    ///
-    /// The whole point is that an **unrecognized** value must not resolve to the live network (#267).
-    /// A stubbed run that silently polls production looks stubbed in every visible respect while
-    /// reporting real data, which is worse than failing outright. So a bad value degrades *away* from
-    /// live, onto the frozen ``screenshot`` frame, and says so via `unknownValue`.
-    ///
-    /// The rule itself lives in ``StubResolution`` (pure, unit-tested, ADR-0009); this is the thin
-    /// binding that feeds it the registry's ids and maps the answer back onto a case.
-    ///
-    /// - Parameters:
-    ///   - env: the raw `TOKENPACE_STUB` value; `nil` when the variable is absent entirely. Note that
-    ///     an empty string is *present but bogus* — it is no longer ``realNetwork``'s id.
-    ///   - isAppBundle: whether this is an installed `.app` (`LaunchAtLoginController.isAppBundle`).
-    ///     A production bundle with no env is the one path that stays live by default — otherwise a
-    ///     real user would see a canned frame instead of their own limits.
+    /// The whole point is that an **unrecognized** value must not resolve to the live network — a bad
+    /// value degrades *away* from live, onto the frozen ``screenshot`` frame, and says so via
+    /// `unknownValue`. The rule itself lives in ``StubResolution`` (pure, unit-tested, ADR-0009); this
+    /// is the thin binding that feeds it the registry's ids and maps the answer back onto a case.
     static func resolve(env: String?, isAppBundle: Bool) -> Resolution {
         let outcome = StubResolution.resolve(
             env: env,
@@ -151,8 +126,8 @@ enum StubScenario: String, CaseIterable {
             fallbackID: StubScenario.screenshot.id,
             knownIDs: validIDs
         )
-        // `outcome.id` is always one of `validIDs`, so the lookup cannot fail; fall back to the frozen
-        // frame rather than force-unwrapping — never to the live network.
+        // `outcome.id` is always one of `validIDs`; fall back to the frozen frame rather than
+        // force-unwrapping — never to the live network.
         return Resolution(
             scenario: StubScenario(rawValue: outcome.id) ?? .screenshot,
             isExplicit: outcome.isExplicit,
@@ -227,9 +202,8 @@ enum StubScenario: String, CaseIterable {
         }
     }
 
-    /// One-line description of what this scenario verifies — shown beside the dropdown so a maintainer
-    /// can tell the ~25 states apart. Sourced from the same stub docs the transport bodies were built
-    /// from.
+    /// What this scenario verifies — shown beside the dropdown so a maintainer can tell the states
+    /// apart.
     var summary: String {
         switch self {
         case .realNetwork:
@@ -525,14 +499,13 @@ enum StubScenario: String, CaseIterable {
 
     // MARK: - Transport
 
-    /// The transport this scenario drives: a fresh ``StubUsageTransport`` per stub case, or the live
-    /// `URLSession.shared` for ``realNetwork``. Constructing a fresh stub resets its per-poll `calls`
-    /// counter, so re-selecting a call-sequence scenario (stale-error, reset-grace, …) replays it from
-    /// the first poll.
+    /// A fresh ``StubUsageTransport`` per stub case, or the live `URLSession.shared` for
+    /// ``realNetwork``. Constructing a fresh stub resets its per-poll `calls` counter, so re-selecting
+    /// a call-sequence scenario replays it from the first poll.
     ///
     /// `now` is the base clock every stub `resets_at` is stamped against — pass the same provider the
     /// App renders with (``clock(realNow:)``) so the transport's reset instants and the layout's
-    /// countdowns stay in lock-step. Defaults to the wall clock (`realNetwork` ignores it).
+    /// countdowns stay in lock-step.
     func makeTransport(now: @escaping @Sendable () -> Date = { Date() }) -> UsageTransport {
         switch self {
         case .realNetwork:         return URLSession.shared
@@ -590,8 +563,8 @@ enum StubScenario: String, CaseIterable {
             return StubUsageTransport(mode: .subscriptionResetOnCredits, now: now)
         case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)
         case .resetGrace:          return StubUsageTransport(mode: .resetGrace, now: now)
-        // The colour walk is driven by `AppDelegate`'s own timer overlaying the retained snapshot, so
-        // the transport only has to supply a plain, stable frame for it to repaint (ADR-0070).
+        // Driven by `AppDelegate`'s own timer overlaying the retained snapshot (ADR-0070); the
+        // transport only needs to supply a plain, stable frame.
         case .colorCycle:          return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         case .incidentActive:      return StubUsageTransport(mode: .incident(.active), now: now)
         case .incidentGreen:       return StubUsageTransport(mode: .incident(.green), now: now)
@@ -602,21 +575,17 @@ enum StubScenario: String, CaseIterable {
         }
     }
 
-    /// Whether this scenario feeds the engine a stub token provider (canned responses never validate
-    /// the bearer, so the Keychain is skipped). Only ``realNetwork`` reads the real Keychain / spawns
-    /// the live refresher.
+    /// Only ``realNetwork`` reads the real Keychain / spawns the live refresher.
     var usesStubToken: Bool { self != .realNetwork }
 
     // MARK: - Clock
 
     /// A **fixed** instant this scenario's canned data is anchored to, or `nil` to run off the wall
-    /// clock. Stubs are decoupled from today's date by default so a frozen frame is reproducible (same
-    /// weekday and reset times every launch) — the exception is scenarios whose behaviour *is* the
-    /// passage of real time (see ``usesRealClock``), which return `nil`.
+    /// clock. Stubs are decoupled from today's date by default so a frozen frame is reproducible — the
+    /// exception is scenarios whose behaviour *is* the passage of real time (``usesRealClock``).
     ///
     /// Most stubs share one anchor (a fixed Wednesday midday, UTC); ``screenshot`` uses a late-month
-    /// instant so its extra-usage bar reads as a long green (month ≈99 % elapsed vs ~22 % spent) with a
-    /// matching "<1d" reset line — bar and text driven by the same clock, so they never disagree.
+    /// instant so its extra-usage bar reads as a long green with a matching "<1d" reset line.
     var stubClock: Date? {
         guard !usesRealClock, self != .realNetwork else { return nil }
         switch self {
@@ -627,11 +596,10 @@ enum StubScenario: String, CaseIterable {
     }
 
     /// Whether this scenario must run off the **real** wall clock because its observable behaviour is
-    /// the clock advancing: ``optimisticReset`` arms a one-shot timer for a reset ~20 s out and watches
-    /// it fire; ``resetGrace`` holds the 5h bar "ready" across empty polls via a real-time freshness
-    /// window. Every other stub is driven purely by the poll counter, so a frozen clock reproduces it.
-    /// ``colorCycle`` likewise: its whole point is a colour changing *over time*, driven by a real
-    /// timer, so a frozen clock would leave every transition unobservable.
+    /// the clock advancing: ``optimisticReset`` arms a one-shot timer for a reset ~20 s out;
+    /// ``resetGrace`` holds the 5h bar "ready" across empty polls via a real-time freshness window;
+    /// ``colorCycle``'s whole point is a colour changing over time. Every other stub is driven purely
+    /// by the poll counter, so a frozen clock reproduces it.
     var usesRealClock: Bool {
         switch self {
         case .optimisticReset, .resetGrace, .colorCycle: return true
@@ -639,10 +607,9 @@ enum StubScenario: String, CaseIterable {
         }
     }
 
-    /// Emoji badges shown before the scenario's name in the dev-tools dropdown, marking how "live" it
-    /// is: **⚡** = real usage API (``realNetwork``), **⏱** = real wall clock (``usesRealClock``),
-    /// **⏭** = a sequence that advances one step per poll (``advancesPerPoll``), so **Refresh now**
-    /// steps through it. A fully canned, frozen frame carries none. Empty string when nothing to flag.
+    /// Badges before the scenario's name in the dropdown: **⚡** = real usage API (``realNetwork``),
+    /// **⏱** = real wall clock (``usesRealClock``), **⏭** = advances one step per poll
+    /// (``advancesPerPoll``). Empty string when nothing to flag.
     var badges: String {
         var out = ""
         if self == .realNetwork { out += "⚡" }
@@ -652,19 +619,15 @@ enum StubScenario: String, CaseIterable {
     }
 
     /// Whether this scenario is a **sequence** whose state advances one step per poll, rather than a
-    /// frozen frame — so it is watched by stepping through it, and **Refresh now** in Troubleshoot is
-    /// the control that does the stepping (each click is one more poll).
-    ///
-    /// Flagged in the dropdown with **⏭** because the difference is invisible otherwise: a frozen
-    /// frame looks identical after a refresh, while these look wrong until you keep going. The
-    /// weekly reconstruction (#386) is the clearest case — its whole subject is motion across polls,
-    /// so a single frame cannot show it at all.
+    /// frozen frame — **Refresh now** in Troubleshoot is the control that steps it (each click is one
+    /// more poll). Flagged with **⏭** in the dropdown since a frozen frame looks identical after a
+    /// refresh, while these look wrong until you keep going.
     var advancesPerPoll: Bool {
         switch self {
         case .weeklyInterp, .standByFloor, .optimisticReset, .resetGrace,
              .justUnblocked, .subscriptionResetOnCredits, .creditsOnset, .staleError,
-             // Seeds the anchor on its first two polls, then blacks out — the whole point is that
-             // the countdown *stops* moving across the handover, which one frame cannot show.
+             // Seeds the anchor on its first two polls, then blacks out — the countdown *stops*
+             // moving across the handover.
              .weeklyResetBlackout:
             return true
         default:
@@ -672,26 +635,20 @@ enum StubScenario: String, CaseIterable {
         }
     }
 
-    /// This scenario's render/transport clock: the fixed ``stubClock`` when set, else the live `realNow`
-    /// (the wall clock, or a scenario on ``usesRealClock``). One provider feeds both the App's render
-    /// and the stub transport so their instants agree.
+    /// One provider feeds both the App's render and the stub transport so their instants agree.
     func clock(realNow: @escaping @Sendable () -> Date = { Date() }) -> @Sendable () -> Date {
         if let fixed = stubClock { return { fixed } }
         return realNow
     }
 
-    /// The shared fixed anchor for date-decoupled stubs: **2026-01-14 12:00:00 UTC**, a Wednesday
-    /// midday — a stable, unambiguous weekday/clock for reproducible frames.
+    /// **2026-01-14 12:00:00 UTC**, a Wednesday midday — a stable, unambiguous weekday/clock.
     private static let defaultAnchor = Date(timeIntervalSince1970: 1_768_392_000)
 
-    /// The ``screenshot`` anchor: **2026-01-31 22:00:00 UTC** — late in the month (≈99 % elapsed) so the
-    /// extra-usage bar is a long green and its reset line reads "<1d", consistent with the bar.
+    /// **2026-01-31 22:00:00 UTC** — late in the month (≈99% elapsed) so the extra-usage bar is a
+    /// long green with a matching "<1d" reset line.
     private static let screenshotAnchor = Date(timeIntervalSince1970: 1_769_896_800)
 
-    /// The ``creditsMonthEnd`` anchor: **2026-01-28 21:36:00 UTC** — exactly **90 %** through January,
-    /// so the Extra-usage bar's time marker lands near (but not on) the right-hand "Jan 31" caption.
-    /// That is the crowded end of the captioned month ruler: close enough to test that the marker and
-    /// its caption coexist, short of the degenerate 100 % case where the marker sits on the boundary
-    /// itself.
+    /// **2026-01-28 21:36:00 UTC** — exactly **90%** through January, so the Extra-usage bar's time
+    /// marker lands near (but not on) the "Jan 31" caption.
     private static let monthEndAnchor = Date(timeIntervalSince1970: 1_769_636_160)
 }

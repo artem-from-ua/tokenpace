@@ -36,45 +36,24 @@ extension SettingsModel {
 
 // MARK: - Conditional rows (#381)
 
-/// How a Settings row that appears and disappears with another control's value should move.
-///
-/// Every pane used to suppress this outright (`.animation(nil, value:)`), on the grounds that an
-/// insertion animation made the neighbouring rows flicker as the card changed height. That traded one
-/// problem for another: a row **blinking** in or out gives no clue where it came from, so the change
-/// reads as the window glitching rather than as a consequence of the click just made.
-///
-/// A short slide from the top edge plus a fade answers both. The row visibly folds out of the block it
-/// belongs to, so the eye follows it instead of hunting for what changed; and the 0.2 s is short enough
-/// that the height change reads as one motion rather than as a bounce.
-///
-/// `easeInOut` rather than a spring: the card is resizing, and an overshoot would push the sections
-/// below it past their resting place and back.
+/// How a Settings row that appears and disappears with another control's value should move: a short
+/// slide from the top edge plus a fade, so the row visibly folds out of the block it belongs to
+/// instead of blinking in/out. `easeInOut` rather than a spring — an overshoot would push the
+/// sections below past their resting place and back.
 enum SettingsRowReveal {
-    /// The animation to attach to the **container** (the `Form` or `Section`), keyed on the value that
-    /// gates the row. Scoping it to that value matters — a bare `.animation(_:)` would also animate every
-    /// segmented-control change on the page, so picking a different segment would slide its own control.
+    /// Keyed on the value that gates the row — a bare `.animation(_:)` would also animate every
+    /// segmented-control change on the page.
     static let animation: Animation = .easeInOut(duration: 0.2)
 
-    /// The transition to attach to the **row**. `.top` rather than the default fade-in-place: the gated
-    /// row always sits under the control that gates it, so folding out of the top edge points back at the
-    /// thing that was just clicked.
-    ///
-    /// Computed rather than stored: `AnyTransition` is not `Sendable`, so a `static let` of it is a
-    /// concurrency error. Rebuilding the value per use costs nothing here.
+    /// Computed rather than stored: `AnyTransition` is not `Sendable`, so a `static let` is a
+    /// concurrency error.
     static var transition: AnyTransition { .move(edge: .top).combined(with: .opacity) }
 }
 
-/// A row title that dims when its row is disabled (#381).
-///
-/// SwiftUI dims a control's **own** label automatically, but most rows here put the title in a sibling
-/// `Text` — either because the control carries `.labelsHidden()` (the notification switches) or because
-/// the row is a hand-built `HStack` (the Appearance segmented rows). SwiftUI has no way to know such a
-/// `Text` belongs to the control beside it, so it stays at full strength over a greyed control and the
-/// row reads as half-live.
-///
-/// Uses AppKit's `disabledControlTextColor` — the colour the platform ships for exactly this ("Text on
-/// disabled controls", `NSColor.h`) — so a disabled row here matches every system-drawn one and follows
-/// the theme without a second rule.
+/// A row title that dims when its row is disabled (#381). SwiftUI dims a control's **own** label
+/// automatically, but most rows here put the title in a sibling `Text` (`.labelsHidden()` switches,
+/// hand-built `HStack` rows), which SwiftUI has no way to associate with the control beside it — so
+/// it stays at full strength over a greyed control without this.
 struct SettingsDisabledLabel: View {
     let title: String
     @Environment(\.isEnabled) private var isEnabled
@@ -82,10 +61,8 @@ struct SettingsDisabledLabel: View {
     init(_ title: String) { self.title = title }
 
     var body: some View {
-        // `Text(.init(_:))` forces the `LocalizedStringKey` initializer, which renders inline
-        // markdown — the same idiom `SettingsHint` uses. A row label may name another surface's
-        // element in italics (`Switching to *Extra usage*`, ADR-0113), and the plain `Text(String)`
-        // initializer would print the asterisks verbatim. Labels without markup render identically.
+        // `Text(.init(_:))` forces the `LocalizedStringKey` initializer, so inline markdown renders
+        // (`Switching to *Extra usage*`, ADR-0113) instead of printing the asterisks verbatim.
         Text(.init(title))
             .foregroundStyle(isEnabled
                              ? AnyShapeStyle(.primary)
@@ -99,28 +76,16 @@ struct SettingsHint: View {
     let text: String
     var warning: Bool = false
 
-    /// Whether the enclosing row is interactive (#381).
-    ///
-    /// Handled here rather than at each call site so a hint follows its row without every pane having to
-    /// remember — but **which hints belong inside the disabled scope is a call-site decision**, and the
-    /// distinction is not cosmetic:
-    ///
-    /// - a hint that **describes** what the control does ("Notifies you when the limit resets") is part
-    ///   of the control, and dims with it — at full strength it makes a disabled row read as half-live;
-    /// - a hint that **explains why the control is unavailable** ("Unavailable in development builds.",
-    ///   "Notifications are turned off for TokenPace — enable them in System Settings") must stay at full
-    ///   strength. It is the one line the user still needs, and dimming the recovery instructions along
-    ///   with the thing they recover is backwards.
-    ///
-    /// So put a describing hint inside the `.disabled(…)` scope and leave an explaining one outside it.
-    /// `GeneralPane`'s launch-at-login row and `AboutPane`'s auto-install row are the worked examples.
+    /// Whether the enclosing row is interactive (#381). **Which hints belong inside the disabled
+    /// scope is a call-site decision**: a hint **describing** the control ("Notifies you when the
+    /// limit resets") dims with it; a hint **explaining unavailability** ("Unavailable in development
+    /// builds.") must stay full strength — it's the recovery instruction, dimming it is backwards.
+    /// `GeneralPane`'s launch-at-login row and `AboutPane`'s auto-install row are worked examples.
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         if !text.isEmpty {
             Label {
-                // `.init(text)` forces the LocalizedStringKey initializer, so inline markdown
-                // (`**bold**` / `*italic*`) in a hint renders; plain hints are unaffected.
                 Text(.init(text))
             } icon: {
                 if warning {
@@ -129,9 +94,8 @@ struct SettingsHint: View {
             }
             .labelStyle(HintLabelStyle(showIcon: warning))
             .font(.callout)
-            // Already secondary when live; disabled drops it a further step to AppKit's own
-            // `disabledControlTextColor` ("Text on disabled controls", `NSColor.h`), so the whole row —
-            // title, control and explanation — reads as one inactive block.
+            // Disabled drops it a further step to AppKit's own `disabledControlTextColor`, so the
+            // whole row reads as one inactive block.
             .foregroundStyle(isEnabled
                              ? AnyShapeStyle(.secondary)
                              : AnyShapeStyle(Color(nsColor: .disabledControlTextColor)))
@@ -140,23 +104,20 @@ struct SettingsHint: View {
     }
 }
 
-/// A section header — the plain title, plus an optional hint line directly beneath it. Because it
-/// lives in the `header:` slot it renders **outside** the grouped card, so a caveat that covers the
-/// whole section reads as part of the heading rather than as one more row among the controls.
-///
-/// `hint` is `nil` for the ordinary case, which then renders exactly like a plain `Section("Title")`.
+/// A section header — the plain title, plus an optional hint line directly beneath it. Lives in the
+/// `header:` slot so it renders **outside** the grouped card, reading as part of the heading rather
+/// than as one more row.
 struct SectionHeaderWithHint: View {
     let title: String
-    /// The caveat shown under the title. Always a ⚠️ line — a neutral note belongs on the control it
-    /// describes, not in the heading.
+    /// Always a ⚠️ line — a neutral note belongs on the control it describes, not in the heading.
     var hint: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
             if let hint {
-                // Cancel the header's inherited uppercase/tracking styling so the hint matches the
-                // in-card hints; `.textCase(nil)` has to sit on the text itself, not the VStack.
+                // Cancel the header's inherited uppercase/tracking styling; `.textCase(nil)` must sit
+                // on the text itself, not the VStack.
                 SettingsHint(text: hint, warning: true)
                     .textCase(nil)
             }
@@ -164,40 +125,26 @@ struct SectionHeaderWithHint: View {
     }
 }
 
-/// The ⚠️ line shown under any section whose data is canned by a `TOKENPACE_STUB` scenario.
-///
-/// Shared rather than duplicated so the wording stays identical wherever it appears. It used to be a
-/// `static let` on a single pane, which meant every other pane reached into that one for it — a
-/// coupling that only got more awkward as panes moved (#333, #341). It belongs to no pane.
+/// The ⚠️ line shown under any section whose data is canned by a `TOKENPACE_STUB` scenario. Shared
+/// so the wording stays identical everywhere; belongs to no single pane.
 enum SettingsStubHint {
     static let text = "Stubbed in this development build."
 }
 
 // MARK: - SettingsNavigationRow (#341, ADR-0084)
 
-/// A row inside a `Form` that opens a child page — the drill-in affordance System Settings uses on
-/// its own parent pages.
+/// A row inside a `Form` that opens a child page — the drill-in affordance System Settings uses.
+/// Modelled on **Network** / **Internet Accounts**, not General: these rows *report* state
+/// ("Usage API · 3 services monitored"), not just a name to tap through.
 ///
-/// Anatomy, read off a live System Settings window rather than from memory: the page's name, an
-/// optional second line reporting its state, and a small grey chevron at the trailing edge. The
-/// **whole row** is the hit target, not just the chevron.
+/// The leading ``badge`` carries a **generic glyph on the provider's brand color**, never the
+/// provider's logo (Internet Accounts is the model; a redrawn wordmark is legally awkward). `nil`
+/// keeps the text flush left.
 ///
-/// Modelled on **Network** / **Internet Accounts**, not General. General's rows ("Storage ›") only
-/// lead somewhere, so they carry a name and nothing else; ours *report* — "Usage API · 3 services
-/// monitored" answers the question the page exists to answer, and reading it should not require
-/// opening the page.
-///
-/// The leading ``badge`` is optional and stays that way. It carries a **generic glyph on the
-/// provider's brand colour**, never the provider's logo — Internet Accounts' rows are the model here,
-/// and a redrawn wordmark would be the legally awkward candidate the badge exists to avoid. A row
-/// with nothing to identify beyond its own name passes `nil` and keeps the text flush left.
-///
-/// Built from a plain `Button` with `.buttonStyle(.plain)` rather than a `NavigationLink`: the
-/// window's navigation state is ours (`SettingsModel`'s route plus the AppKit toolbar's ‹ ›), and a
-/// `NavigationLink` would need a `NavigationStack` whose back button cannot land in our toolbar —
-/// `NavigationSplitView` inside an `NSHostingController` does not register its columns with the
-/// toolbar bridge, so SwiftUI `.navigation` items surface above the *sidebar* instead (ADR-0077 §3,
-/// the same wall #156 and #314 hit). The row therefore only reports the tap; the model decides.
+/// Built from a plain `Button`, not a `NavigationLink`: a `NavigationSplitView` inside an
+/// `NSHostingController` doesn't register its columns with the toolbar bridge, so `.navigation`
+/// items would surface above the sidebar instead of in our AppKit toolbar's ‹ › (ADR-0077 §3, same
+/// wall #156/#314 hit). The row only reports the tap; the model decides.
 struct SettingsNavigationRow: View {
     let title: String
     /// The state line under the title. `nil` draws a single-line row.
@@ -221,8 +168,7 @@ struct SettingsNavigationRow: View {
                 }
                 Spacer(minLength: Metrics.chipTextGap)
                 Image(systemName: "chevron.right")
-                    // `.tertiary` is the weight System Settings gives this chevron: present enough to
-                    // read as "there is more here", never competing with the row's own text.
+                    // `.tertiary` is the weight System Settings gives this chevron.
                     .foregroundStyle(.tertiary)
                     .font(.system(size: Metrics.chevron, weight: .semibold))
             }
@@ -242,24 +188,17 @@ struct SettingsNavigationRow: View {
 
 // MARK: - NavigationRowButtonStyle
 
-/// A navigator row's press behaviour: the **whole block** takes the click and lights up, the way
-/// System Settings' own drill-in rows do.
+/// A navigator row's press behaviour: the **whole block** takes the click and lights up. `.plain`'s
+/// hit target is only the drawn content, so a click in the row's margins falls through and it draws
+/// no pressed state.
 ///
-/// `.plain` gave neither. Its hit target is the drawn content, so a click in the row's margins fell
-/// through, and it draws no pressed state at all — the row that looked like one target behaved like a
-/// piece of text with some dead space around it.
-///
-/// **The negative insets are the point.** A grouped `Form` lays each row inside its own padding, and a
-/// background added inside that padding paints a stripe narrower than the row, with a gap on either
-/// side that still swallows clicks. Expanding by the same insets pushes both the fill and the hit area
-/// back out to the card's edges, which is where the row's boundary actually is.
+/// **The negative insets are the point.** A grouped `Form` lays each row inside its own padding, so a
+/// background added inside it paints a stripe narrower than the row with a dead gap on either side.
+/// Expanding by the same insets pushes both the fill and the hit area back out to the card's edges.
 private struct NavigationRowButtonStyle: ButtonStyle {
 
-    /// The form's own row padding, which this reaches back across.
-    ///
-    /// Measured off a grouped `Form` on macOS 15 rather than derived: SwiftUI exposes no metric for it.
-    /// If a future macOS changes the padding these numbers follow it — the failure is visible (a fill
-    /// that stops short of the card edge, or bleeds past it), which is the kind worth having.
+    /// Measured off a grouped `Form` on macOS 15 — SwiftUI exposes no metric for it. If a future
+    /// macOS changes the padding, the failure is visible (fill short of or past the card edge).
     private enum Inset {
         static let horizontal: CGFloat = 10
         static let vertical: CGFloat = 6
@@ -283,17 +222,10 @@ private struct NavigationRowButtonStyle: ButtonStyle {
 
 /// The tinted glyph chip a ``SettingsNavigationRow`` can carry at its leading edge.
 ///
-/// Unlike `SettingsSection.tint`'s `CapsuleTint`, whose two endpoints are both Digital Color Meter
-/// readings off a real System Settings pane, a brand gives us exactly one colour. The second endpoint
-/// is therefore **derived, not measured** — ``lightened(by:)`` mixes the brand toward white — and it
-/// is kept honest by taking the mix fraction from the measured pairs rather than from taste.
-///
-/// Modelling each measured `light` as `dark + t·(255 − dark)` per channel gives t = 0.188 for UI
-/// presets, 0.191 for Notifications, 0.503 for About and 0.616 for General; the mean is **0.375**,
-/// which is what ``brand(_:symbol:)`` applies. The spread across those four is wide because the
-/// system's capsules are hand-picked artwork rather than one formula (the `CapsuleTint` doc says as
-/// much), so any single fraction is a stand-in for a measurement we cannot take on a colour System
-/// Settings never drew.
+/// Unlike `SettingsSection.tint`'s `CapsuleTint`, whose two endpoints are both measured off a real
+/// System Settings pane, a brand gives us exactly one color — the second endpoint is therefore
+/// **derived, not measured** via ``lightened(by:)``, using a mix fraction averaged from the measured
+/// pairs (t = 0.188/0.191/0.503/0.616 across four panes, mean **0.375**) rather than from taste.
 struct SettingsRowBadge: Equatable {
     /// The chip gradient's bottom-right endpoint — for a brand badge, the brand colour itself.
     let dark: Color
@@ -345,33 +277,17 @@ struct SettingsRowBadge: Equatable {
         return .tinted(tint, symbol: symbol, trimsOuterRules: page.trimsOuterRules)
     }
 
-    /// Claude's row: Anthropic's terracotta (`#d97757`, confirmed against `anthropics/skills`'
-    /// `brand-guidelines/SKILL.md` — ADR-0021), carrying the cloud that used to sit on the Providers
-    /// section itself before it became a puzzle piece. The colour comes from the same `ColorRole`
-    /// the popup's "Claude Code" header uses, so the two brand marks cannot drift apart.
-    ///
-    /// Gradient ends up `#D97757` at the bottom-right, `#E7AA96` at the top-left — the second one
-    /// derived, so check it with the meter rather than trusting it.
+    /// Anthropic's terracotta (`#d97757`, ADR-0021), the same `ColorRole` the popup's "Claude Code"
+    /// header uses, so the two brand marks cannot drift apart.
     @MainActor
     static var claude: SettingsRowBadge {
         brand(ColorRole.claudeBrand.defaultColor, symbol: "cloud.fill")
     }
 
-    /// GitHub's row (#454): the **same `cloud.fill`** Claude wears, on black.
-    ///
-    /// One glyph for every provider, deliberately. ADR-0094 §4 puts it as "colour belongs to the
-    /// brand, shape belongs to the system" — so the shape is the *category*, and every row in this
-    /// list is the same kind of thing: a service TokenPace watches over the network. Giving each
-    /// provider its own glyph would make the shape carry identity too, which is the job the colour
-    /// already does, and it would leave a reader deciding whether a branch and a cloud differ in kind
-    /// or only in vendor. A per-provider glyph is also the seam where a logo eventually gets proposed;
-    /// a shared category glyph closes that door by construction.
-    ///
-    /// The gradient derives from pure black, so ADR-0094 §7's 0.375 mix puts the far end at `#606060`
-    /// — a visibly grey top-left, the same shape the measured system capsules have. That is the ADR's
-    /// arithmetic, not a fallback: a flat chip was considered and rejected there for reading as a
-    /// different material beside the sidebar's gradients. `needsBorder` stays false — black is darker
-    /// than the form row behind it, unlike the one white chip.
+    /// GitHub's row (#454): the **same `cloud.fill`** Claude wears, on black — one glyph for every
+    /// provider, deliberately. ADR-0094 §4: "color belongs to the brand, shape belongs to the
+    /// system"; a per-provider glyph is also the seam where a logo eventually gets proposed, and a
+    /// shared category glyph closes that door.
     @MainActor
     static var github: SettingsRowBadge {
         brand(ColorRole.githubBrand.defaultColor, symbol: "cloud.fill")
@@ -380,8 +296,7 @@ struct SettingsRowBadge: Equatable {
 
 private extension NSColor {
 
-    /// This colour mixed toward white by `fraction`, in sRGB — the same space the measured capsule
-    /// endpoints were read in, so the derived endpoint sits on the same scale as they do.
+    /// In sRGB — the same space the measured capsule endpoints were read in.
     func lightened(by fraction: CGFloat) -> NSColor {
         guard let srgb = usingColorSpace(.sRGB) else { return self }
         func mix(_ c: CGFloat) -> CGFloat { c + fraction * (1 - c) }
@@ -393,22 +308,14 @@ private extension NSColor {
 }
 
 /// Draws a ``SettingsRowBadge``: a white glyph on a tinted rounded rect, sized for a `Form` row
-/// rather than for the sidebar.
-///
-/// Sized off **Internet Accounts**, the pane this row is modelled on: there the account badge is
-/// noticeably larger than a sidebar chip, spanning both the account name and its state line rather
-/// than sitting beside the title alone. Ours does the same at 26 pt — the sidebar chip's size, which
-/// on a two-line row reads as the row's icon rather than as a bullet in front of its text.
-///
-/// Keeps the sidebar chip's 5 pt continuous corner radius, and its gradient axis, so the two read as
-/// the same family of object. The glyph is a touch smaller in proportion than the sidebar's (16 pt in
-/// 26, against 17 in 26): a cloud fills its box more than a gear does, and matching the sidebar ratio
-/// left it crowding the corners.
+/// rather than for the sidebar. Sized off **Internet Accounts** at 26 pt (the sidebar chip's size),
+/// which on a two-line row reads as the row's icon. Keeps the sidebar chip's 5 pt corner radius and
+/// gradient axis; the glyph is proportionally smaller (16 pt in 26 vs. 17 in 26) since a cloud fills
+/// its box more than a gear does.
 private struct SettingsRowBadgeView: View {
     let badge: SettingsRowBadge
-    /// Same reasoning as the sidebar chip: a flat tint takes no part in vibrancy, so it would stay at
-    /// full strength in an inactive window while every label around it dims. Halving the fill keeps
-    /// the row's parts dimming together.
+    /// A flat tint takes no part in vibrancy, so it would stay full strength in an inactive window
+    /// while every label around it dims without this.
     @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
@@ -416,16 +323,12 @@ private struct SettingsRowBadgeView: View {
             .foregroundStyle(badge.glyph)
             .frame(width: Metrics.chip, height: Metrics.chip)
             .background(fill, in: Self.shape)
-            // Only the white chip asks for one, for the same reason its sidebar twin does: it is the
-            // single badge lighter than the row behind it, so without a hairline its edge is not there.
+            // Only the white chip asks for one — it's the single badge lighter than the row behind it.
             .overlay { if badge.needsBorder { Self.shape.stroke(Metrics.border, lineWidth: 1) } }
     }
 
-    /// The chip outline, shared by the fill and the optional border so the two cannot drift.
     private static let shape = RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
 
-    /// The symbol, drawn whole — or, for a badge that asks for it, only the middle band of it
-    /// (`SymbolTrim`, the same renderer the sidebar chip uses).
     @ViewBuilder
     private var glyph: some View {
         if badge.trimsOuterRules,
@@ -465,26 +368,18 @@ private struct SettingsRowBadgeView: View {
 
 // MARK: - SymbolTrim
 
-/// Renders an SF Symbol with its outer strokes cut away, keeping only the middle band.
-///
-/// Shared by the sidebar chip and the navigator-row badge: the band is a property of the *glyph*
-/// (`distribute.vertical`'s rounded rectangle between two full-width rules), so it has to survive a
-/// page moving between the two surfaces. Both callers ask for the same slice at their own size.
+/// Renders an SF Symbol with its outer strokes cut away, keeping only the middle band. Shared by the
+/// sidebar chip and the navigator-row badge, each asking for the same slice at their own size.
 enum SymbolTrim {
 
-    /// The slice of the symbol's height that is kept — the band between the two rules, generous
-    /// enough to clear the rectangle's rounded corners at any size. Measured on the rendered glyph at
-    /// 64 pt (91×68 px): rules at y 5–9 and 59–63, rectangle at y 23–45, with clean gaps between.
-    /// Expressed as fractions of the glyph box rather than pixels so it holds at every chip size.
+    /// The band between the two rules, generous enough to clear the rectangle's rounded corners at
+    /// any size. Measured on the rendered glyph at 64 pt: rules at y 5–9 and 59–63, rectangle at
+    /// y 23–45. Expressed as fractions of the glyph box so it holds at every chip size.
     static let band: ClosedRange<CGFloat> = 0.28...0.72
 
-    /// Render `name` at `size` and keep only ``band`` of its height.
-    ///
-    /// The trim happens on the rendered `NSImage`, not through SwiftUI transforms: the band is cut out
-    /// and the result handed over as a plain image, so it lays out as exactly what it is. The
-    /// `.scaleEffect` + `.mask` spelling looks equivalent and is not — the scale moves the glyph's
-    /// centre relative to the mask, so the surviving strip is not the one that was measured. The image
-    /// is left as a template so the caller's own `foregroundStyle` still tints it.
+    /// Trims on the rendered `NSImage`, not via SwiftUI transforms: `.scaleEffect` + `.mask` looks
+    /// equivalent but isn't — the scale moves the glyph's centre relative to the mask, so the
+    /// surviving strip is not the one that was measured.
     static func middleBand(_ name: String, size: CGFloat) -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
         guard let full = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
