@@ -962,6 +962,37 @@ not of a window — [the rule about the menu material/vibrancy](#testing-menu-ba
 
 ## Scenarios without a stub
 
+### The dropdown's ⌥ gate and its caption (#475)
+
+No stub: the behavior depends on the modifier and one defaults key, not on the data. Any scenario
+works — `TOKENPACE_STUB=screenshot` gives a stable frame to compare margins against.
+
+Four states, and each is a separate check:
+
+1. **⌥ up, caption on** (the default). The menu is the popup plus one dim italic line,
+   `hold ⌥ Option for more`, right-aligned under the status column. **No action items at all** — no
+   `Settings…`, no `Quit`, no separator above where `Quit` would be. A stray separator is the
+   failure this state is most likely to show.
+2. **⌥ held.** The caption disappears and the full column appears in one step. Watch the **gap
+   between the card and `Settings…`**: it should look like every other menu item gap. This is where
+   an over-generous bottom margin shows up — the constant that applies when nothing follows the card
+   must not apply here ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md)).
+3. **⌥ up, caption off** (Settings → Appearance › Dropdown). The menu is the widget alone. Check the
+   **bottom margin against the sides** — they should read as equal. They are *not* equal as
+   constants: `NSMenu` pads below the hosted view, so the code carries 8.5 to render the sides' 14.
+   Judge the rendered gap, not the number.
+4. **The live preview** (Settings → Appearance › Dropdown, the window beside the panes). It must
+   show **no caption in any ⌥ state** — it has no menu items to offer — while ⌥ still reveals the
+   on-demand content it mirrors. Its own card margins must be unchanged by all of the above.
+
+Measuring rather than eyeballing is worth it for the margins: capture the menu, then compare the
+plate's gap to the popup edge on all four sides in pixels (remember a 2× capture halves to points).
+Three separate "looks off to me" rounds on this feature were each settled in one measurement.
+
+The switch is read on **every menu open**, so toggling it in Settings takes effect on the next open
+with no restart — verify that directly, since a stale read would look identical to a working one
+until the app is relaunched.
+
 ### Forced delegated refresh (#183)
 
 The goal is to manually trigger a **real** spawn of `claude --safe-mode --model haiku -p '/usage'`
