@@ -81,7 +81,7 @@ struct IsBlockedTests {
 
     @Test func activeSevenExhaustedBlocksEvenWhenFiveHasQuota() {
         // 7d at 100 with the active 5h still below → the weekly cap blocks despite 5h quota (#177).
-        // This is Артем's real bug: 7d exhausted, 5h at 48 %, no red blocking badge before the fix.
+        // This is Artem's real bug: 7d exhausted, 5h at 48 %, no red blocking badge before the fix.
         #expect(CreditsPacing.isBlocked(in: active(fiveDayUtil: 30, sevenDayUtil: 100)))
     }
 

@@ -8,7 +8,7 @@ import Foundation
 ///
 /// One method, and it answers a **question** rather than returning a listing: the probe never needs
 /// to know *which* file moved or *how many* did, only whether at least one did. That lets the
-/// production implementation stop walking at the first hit (`ADR-0117`), which is what keeps a
+/// production implementation stop walking at the first hit (`ADR-0118`), which is what keeps a
 /// ~500-file tree affordable to check every three minutes.
 public protocol ActivityFileIndex: Sendable {
     /// Whether **any** file at or below `root` has an mtime strictly after `cutoff`.
@@ -28,7 +28,7 @@ public protocol ActivityFileIndex: Sendable {
 
 // MARK: - TranscriptActivityProbe
 
-/// Production ``ClaudeActivityProbe`` (ADR-0117): reports a Claude Code session as active when any
+/// Production ``ClaudeActivityProbe`` (ADR-0118): reports a Claude Code session as active when any
 /// of its **on-disk journals** was written to within ``activityWindow``.
 ///
 /// ## Why not the process table

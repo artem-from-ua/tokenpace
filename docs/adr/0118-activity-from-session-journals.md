@@ -5,7 +5,7 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0117: Claude Code activity is read from session journals, not the process table
+# ADR-0118: Claude Code activity is read from session journals, not the process table
 
 > Partially supersedes the **mechanism** named in [ADR-0032](0032-simplified-polling-cadence.md) §D3
 > and [ADR-0045](0045-honest-reset-boundary-grace.md) §D5′. Both decisions stand exactly as written

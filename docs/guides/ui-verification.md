@@ -105,7 +105,7 @@ stub name from the table below, and `summary` is its description.
 | `active-blocked` | **active** blocked (#177): a live 5h session (48 %) with an exhausted 7d (100 %, `weekly_all` critical) and no credits → the weekly cap blocks despite the 5h quota (`isBlocked`). **The red pause glyph is always on the left** (#199/#227, ADR-0063). There are **no bars** ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)): pause + countdown, and there is no toggle for it anymore. The credits icon (€) sits **between** the pause and the bars (#227). The popup always shows the full picture: the 7d reset gets a **red badge** reading "Effective blocker" |
 | `optimistic-reset` ⏱ | the reset boundary (#36): 5h resets in ~20 s — the bar jumps 60 % → 0 % with no ⏰ plus a forced refresh. **Real clock** (⏱): the timer has to tick live, so this stub is not detached from time |
 | `color-cycle` ⏱ | **smooth color transitions** (ADR-0070) — **real clock** (⏱: the color sweep drives its own 5-second timer). The 5h bar and the service dot walk the entire pacing palette: blue → green → yellow → orange → red and back, 5 s per zone (a 0.8 s transition plus a pause). **The 5h geometry is frozen** — the strip is pinned at half the track and the time marker parks at its end, so **only the color** moves; 7d / per-model / credits keep their real geometry as a motionless reference alongside. Check that: (1) the color **blends** rather than jumping, both in the menu bar **and** in the dropdown (the dropdown also exercises `.common` run-loop mode under NSMenu tracking); (2) switching "Colors tell me" / Style mid-sweep animates too — check **both** Style rows separately (the menu-bar one and the dropdown one, #329). While you are there, catch **two effects from #381**: switching to **Pressure** disables the "Colors tell me" row (the label and segments gray out, the highlight moves to `Slow down`, and clicks do nothing), and at that same instant the entire calm side turns **white** — the blue/green/yellow stages of the sweep must not be colored under Pressure for any value of the setting. The service dot in the sweep is no longer muted along with the bars — it walks **its own** scale (yellow → orange → red → blue → gray), and **not one** step goes dim under any setting ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md), [ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md)); this doubles as the frame for the `yellow→orange` transition — adjacent tones, the shortest fade distance: it has to read as a blend, not a jump; (3) Progress keeps its slider (it does not collapse into Pressure); (4) between transitions the timer is idle — sitting still must not heat up the CPU. **Not** for checking the pacing thresholds themselves: the `utilization` values here are synthetic and tuned to hit each zone |
-| `reset-grace` ⏱ | the grace period at the reset boundary (ADR-0041, ADR-0045) — **real clock** (⏱: the "utilization rose recently" freshness window is measured in real time): an active 5h window (polls 0–1) → an **empty** post-reset body (polls 2–3: `five_hour.resets_at:null`, with no `session` limit — the decoder on its own would produce `sessionIdle`) → active again (polls 4+). In the "hole" the 5h line must show a calm **0 % "on pace" with a rolled-forward countdown** (`Nh at …`), and the menu bar must **not blink** — **never "resetting…" and never a full-width green bar** (ADR-0045). The grace period only arms while Claude Code is active (`claudeActive` — a journal written in the last 5 min, ADR-0117) — otherwise an honest idle "ready to start" shows immediately. Note this gate was silently dead until ADR-0117: the old process probe never matched, so the grace could not arm at all. Compare with `idle`: there the idle is **real** and is supposed to show |
+| `reset-grace` ⏱ | the grace period at the reset boundary (ADR-0041, ADR-0045) — **real clock** (⏱: the "utilization rose recently" freshness window is measured in real time): an active 5h window (polls 0–1) → an **empty** post-reset body (polls 2–3: `five_hour.resets_at:null`, with no `session` limit — the decoder on its own would produce `sessionIdle`) → active again (polls 4+). In the "hole" the 5h line must show a calm **0 % "on pace" with a rolled-forward countdown** (`Nh at …`), and the menu bar must **not blink** — **never "resetting…" and never a full-width green bar** (ADR-0045). The grace period only arms while Claude Code is active (`claudeActive` — a journal written in the last 5 min, ADR-0118) — otherwise an honest idle "ready to start" shows immediately. Note this gate was silently dead until ADR-0118: the old process probe never matched, so the grace could not arm at all. Compare with `idle`: there the idle is **real** and is supposed to show |
 | `broken-reset` | a broken `resets_at` (#167, ADR-0043 → [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)): an **exhausted** 5h (100 %) with an **unparsable but non-empty** `resets_at` (`"not-a-date"`, NOT `null` — `null` or empty would give an honest `sessionIdle` rather than an error) → the menu bar draws **a lone ⚠️** (`MenuBarMode.exhaustedUnknownReset`): no bars, no countdown — and **no pause or currency sign beside it**, even though the window is ostensibly at 100 %. The pair "⏸ + ⚠️" would read as a broken widget rather than a state, so contradictory data gets a single signal. If you see a red bar, a pill, a pause, or a fake `<1m`, that is a regression. 7d is calm with a valid reset (not the source of the error) |
 | `calm-degraded` | calm bars plus a **`degraded`** service dot. Since [ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md) this is the frame about **three surfaces converging**: the menu bar, the popup, and the Legend page all draw this state in the **same yellow**. Check exactly that: open the popup over the bar and compare the two dots in a single capture — they must be **identical**; any difference is now a regression (before [#410](https://github.com/artem-from-ua/tokenpace/issues/410) they differed on purpose). Cycle "Colors tell me" through all three values and switch Style — **none** of them may shift that yellow: this is the check that [ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md) still stands (the tone changed, not who decides it). A white dot must not appear in **any** state. The louder states are unchanged on both surfaces (check them on `incident-*`: `partialOutage` orange, `majorOutage` red, `underMaintenance` blue, `unknown` gray). The screenshot **must be of the real menu bar**, and **separately on the light theme** — the question there is not "is it visible" but whether the yellow reads as an alarm next to the system icons |
 | `all-green` | calm bars plus **all services operational** (green): `worstProblem == nil`, so the popup has **no status lines at all** — neither without ⌥ nor under it. Since #279, ⌥ switches the **dimension** (services → incidents) rather than "show more", so green lines no longer expand; with no incidents, the section under ⌥ is simply absent. This is the frame for checking that "nothing appears for nothing" (the remaining stubs are all-operational too — except `error`, `stale-error`, `calm-degraded`, and `incident-*`) |
@@ -961,6 +961,48 @@ not of a window — [the rule about the menu material/vibrancy](#testing-menu-ba
   stub set up precisely to show one of them rendered without it.
 
 ## Scenarios without a stub
+
+### The dropdown's ⌥ gate and its caption (#475)
+
+No stub: the behavior depends on the modifier and one defaults key, not on the data. Any scenario
+works — `TOKENPACE_STUB=screenshot` gives a stable frame to compare margins against.
+
+Four states, and each is a separate check:
+
+1. **⌥ up, caption on** (the default). The menu is the popup plus one dim italic line,
+   `hold ⌥ Option for more`, right-aligned under the status column. **No action items at all** — no
+   `Settings…`, no `Quit`, no separator above where `Quit` would be. A stray separator is the
+   failure this state is most likely to show.
+2. **⌥ held.** The caption disappears and the full column appears in one step. Watch the **gap
+   between the card and `Settings…`**: it should look like every other menu item gap. This is where
+   an over-generous bottom margin shows up — the constant that applies when nothing follows the card
+   must not apply here ([ADR-0118](../adr/0117-dropdown-actions-behind-option.md)).
+3. **⌥ up, caption off** (Settings → Appearance › Dropdown). The menu is the widget alone. Check the
+   **bottom margin against the sides** — they should read as equal. They are *not* equal as
+   constants: `NSMenu` pads below the hosted view, so the code carries 8.5 to render the sides' 14.
+   Judge the rendered gap, not the number.
+4. **The live preview** (Settings → Appearance › Dropdown, the window beside the panes). It must
+   show **no caption in any ⌥ state** — it has no menu items to offer — while ⌥ still reveals the
+   on-demand content it mirrors. Its own card margins must be unchanged by all of the above.
+
+**Then run states 1–3 again with the update line showing** — add
+`TOKENPACE_UPDATE_STATE=available` (or `failed`). That line is visible in *both* ⌥ states, which makes
+it a neighbour under the card, and it is the case the first pass missed:
+
+- with ⌥ up, the card must keep its **trimmed** margin (the even one belongs to a plate with nothing
+  under it), and there must be **no separator** between the card and the update line — that divider
+  belongs to the action items above it, which are hidden;
+- with ⌥ held, the separator comes back with the items, above the update line where it belongs;
+- with the caption on, it sits between the card and the update line, and the three must read as one
+  column rather than as three stacked blocks.
+
+Measuring rather than eyeballing is worth it for the margins: capture the menu, then compare the
+plate's gap to the popup edge on all four sides in pixels (remember a 2× capture halves to points).
+Three separate "looks off to me" rounds on this feature were each settled in one measurement.
+
+The switch is read on **every menu open**, so toggling it in Settings takes effect on the next open
+with no restart — verify that directly, since a stale read would look identical to a working one
+until the app is relaunched.
 
 ### Forced delegated refresh (#183)
 

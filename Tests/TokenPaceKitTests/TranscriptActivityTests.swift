@@ -61,7 +61,7 @@ struct TranscriptActivityProbeTests {
     // MARK: The other two sources
 
     /// The user typing is activity **before** any token is spent: someone is at the keyboard looking
-    /// at the widget, and spend follows within seconds (ADR-0117).
+    /// at the widget, and spend follows within seconds (ADR-0118).
     @Test("a fresh history.jsonl counts even when every transcript is stale")
     func freshHistoryIsActive() {
         let index = StubIndex(newest: [

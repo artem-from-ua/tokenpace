@@ -13,7 +13,7 @@ date: 2026-07-28
 >
 > **Postscript (2026-08-22).** §D5′'s decision stands — the grace still arms only on
 > `prevActive && claudeActive && utilFresh`. Only how `claudeActive` is obtained is superseded by
-> [ADR-0117](0117-activity-from-session-journals.md); it is no longer "the `claude` CLI process is
+> [ADR-0118](0118-activity-from-session-journals.md); it is no longer "the `claude` CLI process is
 > alive" but "a Claude Code session journal was written within the last 5 minutes". Note that while
 > the old probe was broken, this gate could never arm at all — the grace was silently dead.
 

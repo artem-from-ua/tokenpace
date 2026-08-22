@@ -187,7 +187,7 @@ display-wake event is ever missed.
 ### Why there is no "claude is running" term
 
 The original draft had one, and an activity probe already exists for the poll cadence
-(`TranscriptActivityProbe` since ADR-0117; `ProcessClaudeActivityProbe` at the time this was
+(`TranscriptActivityProbe` since ADR-0118; `ProcessClaudeActivityProbe` at the time this was
 written). It was dropped in #275 after costing it out:
 
 - **Nothing to silence.** With no Claude Code running nothing writes to `~/.claude/sessions|jobs`, so

@@ -198,7 +198,7 @@ live in `PopupBarView.stripRect(pinsStart:)`.
 This is **not** a special case for zero spend: the floor kicks in on any gap narrower than 3.5 pt,
 which is to say every time spending tracks the pace almost exactly. At `u = 0.40, t = 0.405` the old
 geometry started the color a point to the left of `usage`. At `usage = 0` it is simply most visible,
-because there the left edge also fell into the band snap to `minX` and the pill crept out from under
+because there the left edge also fell into the strip snap to `minX` and the pill crept out from under
 the time marker. The invariant is checked by
 [`scripts/check-strip-geometry.py`](../../scripts/check-strip-geometry.py) on a 1001×1001 grid: 19,910
 affected states before the fix (up to 4.75 pt), zero after.
@@ -393,7 +393,7 @@ only: in a warning the strip has a length of its own and there is nothing to boo
 
 **A bar with no marker is Pressure (`.pressure`) or Balance (`.balance`), but definitely not Progress
 (`.progress`).** The most common mistake in mockups: labeling a render "Progress" while drawing only a
-color band. The marker is not decorative detail — it is what tells one style from another.
+color strip. The marker is not decorative detail — it is what tells one style from another.
 
 And it is **not the only** difference: the scale changes along with the marker. A bar without a marker
 is measured against the time remaining, so a mockup in which "Pressure" is drawn with a length of
@@ -426,7 +426,7 @@ Before publishing a mockup with bars:
 - in a bar **without** a marker the length is `pressureLength`, and there are no ticks in the popup at
   all (only the zero tick, labeled under ⌥). Four ticks under a marker-less 5h bar (window fractions)
   is the same mistake as a marker under Pressure;
-- the marker stands at **its own** fraction, not at the edge of the band: at `usage > time` it is
+- the marker stands at **its own** fraction, not at the edge of the strip: at `usage > time` it is
   **left** of the gap, at `usage < time` **right** of it. Both bars with the marker on the left means
   the geometry was copied, not computed;
 - every x goes through the `scaleX` inset, the marker included.
@@ -437,12 +437,12 @@ certainly wrong.
 ### What nobody draws
 
 **A fill from zero to `usageFraction`.** The level is not drawn in any style — that is a deliberate
-decision ([ADR-0062](../adr/0062-configurable-bar-presentation.md)). If the picture has a band starting
+decision ([ADR-0062](../adr/0062-configurable-bar-presentation.md)). If the picture has a strip starting
 at the left edge and ending at "how much has been spent", the picture is wrong.
 
 Similar to a fill but not one: **any** `.pressure` bar, where the strip is also left-anchored even
 though its length is `pressureLength` (the gap against the time remaining), not the level. A
-left-anchored band does **not** by itself mean a level fill: only the start matches, not the end.
+left-anchored strip does **not** by itself mean a level fill: only the start matches, not the end.
 
 The **credit** row under `.pressure` used to stand here as an example — that state no longer exists: the
 credit bar is always Progress ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)), so a left-anchored
@@ -537,6 +537,11 @@ Check before you draw a state.
 | A `stand by …` line on the **5-hour** row | The gate is `index == PopupViewController.sevenDayRowIndex`: the signal exists **only** on 7d. A five-hour window resets at least twice a day and fixes itself, so the cost of a pause there changes no decision |
 | A `stand by …` line on a **non-orange** 7d | `standBySecondsForGreen` returns `nil` for every severity except `.ahead`. On green or blue there is nothing to wait for, on yellow the lead is within norms, and red (`usage >= 1`) is cured **only** by the reset: spending has hit the ceiling, and time will not catch up with it |
 | A `stand by …` line **without** ⌥ held | The line is built only under `optionHeld`. At rest the 7d section is two lines + a bar, like any other |
+| The dropdown's action items (`Settings…`, `Quit TokenPace`, `Troubleshoot…`) **without** ⌥ held | Every action item is ⌥-gated ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md)). At rest the menu is the popup and nothing else. A mockup showing the widget with `Settings…` beneath it is drawing the ⌥-**held** state and must show the rest of the column too — including `Troubleshoot…`, which appears in the same breath |
+| The `hold ⌥ Option for more` caption **while ⌥ is held** | It stands in for the items ⌥ reveals, so the two are mutually exclusive by construction (`optionHintEnabled && !optionHeld`). It is also absent whenever the Appearance › Dropdown switch is off, and **never** appears in the Settings live preview, which has no menu items to offer |
+| The update line hidden under ⌥, or the caption drawn as a menu item | The update row is a notice and stays visible in both ⌥ states ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md)); the caption is the reverse — not an `NSMenuItem` at all but an inert label inside the popup's view, so it never highlights on hover and cannot be drawn with a menu row's selection |
+| A **separator above the update line while ⌥ is up** | That separator divides the update line from the action items above it, and with ⌥ up there are none — it would be a rule under nothing, sitting between the card and the notice. The line stays, its divider does not: the two answer different questions ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md)) |
+| The card's **even bottom margin while the update line is showing** | The full margin belongs to a plate with no neighbour at all. The update line is a neighbour like any other, so the trimmed inset applies whenever it is visible — even with the caption off and ⌥ up |
 | `stand by` **shorter than 20 min** | Cut off by `PacingModel.standByFloorSeconds`. The state is almost unreachable: it exists only in the last ~2 hours of a window (remaining < 125 min) **and** within a spending band hundredths of a pp wide (at 120 min remaining — `u ∈ [99.0000%, 99.0079%]`). The minimum orange wait equals `0.16·(1−t)·D` itself, and mid-week that is already ≈13 hours. The threshold is a guard against "stand by 3m", not a working filter |
 | `stand by` that runs **right up to the reset** | Cut off even earlier — by the `remainingSeconds − standBy > pacingOrangeOverrideSeconds` check inside the calculation: a green that would arrive in the last 20 minutes of a window would be orange there anyway. There is **no separate "10-minute" rule and no need for one** — it is nested inside this one and would not have rejected a single case |
 | **A blue idle pill** — whatever the weekly state | Since [#381](https://github.com/artem-from-ua/cc-timer/issues/381) there is no blue idle anywhere: the pill is green (or white under muting), and gray is left only for `isBlocked`. The weekly gate no longer enters into it — the fields `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` do not exist |

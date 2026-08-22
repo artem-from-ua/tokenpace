@@ -185,7 +185,7 @@ limit as in updates.
 ### Claude Code active
 
 `TranscriptActivityProbe` ([`TranscriptActivity.swift`](../../Sources/TokenPaceKit/TranscriptActivity.swift),
-ADR-0117) checks whether anything under `history.jsonl`, `jobs/` or `projects/` in the Claude Code
+ADR-0118) checks whether anything under `history.jsonl`, `jobs/` or `projects/` in the Claude Code
 home was written in the last 5 minutes. Nothing recent → the usage cadence becomes 15 min instead of
 180 s. Metadata only — the walk never opens a file — and it stops at the first fresh root, so the
 active case costs ~0.01 ms; an idle machine pays a full walk (~74 ms) once per 15-minute interval. This is **not a stop**: limits keep

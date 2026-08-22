@@ -8,7 +8,7 @@ date: 2026-07-06
 > **Postscript (2026-08-22).** The Consequences bullet about the spawned `claude` being visible to
 > `ProcessClaudeActivityProbe` "for a few seconds (an exact name match)" no longer holds: that probe
 > is gone, replaced by journal-based detection
-> ([ADR-0117](0117-activity-from-session-journals.md)). The spawn no longer perturbs the activity
+> ([ADR-0118](0118-activity-from-session-journals.md)). The spawn no longer perturbs the activity
 > signal at all. Separately, `binaryCandidates` does not list the native installer's
 > `~/.local/share/claude/versions/<semver>` layout — it still resolves today via the
 > `~/.local/bin/claude` symlink, and is tracked as follow-up work.

@@ -8,7 +8,7 @@ supersedes: [0011]
 
 > **Postscript (2026-08-22).** §D3's decision stands unchanged — no Claude Code session still means
 > a 15-minute interval. Only the *mechanism* named in it is superseded by
-> [ADR-0117](0117-activity-from-session-journals.md): `claudeActive` no longer comes from probing
+> [ADR-0118](0118-activity-from-session-journals.md): `claudeActive` no longer comes from probing
 > the process table for a process named `claude` (the native installer made that match fail
 > silently), but from recent writes to Claude Code's session journals. Everything else in this ADR
 > is unaffected.
