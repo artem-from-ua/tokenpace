@@ -70,17 +70,21 @@ struct JournalMigrationTests {
         #expect(last.d7.utilSrc != nil)                  // and it says how it got there
     }
 
+    /// `resume` and `error` still pass through byte-identical. `status` used to be on this list and is
+    /// not any more (#456) — it is rewritten to carry its provider, so it is asserted separately in
+    /// `ProviderIDBackfillTests` below.
     @Test func passesThroughOtherRecordKinds() {
         let input = [
-            #"{"kind":"status","t":"2026-08-03T12:00:00Z","svc":[],"worst":"operational"}"#,
             #"{"kind":"resume","t":"2026-08-03T12:05:00Z","gap":900}"#,
             #"{"kind":"error","t":"2026-08-03T12:10:00Z","code":429,"reason":"clientProblem"}"#,
         ].joined(separator: "\n")
 
         let (out, _, outcome) = JournalMigration.migrate(contents: input)
         #expect(outcome.migrated == 0)
-        #expect(outcome.passedThrough == 3)
+        #expect(outcome.statusTagged == 0)
+        #expect(outcome.passedThrough == 2)
         #expect(out == input)                            // byte-identical
+        #expect(!outcome.changedAnything)
     }
 
     @Test func preservesUnparseableLinesVerbatim() {
@@ -551,5 +555,96 @@ struct SeverityRecomputationTests {
             of: "\"sevV\":\(UsageSample.currentColorVersion)", with: "\"sevV\":0")
         let again = decodeUsage(JournalMigration.migrate(contents: stale).contents)
         #expect(again?.scoped.first?.sevRaw == .blue)   // the poll's verdict, not the migrated green
+    }
+}
+
+// MARK: - Provider backfill on status lines (#456)
+
+/// The `status` half of the pass: an archived line gets its provider written in, under a `v` counter
+/// of the status shape's own. A relabelling only — `t`, `svc` and `worst` are historical facts whose
+/// inputs are gone, so nothing about them is recomputed.
+@Suite("JournalMigration — status provider backfill")
+struct ProviderIDBackfillTests {
+
+    /// A v1 status line: no `v`, no `provider` — every one in the archive looks like this.
+    private static func v1Status(t: String, worst: String = "operational") -> String {
+        #"{"kind":"status","t":"\#(t)","svc":[{"n":"Claude Code","s":"operational"}],"worst":"\#(worst)"}"#
+    }
+
+    private static func decodeStatus(_ line: String) -> StatusSample? {
+        guard let data = line.data(using: .utf8),
+              let record = try? JSONDecoder().decode(JournalRecord.self, from: data),
+              case let .status(sample) = record else { return nil }
+        return sample
+    }
+
+    @Test func tagsArchivedStatusLinesWithTheirProvider() throws {
+        let input = [
+            Self.v1Status(t: "2026-08-03T12:00:00Z"),
+            Self.v1Status(t: "2026-08-03T12:03:00Z", worst: "degraded_performance"),
+        ].joined(separator: "\n")
+
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+        #expect(outcome.statusTagged == 2)
+        #expect(outcome.migrated == 0)                   // status lines are not usage samples
+        #expect(outcome.migratedFromVersion == nil)      // …so they name no usage generation
+
+        let samples = out.split(separator: "\n").compactMap { Self.decodeStatus(String($0)) }
+        #expect(samples.count == 2)
+        #expect(samples.allSatisfy { $0.provider == ProviderID.claude.rawValue })
+        #expect(samples.allSatisfy { $0.v == StatusSample.currentVersion })
+        // The facts that cannot be recomputed are carried across untouched.
+        #expect(samples.first?.t == "2026-08-03T12:00:00Z")
+        #expect(samples.first?.svc.first?.n == "Claude Code")
+        #expect(samples.last?.worst == "degraded_performance")
+    }
+
+    /// The trap the ticket named: a file whose **only** stale lines are status ones must still be
+    /// detected as changed, or the shell computes the rewrite and then declines to write it.
+    @Test func aStatusOnlyChangeIsDetectedAsChanged() {
+        let outcome = JournalMigration.migrate(contents: Self.v1Status(t: "2026-08-03T12:00:00Z")).outcome
+        #expect(outcome.migrated == 0)
+        #expect(outcome.changedAnything)
+    }
+
+    @Test func theBackfillIsIdempotent() {
+        let input = [
+            Self.v1Status(t: "2026-08-03T12:00:00Z"),
+            Self.v1Status(t: "2026-08-03T12:03:00Z"),
+        ].joined(separator: "\n")
+
+        let first = JournalMigration.migrate(contents: input)
+        let second = JournalMigration.migrate(contents: first.contents, state: first.state)
+        #expect(second.outcome.statusTagged == 0)
+        #expect(second.outcome.passedThrough == 2)
+        #expect(!second.outcome.changedAnything)
+        #expect(second.contents == first.contents)
+    }
+
+    /// Line count is the invariant a migration may never break, whatever else it changes.
+    @Test func lineCountSurvivesAMixedFile() {
+        let input = [
+            Self.v1Status(t: "2026-08-03T12:00:00Z"),
+            #"{"kind":"resume","t":"2026-08-03T12:05:00Z","gap":900}"#,
+            #"{"kind":"error","t":"2026-08-03T12:10:00Z","code":429,"reason":"clientProblem"}"#,
+            Self.v1Status(t: "2026-08-03T12:12:00Z"),
+        ].joined(separator: "\n")
+
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+        #expect(out.split(separator: "\n", omittingEmptySubsequences: false).count == 4)
+        #expect(outcome.statusTagged == 2)
+        #expect(outcome.passedThrough == 2)              // resume + error, untouched
+    }
+
+    /// A torn status line is preserved exactly, like any other unparseable one — a relabelling pass
+    /// must not be the thing that costs a file its corrupt tail.
+    @Test func anUnparseableStatusLineSurvivesVerbatim() {
+        let torn = #"{"kind":"status","t":"2026-08-03T12:00:00Z","svc":[{"n":"Cla"#
+        let input = [Self.v1Status(t: "2026-08-03T12:00:00Z"), torn].joined(separator: "\n")
+
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+        #expect(outcome.skipped == 1)
+        #expect(outcome.statusTagged == 1)
+        #expect(out.hasSuffix(torn))
     }
 }

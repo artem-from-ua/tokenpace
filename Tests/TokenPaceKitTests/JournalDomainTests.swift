@@ -155,6 +155,54 @@ struct JournalStatusMappingTests {
         #expect(s.svc.count == 2)
         #expect(s.svc.first?.n == "Claude Code")
         #expect(s.worst == "major_outage")
+        #expect(s.provider == ProviderID.claude.rawValue)
+        #expect(s.v == StatusSample.currentVersion)
+    }
+
+    /// `svc` is the **whole feed**, not the monitored set (ADR-0119): the page's response verbatim,
+    /// including components no config watches. `worst`, by contrast, is the monitored-set aggregate —
+    /// so the two disagree here on purpose, and that is the pair being pinned.
+    @Test func svcCarriesTheWholeFeedWhileWorstCoversTheMonitoredSet() throws {
+        let summary = StatusSummary(components: [
+            StatusComponent(name: StatusHealth.claudeAPIComponentName, status: "operational"),
+            StatusComponent(name: StatusHealth.claudeCodeComponentName, status: "operational"),
+            StatusComponent(name: StatusHealth.claudeWebComponentName, status: "operational"),
+            // On the page, never monitored by any config — it must appear in `svc` and not in `worst`.
+            StatusComponent(name: "Claude for Government", status: "major_outage"),
+        ])
+        let health = StatusHealth.from(summary, config: .default)
+        guard case let .status(s) = JournalRecord.status(from: summary, health: health, now: now) else {
+            Issue.record("expected .status"); return
+        }
+        #expect(s.svc.count == 4)
+        #expect(s.svc.contains { $0.n == "Claude for Government" })
+        #expect(s.worst == "operational")
+    }
+
+    /// `worst` comes from **this provider's** checks, not from a flatten across every check in
+    /// `health` (#454 §2b). With one provider the two agree, so the test pins the derivation rather
+    /// than the value: a check belonging to another provider must not reach this line's `worst`.
+    @Test func worstIsScopedToTheProviderNotFlattenedAcrossChecks() throws {
+        let summary = StatusSummary(components: [
+            StatusComponent(name: StatusHealth.claudeAPIComponentName, status: "operational"),
+            StatusComponent(name: StatusHealth.claudeCodeComponentName, status: "operational"),
+            StatusComponent(name: StatusHealth.claudeWebComponentName, status: "operational"),
+        ])
+        let claudeHealth = StatusHealth.from(summary, config: .default)
+        #expect(claudeHealth.worstProblem(for: .claude) == nil)
+
+        // Every check today is Claude's, so the scoped aggregate and the flattened one must agree —
+        // the equivalence that makes it safe to introduce the scoped one before the second provider.
+        #expect(claudeHealth.worstProblem(for: .claude) == claudeHealth.worstProblem)
+        #expect(StatusHealth(checks: []).worstProblem(for: .claude) == nil)
+
+        // And the scoping itself: a degraded Claude check is visible to `.claude`.
+        let degraded = StatusHealth(checks: [
+            ServiceCheck(id: .claudeCode,
+                         components: [ResolvedComponent(name: "Claude Code", status: .degraded)]),
+        ])
+        #expect(degraded.worstProblem(for: .claude) == .degraded)
+        #expect(ServiceID.claudeCode.provider == .claude)
     }
 
     @Test func allOperationalWorstIsOperational() throws {

@@ -80,12 +80,39 @@ One object per line, tagged with `kind`. For analytics the `usage` lines are the
 | `h5.sevRaw` | same | the verdict recorded at poll time — **only** if it differs from `sev`. A missing field means "identical", not "no data" |
 | `d7.*` | same | the 7-day window |
 | `scoped[]` | array | per-model limits (`name`, `pct`, `reset`, `timePct`, `sev`, `sevRaw`) |
-| `v` | Int | the version of the line **format** (4 is current); absent reads as 1 |
+| `v` | Int | the version of the line **format** — for a `usage` line, **4** is current; absent reads as 1. Every `kind` has its own counter, so dispatch on `kind` before reading it (a `status` line's `v` is at 2 and means something else entirely) |
 | `sevV` | Int | the generation of the **color model** that produced `sev` (1 is current); absent = older than the first named one |
 | `spend` | object | the spend limit, credits consumed, currency |
 | `plan` / `tier` | String | `max`/`pro`, the plan — needed to attribute the series |
 | `sessionIdle` | Bool | the app considered the session inactive |
 | `ms` | Int | API response latency |
+
+### The `status` line
+
+Still not an analytics source — the `usage` lines remain the interesting ones — but the format
+section has to be accurate, and since [ADR-0120](../adr/0120-status-records-carry-their-provider.md)
+these lines carry two more keys:
+
+| Field | Type | What it is |
+|---|---|---|
+| `v` | Int | the version of the **`status`** line format (**2** is current); absent reads as 1. A counter of its own — unrelated to the `usage` line's `v` above |
+| `t` | ISO-8601 UTC | the moment of the status poll |
+| `provider` | String | which status page this line came from (`claude`). Written on every line since v2 and backfilled onto every archived one, so **never** infer it from absence |
+| `svc[]` | array | the **whole feed** of that page (`n` = component name, `s` = raw status) — six components for Claude, including ones no config monitors |
+| `worst` | String | worst-of over the **monitored** services of *this provider*, or `operational` |
+
+**`svc` and `worst` answer different questions, and they disagree on purpose.** `svc` is the page's
+response verbatim; `worst` is the aggregate over what the user was actually watching. So a line can
+carry a `major_outage` component in `svc` and still read `worst: "operational"` — that is correct, not
+a bug: the outage was on a component nobody asked about. A count over `svc[].s` measures *the page*, a
+count over `worst` measures *the user's exposure*. Never substitute one for the other.
+
+Which services were monitored is a **setting**, and it is not in the line. That is why `svc` is not
+narrowed to it: a narrowed feed would silently change meaning whenever the user flipped a toggle, and
+two lines that look alike would not be comparable.
+
+**Status lines are on a different cadence from usage lines** (ADR-0013) and carry no resume markers of
+their own, so never interleave the two series or read a gap in one as a gap in the other.
 
 **Take `sev` as given — but look at `sevV` first.** The ready-made value already accounts for the
 weekly-capacity gate ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)) and the ban on blue
