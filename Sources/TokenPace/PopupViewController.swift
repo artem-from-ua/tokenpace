@@ -1869,6 +1869,9 @@ final class PopupViewController: NSViewController {
     /// The bold header of the popup's first section — "Claude" covers the update-cadence line and the
     /// per-component service status rows beneath it (see `rebuild`).
     private static let claudeCodeSectionTitle = "Claude"
+    /// The GitHub section's header (#454). Bare, like `Claude`: the header names the provider and
+    /// the rows below it name components, so neither repeats the other.
+    private static let githubSectionTitle = "GitHub"
 
     /// The status word shown flush-right on the **idle** 5-hour row (#100, ADR-0027): the 5h window has
     /// no active session, so the row reads "5-hour  ready to start" with a green pill and no second
@@ -1939,8 +1942,39 @@ final class PopupViewController: NSViewController {
     /// by weight, not colour (the plan itself is deliberately **not** bold; the `･` separator is, to
     /// match "Claude"). Returns a single attributed label so the parts share one baseline.
     private static func brandTitleLabel(plan: String?) -> NSTextField {
-        let bold: [NSAttributedString.Key: Any] = [.font: menuItemFont, .foregroundColor: claudeBrandColor]
-        let title = NSMutableAttributedString(string: claudeCodeSectionTitle, attributes: bold)
+        brandTitleLabel(title: claudeCodeSectionTitle, color: claudeBrandColor, plan: plan, dot: nil)
+    }
+
+    /// The general form (#454): any provider's brand mark, optionally preceded by a status dot.
+    ///
+    /// The dot is a **text attachment inside the same attributed string**, not a sibling view. That
+    /// keeps the header on one baseline — the stack is `.firstBaseline`, and a `GlowDotView` beside
+    /// the label would have to switch it to `.centerY` and re-tune the spacing that #130 already
+    /// settled. `dotAttachment` is the same helper the service rows use, so the header's dot and the
+    /// rows' dots are optically centred by identical arithmetic.
+    ///
+    /// Unlike every other dot in the app, this one is drawn **while green** (#454). The menu-bar dot
+    /// vanishes on a calm state because silence is a complete answer there. A section header is not
+    /// silent — it is a label sitting above rows that are themselves hidden while healthy, so for a
+    /// status-only provider like GitHub the dot is the section's entire content when all is well.
+    /// Without it the calm state reads as `GitHub` followed by nothing, which is indistinguishable
+    /// from a section that failed to load.
+    private static func brandTitleLabel(
+        title titleText: String,
+        color: NSColor,
+        plan: String?,
+        dot: ServiceStatus?
+    ) -> NSTextField {
+        let bold: [NSAttributedString.Key: Any] = [.font: menuItemFont, .foregroundColor: color]
+        let title = NSMutableAttributedString()
+        if let dot, let attachment = dotAttachment(color: dotColor(dot), accessibility: word(dot)) {
+            title.append(NSAttributedString(attachment: attachment))
+            // A hair-space rather than the stack's 4 pt: the attachment carries its own side bearing,
+            // and a full space beside it reads as a double gap (the same finding that set the
+            // header stack's spacing to 4 in the first place).
+            title.append(NSAttributedString(string: "\u{2009}", attributes: bold))
+        }
+        title.append(NSAttributedString(string: titleText, attributes: bold))
         if let plan, !plan.isEmpty {
             // Bold `･` separator (halfwidth katakana middle dot, U+FF65), then the regular-weight plan.
             title.append(NSAttributedString(string: " ･ ", attributes: bold))
@@ -1948,11 +1982,23 @@ final class PopupViewController: NSViewController {
                 string: plan,
                 attributes: [
                     .font: NSFont.systemFont(ofSize: Metrics.textSize),
-                    .foregroundColor: claudeBrandColor,
+                    .foregroundColor: color,
                 ]))
         }
         let label = NSTextField(labelWithAttributedString: title)
         return label
+    }
+
+    /// The popup's mark for one provider: its wordmark colour (#454).
+    ///
+    /// GitHub's is **not** the badge's pure black. On the dropdown's dark material black ink is
+    /// unreadable, so the header uses `githubBrandInk`, which resolves per appearance — the identity
+    /// survives on both, which pure black would not.
+    static func brandColor(for provider: ProviderID) -> NSColor {
+        switch provider {
+        case .claude: return claudeBrandColor
+        case .github: return ColorRole.githubBrandInk.defaultColor
+        }
     }
 
     /// Dimmed text colour for supporting numbers/rows ("88% used", "resets in …", "Updated …",
@@ -2133,7 +2179,7 @@ final class PopupViewController: NSViewController {
         // happened"), or — under ⌥ — when there are incidents to switch the dimension to. With ⌥ held
         // and no incidents, there is nothing for that dimension to show, so the section stays away
         // rather than falling back to the service rows the user was already looking at.
-        let hasRecentRecovery = status?.checks.flatMap(\.components)
+        let hasRecentRecovery = status?.checks(of: .claude).flatMap(\.components)
             .contains { Self.isRecentlyRecovered($0, now: now()) } ?? false
         // #341: in the services-only mode the service rows are the popup's **entire** content — the
         // limit sections are gone with the usage poll. The ordinary condition would hide them while
@@ -2145,7 +2191,7 @@ final class PopupViewController: NSViewController {
         // component just recovered, so the incident dimension must answer for the same moment rather
         // than go blank (the ⌥ half would otherwise look broken beside a populated non-⌥ half).
         let showStatusRows = status != nil
-            && (servicesAreTheContent || status?.worstProblem != nil || hasRecentRecovery
+            && (servicesAreTheContent || status?.worstProblem(of: .claude) != nil || hasRecentRecovery
                 || (optionHeld && !layout.incidents.isEmpty))
         // The age threshold is 2× the usage poll's floor, which the status cadence never reaches — so
         // in the services-only mode the age would essentially never appear without ⌥, and the one
@@ -2166,7 +2212,15 @@ final class PopupViewController: NSViewController {
         // between polls, and answers a question nobody asks twice — so at rest the header is the bare
         // "Claude" mark and ⌥ restores "Claude ･ Max (5x)". `brandTitleLabel` already renders the mark
         // alone for a nil plan, so this is a gate on the argument, not a second code path.
-        let brand = Self.brandTitleLabel(plan: optionHeld ? layout.planLabel : nil)
+        // The dot appears once a status poll has landed and Claude is actually monitored; before
+        // that there is nothing honest to colour, and `unknown` grey would claim we looked and
+        // could not tell (#454).
+        let claudeDot = layout.serviceStatus?.aggregate(of: .claude)
+        let brand = Self.brandTitleLabel(
+            title: Self.claudeCodeSectionTitle,
+            color: Self.claudeBrandColor,
+            plan: optionHeld ? layout.planLabel : nil,
+            dot: claudeDot)
         // The age rides the ⌥ layer with the plan label (#396): at rest the header is the bare "Claude"
         // mark, and ⌥ restores the whole tail — `Claude ･ Max (20x) ･ updated just now`.
         //
@@ -2259,7 +2313,9 @@ final class PopupViewController: NSViewController {
                 // Default: only the non-operational components — plus any that went green within the
                 // recovery window, so a fix that just landed is visible rather than leaving a blank
                 // popup that looks identical to "nothing ever happened".
-                let components = status.checks.flatMap(\.components)
+                // Claude's own components only (#454): GitHub has its own section below, and
+                // flattening every check here would file its rows under the "Claude" header.
+                let components = status.checks(of: .claude).flatMap(\.components)
                     .filter { $0.status.isProblem || Self.isRecentlyRecovered($0, now: now) }
                 // #341: in the services-only mode this section is the popup's entire content, so the
                 // question it answers is "is anything wrong", and the answer while nothing is —
@@ -2277,7 +2333,7 @@ final class PopupViewController: NSViewController {
                 // answering the same question either way. Expanding the summary into a per-component
                 // list under ⌥ would make it a level-of-detail control, which is exactly what
                 // ADR-0071 §2 says it is not.
-                if servicesAreTheContent, status.worstProblem == nil {
+                if servicesAreTheContent, status.worstProblem(of: .claude) == nil {
                     lastRow = addServiceStatusRow(
                         label: "All services",
                         status: .operational,
@@ -2292,6 +2348,45 @@ final class PopupViewController: NSViewController {
                 }
             }
             if let subscribeRow = addSubscribeRowIfNeeded(layout) { lastRow = subscribeRow }
+            if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
+        }
+
+        // MARK: GitHub (#454) — its own section, below Claude's
+        //
+        // A second provider is a second section, not more rows under the first: the components carry
+        // no provider in their names (`Actions`, `Issues` say nothing about whose they are), so a
+        // flat list would leave the reader to guess. The header carries the answer instead, which is
+        // also what lets the rows keep their bare names — the same argument `displayName` makes for
+        // dropping the "Claude" prefix.
+        //
+        // Drawn whenever GitHub is monitored, even while every component is green — unlike Claude's
+        // section, which stays hidden on a calm state. Claude has bars above it, so its silence still
+        // leaves a populated popup; GitHub has nothing else, so hiding its calm state would make an
+        // enabled provider indistinguishable from a disabled one.
+        if let status, status.monitors(.github) {
+            var lastRow: NSView?
+            let now = self.now()
+            let githubDot = status.aggregate(of: .github)
+            let header = Self.brandTitleLabel(
+                title: Self.githubSectionTitle,
+                color: Self.brandColor(for: .github),
+                plan: nil,
+                dot: githubDot)
+            lastRow = addSplitRow(leadingView: header, rightView: NSView())
+            if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
+
+            // The same visibility rule Claude's rows follow: only what is broken, plus what just
+            // recovered. ⌥ is not consulted — it switches the whole popup to the incident dimension
+            // (ADR-0071 §2), and the incident list above already covers both providers.
+            let components = status.checks(of: .github).flatMap(\.components)
+                .filter { $0.status.isProblem || Self.isRecentlyRecovered($0, now: now) }
+            for component in components {
+                lastRow = addServiceStatusRow(
+                    label: Self.displayName(component),
+                    status: component.status,
+                    age: component.stateAge(at: now),
+                    pageURL: StatusHealth.githubPageURL)
+            }
             if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
         }
 
@@ -3212,7 +3307,8 @@ final class PopupViewController: NSViewController {
     /// service one (#341).
     @discardableResult
     private func addServiceStatusRow(
-        label: String, status: ServiceStatus, age: TimeInterval? = nil, showsStatusWord: Bool = true
+        label: String, status: ServiceStatus, age: TimeInterval? = nil, showsStatusWord: Bool = true,
+        pageURL: URL = StatusHealth.pageURL
     ) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
 
@@ -3247,7 +3343,7 @@ final class PopupViewController: NSViewController {
         if showsStatusWord {
             trailing = Self.makeLinkWord(
                 Self.word(status),
-                url: status == .operational ? nil : StatusHealth.pageURL,
+                url: status == .operational ? nil : pageURL,
                 prefix: age.map { Self.durationMinutes(Int($0)) + " · " })
         } else {
             // Age alone, in the same dimmed tone the word's prefix uses, so the column still lines up
@@ -3642,6 +3738,15 @@ final class PopupViewController: NSViewController {
         case StatusHealth.claudeCodeComponentName:   return "Code"
         case StatusHealth.claudeWebComponentName:    return "Web/Desktop"
         case StatusHealth.claudeCoworkComponentName: return "Cowork"
+        // GitHub's five, shortened under their own header the same way Claude's are under theirs.
+        // `API Requests` becomes "API", which Claude's `Claude API` also does — the two never collide
+        // because each sits under a header naming its provider, which is the whole reason the rows
+        // may stay bare.
+        case StatusHealth.githubGitOperationsComponentName: return "Git"
+        case StatusHealth.githubAPIRequestsComponentName:   return "API"
+        case StatusHealth.githubIssuesComponentName:        return "Issues"
+        case StatusHealth.githubPullRequestsComponentName:  return "Pull requests"
+        case StatusHealth.githubActionsComponentName:       return "Actions"
         default:                                     return component.name
         }
     }
