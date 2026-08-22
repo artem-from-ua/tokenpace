@@ -111,6 +111,7 @@ struct SettingsRootView: View {
         if let child = model.childPage {
             switch child {
             case .providersClaude:      ProvidersClaudePane(model: model)
+            case .providersGitHub:      ProvidersGitHubPane(model: model)
             case .appearanceMenuBar:    MenuBarPane(model: model)
             case .appearanceDropdown:   DropdownPane(model: model)
             case .appearanceLegend:     LegendPane()

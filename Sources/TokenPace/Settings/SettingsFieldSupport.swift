@@ -356,6 +356,24 @@ struct SettingsRowBadge: Equatable {
     static var claude: SettingsRowBadge {
         brand(ColorRole.claudeBrand.defaultColor, symbol: "cloud.fill")
     }
+
+    /// GitHub's row (#454): black, carrying a branch — the thing GitHub *is* (branching version
+    /// control), never its logo. The legal half of ADR-0084 is still in force and ADR-0094 §4 states
+    /// it as the rule: colour belongs to the brand, shape belongs to the system.
+    ///
+    /// `arrow.triangle.branch` over the code-punctuation family (`chevron.left.forwardslash…`,
+    /// `curlybraces`): those name *source code*, which is what a developer writes anywhere, while a
+    /// branch names what this provider hosts. Verified to resolve on macOS 15.
+    ///
+    /// The gradient derives from pure black, so ADR-0094 §7's 0.375 mix puts the far end at `#606060`
+    /// — a visibly grey top-left, the same shape the measured system capsules have. That is the ADR's
+    /// arithmetic, not a fallback: a flat chip was considered and rejected there for reading as a
+    /// different material beside the sidebar's gradients. `needsBorder` stays false — black is darker
+    /// than the form row behind it, unlike the one white chip.
+    @MainActor
+    static var github: SettingsRowBadge {
+        brand(ColorRole.githubBrand.defaultColor, symbol: "arrow.triangle.branch")
+    }
 }
 
 private extension NSColor {

@@ -15,6 +15,9 @@ import TokenPaceKit
 enum SettingsChildPage: Int, CaseIterable, Identifiable {
     /// Providers › Claude — what TokenPace collects and watches for Claude.
     case providersClaude = 50
+    /// Providers › GitHub — the second provider (#454), watched for service status only. It has no
+    /// usage half: GitHub publishes no subscription limit for the bars to draw.
+    case providersGitHub = 54
     /// Appearance › Menu bar — everything that configures the menu-bar widget.
     case appearanceMenuBar = 51
     /// Appearance › Dropdown — everything that configures the popup.
@@ -34,7 +37,7 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     /// row the sidebar keeps highlighted while the page shows.
     var section: SettingsSection {
         switch self {
-        case .providersClaude: return .providers
+        case .providersClaude, .providersGitHub: return .providers
         case .appearanceMenuBar, .appearanceDropdown, .appearanceLegend: return .appearance
         }
     }
@@ -53,6 +56,7 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .providersClaude: return "Claude"
+        case .providersGitHub: return "GitHub"
         case .appearanceMenuBar: return "Menu bar"
         case .appearanceDropdown: return "Dropdown"
         case .appearanceLegend: return "Legend"
@@ -68,7 +72,7 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     /// provider row identifies a company and these two identify a surface.
     var symbol: String? {
         switch self {
-        case .providersClaude: return nil
+        case .providersClaude, .providersGitHub: return nil
         case .appearanceMenuBar: return "distribute.vertical"
         case .appearanceDropdown: return "chart.bar.horizontal.page"
         // A map's legend is the direct reading of the page's name, and the page is a key to marks
@@ -103,7 +107,7 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     /// thing they say. The white chip needs a hairline to exist on a light form row.
     var tint: CapsuleTint? {
         switch self {
-        case .providersClaude: return nil
+        case .providersClaude, .providersGitHub: return nil
         case .appearanceMenuBar: return CapsuleTint(flat: 0x000000)
         case .appearanceDropdown: return CapsuleTint(flat: 0xFFFFFF, glyph: .black, needsBorder: true)
         // **About's blue**, the sidebar's reference colour — not a third flat tone.
@@ -157,6 +161,7 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
         case .appearanceMenuBar:  return 1
         case .appearanceDropdown: return 2
         case .providersClaude:    return 0
+        case .providersGitHub:    return 1
         }
     }
 }

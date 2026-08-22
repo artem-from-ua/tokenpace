@@ -51,6 +51,22 @@ enum ColorRole {
     // MARK: Brand (Claude accent stays sRGB)
 
     case claudeBrand
+    /// GitHub's mark (#454). Black is GitHub's brand colour, and it is a **fixed sRGB literal** for
+    /// the same reason `claudeBrand` is: a semantic colour would invert with the appearance and
+    /// destroy the only thing a brand mark says.
+    ///
+    /// Pure `#000000` on the Settings badge, where the chip is the surface and ADR-0094's derived
+    /// gradient lifts the far end to `#606060`. The popup's header mark is a different problem —
+    /// black ink on the dropdown's dark material is unreadable — so that surface uses
+    /// ``githubBrandInk``, which keeps the identity without disappearing.
+    case githubBrand
+    /// The popup's GitHub wordmark: a light neutral that reads as the same mark on both materials.
+    ///
+    /// Not `.labelColor`: that is the popup's ordinary text colour, and the header would stop being a
+    /// brand mark and start looking like a heading. Not black either — see ``githubBrand``. The value
+    /// is a measurement question, so it is checked with Digital Color Meter on both appearances
+    /// rather than eyeballed.
+    case githubBrandInk
 
     // MARK: - Shipped defaults
 
@@ -87,6 +103,16 @@ enum ColorRole {
         case .pillText:      return .white
         case .calmWhite:     return .labelColor            // calm neutral — re-alpha'd by bright()
         case .claudeBrand:   return NSColor(srgbRed: 0xd9/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
+        case .githubBrand:   return NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+        // `#1F2328` — GitHub's own foreground ink, lightened for dark material by the dynamic
+        // provider below. Fixed on light, near-white on dark: the mark stays the mark on both.
+        case .githubBrandInk:
+            return NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                return isDark
+                    ? NSColor(srgbRed: 0xE6/255, green: 0xED/255, blue: 0xF3/255, alpha: 1)
+                    : NSColor(srgbRed: 0x1F/255, green: 0x23/255, blue: 0x28/255, alpha: 1)
+            }
         }
     }
 }
