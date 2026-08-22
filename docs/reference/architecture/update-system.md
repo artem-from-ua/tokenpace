@@ -29,9 +29,9 @@ Checking : GitHubReleaseClient.checkForUpdate
 
 ## The single dropdown update item (ADR-0036)
 
-`UpdateMenuState` is a pure state machine for the **single** menu item (#130) that replaced the
-`UpdateNotifier` banner (no `UserNotifications` at all). `evaluate(...)` → a semantic `Item` enum
-per a priority table; any version newer than the installed one supersedes "what's new".
+`UpdateMenuState` is a pure state machine for the **single** menu item (no `UserNotifications` at
+all). `evaluate(...)` → a semantic `Item` enum per a priority table; any version newer than the
+installed one supersedes "what's new".
 
 ```plantuml
 @startuml
@@ -130,7 +130,7 @@ stop
 | **UpdateAssetSelector / UpdateInstallPlan** | Pure auto-install seams (#122, `TokenPaceKit`, ADR-0033). `selectZIP(from:)` picks the version-named `.zip` (`TokenPace-<X.Y.Z>.zip`), rejects non-HTTPS. `decide(...)` — ordered gates (opt-in → newer → real `.app` → asset → free space ≥5 GB → AC power → unmetered) → `.install` / `.skip…` / `.defer…`. Facts are injected from the shell |
 | **UpdateDeferralReason** | The explanatory counterpart to `decide` (#221, `TokenPaceKit`). `UpdateInstallPlan.deferralReasons(...)` returns **all** active environment blockers (`onBattery` / `meteredNetwork` / `insufficientSpace`) in the stable `allCases` order, whereas `decide` stops at the first one — so the UI doesn't chase the user to fix one condition only to reveal the next. Settled-no cases (auto off / not newer / dev / no asset) → `[]`: there's no deferred install to explain there. `pendingExplanation(for:)` composes them into one sentence ("a", "a and b", "a, b and c") for the About-page ⚠ line |
 | **UpdateCheckCadence** | Pure seam for the update-check frequency (#37, ADR-0025) — a fixed 12-hour interval (not tied to the usage cadence). The shell also checks **unconditionally at launch**; the `lastUpdateCheck` marker advances on **every** attempt (even a 404) |
-| **UpdateMenuState** | Pure state machine for the **single** update item (#130, `TokenPaceKit`, ADR-0036). `evaluate(...)` → an `Item` enum (`hidden`/`updateFailed`/`updateAvailable`/`updatePending`/`whatsNew`) per a priority table. Color/text live in the view. **Replaced `UpdateNotifier`** (the banner was removed). ADR-0036 |
+| **UpdateMenuState** | Pure state machine for the **single** update item (#130, `TokenPaceKit`, ADR-0036). `evaluate(...)` → an `Item` enum (`hidden`/`updateFailed`/`updateAvailable`/`updatePending`/`whatsNew`) per a priority table. Color/text live in the view |
 | **GHReleaseFetcher / ShellEnvironment** | The `gh`-subprocess conformer to `UpdateFetcher` (#37, ADR-0025) — `gh api repos/…/releases/latest`, 20 s timeout, stdout captured, environment inherited (`gh` needs the keyring). Selected when `TOKENPACE_GH_AUTH` is set, which is resolved by its own `AppDelegate.resolveGHAuth`: `ProcessInfo` → login-shell fallback via `ShellEnvironment` (`zsh -l -i`; `SMAppService` starts without a shell). `StubUpdateFetcher` — `TOKENPACE_FAKE_LATEST` |
 | **UpdateInstaller** | A thin I/O shell for the auto-installer (#123, ADR-0033) behind the `AppUpdateInstalling` seam. Off-main pipeline: **download** (two paths: `gh release download` under `TOKENPACE_GH_AUTH` / anonymous `URLSession`) → **unzip** (`ditto -x -k`) → **verify** (`codesign --verify` + Team ID check via `codesign -dv` + Gatekeeper `spctl`) → **replace** (atomic `replaceItemAt` with backup) → **relaunch**. Fail-safe (never throws). `TOKENPACE_UPDATE_DRYRUN` stops after verify; `TOKENPACE_UPDATE_TARGET` redirects the replace to a test copy |
 | **PowerSource / DiskSpace / NetworkMonitor.isMetered** | Shell facts about the environment for the defer gates (#123/#124, ADR-0033). `isOnACPower` — an IOKit read (fail-open → `true`). `availableBytes` — `volumeAvailableCapacityForImportantUsage`. `isMetered` — `path.isExpensive || path.isConstrained`. These gate **only installing**, never the check path |

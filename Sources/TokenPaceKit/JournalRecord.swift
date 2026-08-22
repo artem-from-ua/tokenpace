@@ -2,8 +2,8 @@ import Foundation
 
 // MARK: - JournalRecord
 
-/// One line of the append-only usage journal (#242) — a tagged, forward-compatible value that the
-/// downstream Insights features (#239/#240/#241) read back.
+/// One line of the append-only usage journal — a tagged, forward-compatible value that the
+/// downstream Insights features read back.
 ///
 /// The journal is a heterogeneous JSONL: every line carries a `kind` discriminator and one of four
 /// shapes. Decoding is **tolerant** in the same spirit as ``MonitoredServices`` / ``StatusSummary``:
@@ -87,7 +87,7 @@ extension JournalRecord: Codable {
 /// objective pacing colour bucket (``PacingBucket``). Used for `h5`/`d7`/`opus`/`sonnet`.
 public struct WindowSample: Sendable, Equatable, Codable {
     /// The utilization the app **acted on** — for the seven-day window that is the value
-    /// reconstructed from the five-hour counter (#386); everywhere else it equals ``raw``.
+    /// reconstructed from the five-hour counter; everywhere else it equals ``raw``.
     ///
     /// This is deliberately the *effective* number rather than the API's: every downstream reader
     /// (charts, #245) wants the series the bars actually drew, and having to know which field to
@@ -114,10 +114,9 @@ public struct WindowSample: Sendable, Equatable, Codable {
     /// — a percentage degraded by a polling hole beside a date invented during an API blackout, two
     /// unrelated failures on one line. A single field would have had to pick one story to tell.
     public let resetSrc: String?
-    /// The 5h↔7d exchange rate in force when this line was written (#386), or `nil` where it does not
-    /// apply. Recorded on **every** sample, not just when it moves: the log gets only the changes
-    /// (that would be ~341 lines a day), the journal gets the series, because a series is what can be
-    /// analysed afterwards.
+    /// The 5h↔7d exchange rate in force when this line was written, or `nil` where it does not
+    /// apply. Recorded on **every** sample, not just when it moves: the log gets only the changes,
+    /// the journal gets the series, because a series is what can be analysed afterwards.
     public let n: Double?
     /// Raw `resets_at` ISO-8601 string (empty for an idle/absent reset), forwarded verbatim.
     public let reset: String
@@ -130,9 +129,8 @@ public struct WindowSample: Sendable, Equatable, Codable {
     /// The verdict this window carried when the poll was written, kept **only where it differs** from
     /// the recomputed ``sev``.
     ///
-    /// `nil` therefore means "the two agree", not "unknown" — which is the common case (on the
-    /// maintainer's August journal, 2 398 of ~23 000 windows disagreed). Writing it out every time
-    /// would add six duplicated strings per line to say nothing; omitting it makes every remaining
+    /// `nil` therefore means "the two agree", not "unknown" — the common case. Writing it out every
+    /// time would add a duplicated string per line to say nothing; omitting it makes every remaining
     /// occurrence a real change of verdict, greppable on sight.
     ///
     /// Live polls never set it: there, computing and recording are the same call, so the two cannot
@@ -226,11 +224,9 @@ public struct WindowSample: Sendable, Equatable, Codable {
     /// The pacing **gap** in percentage points: `timePct·100 − util`. Positive = headroom (behind
     /// pace); negative = ahead of pace.
     ///
-    /// **Derived, no longer stored** (#386). It used to be a field, written with fifteen decimals
-    /// while all of its uncertainty sat in a `util` quantised to whole percent — 0.2 MB of a 4.6 MB
-    /// file spent on digits that meant nothing. Nothing read it: it was written and asserted on, and
-    /// never consumed. Now it is computed on demand, which also keeps it honest when `util` is the
-    /// reconstructed value.
+    /// **Derived, not stored**: writing it would duplicate precision the `util`/`timePct` fields
+    /// already carry, for a value nothing else reads. Computed on demand, which also keeps it honest
+    /// when `util` is the reconstructed value.
     public var gap: Double { timePct * 100 - util }
 }
 
@@ -256,11 +252,9 @@ public struct ScopedSample: Sendable, Equatable, Codable {
     /// blue talks about (reason 2 on ``BarLayout/blueAllowed``).
     public let sev: PacingBucket
     /// The verdict written at poll time, kept **only where it differs** from ``sev`` — the scoped
-    /// counterpart of ``WindowSample/sevRaw``, with the same "absent means agreed" reading.
-    ///
-    /// This is where the #426 migration leaves most of its marks: scoped rows carried the blue that
-    /// the popup was suppressing in the view, so 2 211 of them on the maintainer's journal recompute
-    /// to green and keep `"sevRaw": "blue"` as the record of what was written then.
+    /// counterpart of ``WindowSample/sevRaw``, with the same "absent means agreed" reading. Older
+    /// archived lines may carry `"sevRaw": "blue"` where a scoped row's blue has since recomputed to
+    /// green — a record of what was written then, not a bug in the reader.
     public let sevRaw: PacingBucket?
 
     public init(name: String, pct: Double, reset: String, timePct: Double, sev: PacingBucket,
@@ -387,8 +381,8 @@ public struct SpendSample: Sendable, Equatable, Codable {
     /// `nil` when there is **no** monthly cap (`spend.limit == nil`) — a gap needs a limit to pace
     /// against.
     ///
-    /// Derived rather than stored, for the same reason as ``WindowSample/gap``: it was written with
-    /// fifteen decimals, read by nothing, and is one subtraction away from the two fields beside it.
+    /// Derived rather than stored, for the same reason as ``WindowSample/gap``: it is one
+    /// subtraction away from the two fields beside it, and nothing reads a stored copy.
     public var creditGap: Double? {
         spentFrac.map { monthPct * 100 - $0 * 100 }
     }

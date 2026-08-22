@@ -8,27 +8,18 @@ import TokenPaceKit
 /// `expiresAt` moved forward. TokenPace itself never writes the Keychain and never touches the
 /// `refreshToken` — Claude Code owns the rotation.
 ///
-/// The command (verified in the issue #8 spike): `claude --model haiku -p '/usage'`.
-/// `/usage` is handled by a local command handler — nothing is sent to a model and no
-/// subscription usage is consumed (confirmed both by an isolated before/after utilization
-/// measurement and by the session transcript containing zero assistant/API entries);
-/// `--model haiku` is a guard in case a future CLI ever forwards the prompt after all.
-/// `--safe-mode` disables the user's customizations — hooks, plugins, MCP servers, CLAUDE.md — but
-/// keeps auth, Keychain, built-in tools and permissions, so the refresh still works. It is required
-/// because the spawned `claude` runs under this GUI app's TCC responsibility: without it, a user's
-/// SessionStart hook that touches a File Provider domain (iCloud, Dropbox, …) triggers a system
-/// permission prompt attributed to *TokenPace* (issue #183). `--bare` must NOT be used: it disables
-/// OAuth/Keychain entirely, so no refresh would happen.
+/// The command: `claude --model haiku -p '/usage'`. `/usage` is a local command handler — nothing is
+/// sent to a model and no subscription usage is consumed; `--model haiku` guards against a future
+/// CLI forwarding the prompt after all. **`--safe-mode` is required**: it disables the user's
+/// customizations (hooks, plugins, MCP servers, CLAUDE.md) while keeping auth/Keychain, because the
+/// spawned `claude` runs under this GUI app's TCC responsibility — without it, a user's SessionStart
+/// hook touching a File Provider domain triggers a permission prompt attributed to *TokenPace*
+/// (#183). **`--bare` must NOT be used**: it disables OAuth/Keychain entirely, so no refresh happens.
 ///
-/// This is the codebase's only `claude` spawn — a shell-side platform seam like
-/// `FileSystemActivityIndex`, injected into `PollingEngine` behind the kit protocol. (The
-/// kit's `TokenProvider` also spawns a subprocess — `/usr/bin/security` for the Keychain read,
-/// ADR-0019.)
+/// This is the codebase's only `claude` spawn, injected into `PollingEngine` behind the kit protocol.
 struct ClaudeCLIRefresher: DelegatedRefresher {
 
-    /// Locations probed for the `claude` binary, in order. The app runs under launchd, whose
-    /// PATH is minimal, so an explicit list beats a `$PATH` lookup (the analogs probe the same
-    /// spots; `~/.claude/local` is the CLI's self-managed install).
+    /// The app runs under launchd, whose PATH is minimal, so an explicit list beats a `$PATH` lookup.
     static let binaryCandidates = [
         "~/.claude/local/claude",
         "/opt/homebrew/bin/claude",
@@ -36,14 +27,12 @@ struct ClaudeCLIRefresher: DelegatedRefresher {
         "~/.local/bin/claude",
     ]
 
-    /// Arguments for the refresh run — see the type doc for why exactly these.
-    /// `--safe-mode` is first: it disables the user's global customizations (hooks, plugins, MCP
-    /// servers, CLAUDE.md) while keeping auth/Keychain, so the spawn can't run arbitrary user code
-    /// under this app's TCC responsibility (issue #183).
+    /// See the type doc for why exactly these — `--safe-mode` first so the spawn can't run arbitrary
+    /// user code under this app's TCC responsibility (#183).
     static let arguments = ["--safe-mode", "--model", "haiku", "-p", "/usage"]
 
     /// Hard cap on the CLI run, after which it is terminated (SIGTERM, then SIGKILL after
-    /// ``killGrace``). The spike measured ~1.5 s normally; 30 s leaves room for a cold start.
+    /// ``killGrace``). ~1.5 s normally; 30 s leaves room for a cold start.
     static let timeout: TimeInterval = 30
 
     /// How long a terminated CLI gets to exit before the SIGKILL escalation.
@@ -87,7 +76,6 @@ struct ClaudeCLIRefresher: DelegatedRefresher {
 
     // MARK: binary discovery
 
-    /// The first existing executable among ``binaryCandidates``, tilde-expanded.
     private static func locateBinary() -> String? {
         binaryCandidates
             .map { NSString(string: $0).expandingTildeInPath }
@@ -109,15 +97,11 @@ struct ClaudeCLIRefresher: DelegatedRefresher {
         let process = Process()
     }
 
-    /// Run the CLI to completion or ``timeout``, whichever comes first.
-    ///
     /// stdin/stdout/stderr all go to `/dev/null`: stdin so the CLI skips its "waiting for piped
-    /// input" grace period, the outputs because only the Keychain side-effect matters (and the
-    /// report could mention account details). The working directory is a fresh empty scratch dir so
-    /// the CLI picks up no *project-local* context (a stray CLAUDE.md) from wherever the app started;
-    /// note cwd does NOT suppress the user's *global* hooks/plugins from `~/.claude` — those are
-    /// disabled by `--safe-mode` (see `arguments`, issue #183). The token itself never appears in
-    /// arguments, environment, or logs.
+    /// input" grace period, the outputs because only the Keychain side-effect matters. The working
+    /// directory is a fresh empty scratch dir so the CLI picks up no *project-local* context (a
+    /// stray CLAUDE.md) — cwd does NOT suppress *global* hooks/plugins, those are disabled by
+    /// `--safe-mode` (#183). The token itself never appears in arguments, environment, or logs.
     private static func run(binary: String) async -> RunResult {
         let box = ProcessBox()
         let scratch = FileManager.default.temporaryDirectory

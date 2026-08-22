@@ -44,20 +44,14 @@ struct LogArchiver {
         /// free on the destination volume, so the run refused **before** writing anything (#306).
         ///
         /// Modelled as an error rather than a `Summary` field on purpose: the shell only advances the
-        /// `lastArchiveSync` marker on `.success`, so a blocked run stays due and retries by itself.
-        /// A field on `Summary` would land in the success branch and advance the marker — exactly the
-        /// "records a failure as a success" bug this gate exists to prevent.
-        ///
-        /// Unlike the battery gate this is a **block**, not a silent defer: a full disk does not fix
-        /// itself, so the Settings pane names the reason. Carries both figures for the log line.
+        /// `lastArchiveSync` marker on `.success`, so a blocked run stays due and retries by itself —
+        /// a `Summary` field would land in the success branch and record the failure as a success.
         case insufficientSpace(needBytes: Int64, freeBytes: Int64)
     }
 
     private let claudeHome: URL
     private let fileManager: FileManager
 
-    /// - Parameter claudeHome: The `~/.claude` directory. Injectable so a test can point at a
-    ///   temporary tree; production passes the real one.
     init(claudeHome: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude"),
          fileManager: FileManager = .default) {
         self.claudeHome = claudeHome
@@ -76,14 +70,12 @@ struct LogArchiver {
     }
 
     /// Mirror the allow-listed roots into `destination`, copying only new/changed files and never
-    /// deleting. Returns how much was copied. Throws ``ArchiveError/destinationUnavailable`` if the
-    /// destination cannot be prepared, or ``ArchiveError/insufficientSpace(needBytes:freeBytes:)`` if
-    /// the copy would run the destination volume below the free-space floor.
+    /// deleting.
     ///
-    /// Runs in three phases (#306). The scan is separated from the copying so the space gate judges
-    /// the **whole run** rather than whichever root it happens to reach first: gating per root could
-    /// copy two roots and then refuse the third, leaving the archive half-updated — the worst of both
-    /// outcomes. Nothing is written before the gate has passed.
+    /// Runs in three phases (#306): scan is separated from copying so the space gate judges the
+    /// **whole run** rather than whichever root it happens to reach first — gating per root could
+    /// copy two roots and then refuse the third, leaving the archive half-updated. Nothing is written
+    /// before the gate has passed.
     func sync(to destination: URL) throws -> Summary {
         try ensureDirectory(destination)
 
@@ -110,11 +102,10 @@ struct LogArchiver {
                             sourceEntries: sourceEntries, destEntries: destEntries, toCopy: toCopy)
         }
 
-        // Phase 2 — the free-space gate, once, against the combined plan. The volume read stays here
-        // rather than being injected from the main actor: `volumeAvailableCapacityForImportantUsage`
-        // can block while an external disk spins up, and this already runs off the main thread.
-        // An unreadable volume reads as `.max` (fail-open, mirroring `?? .max` on the update path) so
-        // a diagnostic glitch can never wedge backups permanently.
+        // Phase 2 — the free-space gate, once, against the combined plan. Read here rather than
+        // injected from the main actor: `volumeAvailableCapacityForImportantUsage` can block while an
+        // external disk spins up. An unreadable volume reads as `.max` (fail-open), so a diagnostic
+        // glitch can never wedge backups permanently.
         let plannedBytes = plans.reduce(Int64(0)) { $0 + $1.toCopy.reduce(Int64(0)) { $0 + $1.size } }
         let freeBytes = DiskSpace.availableBytes(forVolumeContaining: destination)
             .map(Int64.init) ?? .max
@@ -144,11 +135,9 @@ struct LogArchiver {
                 }
             }
 
-            // Files now in the archive for this root = the union of what was already mirrored (incl.
-            // pruned-in-source files) and every source file (all present after the copies above). Size
-            // per file prefers the source (freshly copied, current) and falls back to the archived
-            // copy for pruned-in-source files. With empty `sourceEntries` this folds to the archived
-            // count/size, matching the pruned-root case exactly.
+            // Files now in the archive = union of what was already mirrored (incl. pruned-in-source
+            // files) and every source file. Size per file prefers the source (fresh) and falls back
+            // to the archived copy for pruned-in-source files.
             let sourceByPath = Dictionary(plan.sourceEntries.map { ($0.relativePath, $0.size) }, uniquingKeysWith: { a, _ in a })
             var sizeByPath = Dictionary(plan.destEntries.map { ($0.relativePath, $0.size) }, uniquingKeysWith: { a, _ in a })
             sizeByPath.merge(sourceByPath) { _, source in source }
@@ -161,11 +150,8 @@ struct LogArchiver {
             totalInArchive: totalInArchive, totalBytesInArchive: totalBytesInArchive)
     }
 
-    /// Count the files and total bytes already sitting in `destination` — a read-only scan of the
-    /// allow-listed roots, no copying. Lets the Settings status line show the archive's size on every
-    /// window open, independent of whether a sync has run in this process session (the in-memory
-    /// `Summary` is lost across relaunches, but the archive on disk is not). Returns `(0, 0)` for an
-    /// empty or missing destination.
+    /// A read-only scan, no copying — lets the Settings status line show the archive's size on every
+    /// window open, independent of whether a sync has run this process session.
     func archiveStats(at destination: URL) -> (files: Int, bytes: Int64) {
         var files = 0
         var bytes: Int64 = 0
@@ -179,7 +165,6 @@ struct LogArchiver {
 
     // MARK: - Tree scan
 
-    /// Walk `root` and build one ``ArchiveEntry`` per regular file, keyed by path relative to `root`.
     /// A missing root yields an empty snapshot (the destination mirror doesn't exist on first run).
     private func scan(_ root: URL) -> [ArchiveEntry] {
         guard let enumerator = fileManager.enumerator(
@@ -205,25 +190,15 @@ struct LogArchiver {
 
     // MARK: - Copy helpers
 
-    /// Copy `from` to `to`, creating parent directories and replacing any existing copy **atomically**
-    /// — a grown `.jsonl` overwrites the shorter mirrored version without the archive ever being left
-    /// without one (#306).
+    /// Copy `from` to `to`, replacing any existing copy **atomically** — a grown `.jsonl` overwrites
+    /// the shorter mirrored version without the archive ever being left without one (#306): a
+    /// remove-then-copy would leave the archive without a copy if the write failed partway on a full
+    /// disk, the worst failure mode for an accumulate-only store.
     ///
-    /// This used to remove the destination and then copy, which opened a window where the previously
-    /// archived copy was already gone and the new one had not landed. On a full disk the copy failed
-    /// exactly there, so the archive silently lost a file it was often the *last* holder of — the
-    /// worst possible failure mode for an accumulate-only store that exists to outlive Claude Code's
-    /// 30-day cleanup.
-    ///
-    /// `replaceItemAt` **moves** its `withItemAt:` argument and consumes it, so `from` — a real log
-    /// under `~/.claude` — must never be passed to it directly. Hence the staging copy, which is
-    /// written beside the destination so the swap is a same-volume rename rather than a cross-volume
-    /// copy that could fail partway (the archive typically lives on an external disk). The staging
-    /// name is dotted because ``scan(_:)`` uses `.skipsHiddenFiles`: a staging file orphaned by a
-    /// crash can never be counted as an archived file nor re-copied.
-    ///
-    /// It costs the destination twice one file's size for the duration of the swap; that is
-    /// comfortably inside the 5 GB headroom the space gate reserves against the whole run.
+    /// `replaceItemAt` **moves** its `withItemAt:` argument, so `from` — a real log under `~/.claude`
+    /// — must never be passed to it directly; hence the staging copy, written beside the destination
+    /// so the swap is a same-volume rename. The staging name is dotted because ``scan(_:)`` uses
+    /// `.skipsHiddenFiles`: a staging file orphaned by a crash can never be counted or re-copied.
     private func copyReplacing(from: URL, to: URL) throws {
         let parent = to.deletingLastPathComponent()
         try ensureDirectory(parent)
@@ -237,10 +212,9 @@ struct LogArchiver {
         let staged = parent.appendingPathComponent(".tokenpace-staging-\(UUID().uuidString)")
         try fileManager.copyItem(at: from, to: staged)
         do {
-            // `copyItem` preserves the source's modification date and `replaceItemAt` moves that very
-            // file into place, so the archived copy keeps the source mtime — which is what
-            // `ArchiveSyncPlan.filesToCopy` compares against. Losing it would silently re-copy every
-            // file on every run.
+            // `copyItem` preserves the source's modification date, so the archived copy keeps the
+            // source mtime — what `ArchiveSyncPlan.filesToCopy` compares against. Losing it would
+            // silently re-copy every file on every run.
             _ = try fileManager.replaceItemAt(to, withItemAt: staged)
         } catch {
             try? fileManager.removeItem(at: staged)   // swap failed → don't leak the staging file

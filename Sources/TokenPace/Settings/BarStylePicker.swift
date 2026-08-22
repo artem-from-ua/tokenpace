@@ -5,47 +5,29 @@ import TokenPaceKit
 
 /// Picks a ``BarStyle`` by **showing** each option rather than naming it, the way System Settings →
 /// Appearance picks light/dark: a row of preview pictures, a caption under each, and an accent ring
-/// around the chosen one.
-///
-/// The difference between the three styles is purely visual — where the strip starts, whether a time
-/// marker rides on it, which zero it measures from — so three words never conveyed it. Prose was
-/// tried and deliberately removed (#341): three paragraphs describing the styles cost more vertical
-/// space than they bought. A picture is what that gap wanted.
+/// around the chosen one. Prose describing the styles was tried and removed (#341) — the difference
+/// is purely visual.
 ///
 /// Each tile is drawn at runtime by the widget's own code (``BarStylePreviewRenderer``), so a preview
-/// cannot drift away from the bar it advertises. It shipped as three captured PNGs first (ADR-0093 §1
-/// named that an interim step and left this seam for exactly this change).
+/// cannot drift away from the bar it advertises.
 ///
-/// Deliberately **not** generic, unlike ``SegmentedControl``. That one is shared by five different
-/// enums and must stay value-agnostic; this one owns a rendered specimen per `BarStyle` case, and
-/// making it generic would push that out to the call site — splitting one responsibility across two
-/// files for no gain. Two consumers, one concrete type, one ``Surface`` switch.
+/// Deliberately **not** generic, unlike ``SegmentedControl``: that one is value-agnostic across five
+/// enums, while this one owns a rendered specimen per `BarStyle` case — making it generic would push
+/// that out to the call site for no gain.
 struct BarStylePicker: View {
 
     /// Which widget a tile is a specimen **of**. The two surfaces draw the same three styles but are
-    /// not the same picture, and the differences are not cosmetic (ADR-0097):
-    ///
-    /// - the menu-bar specimen bakes under a fixed `.vibrantDark` on a black plate, because the menu bar
-    ///   is dark under a light theme too;
-    /// - the dropdown specimen bakes under the *current* appearance on the popup card's own colour,
-    ///   because that surface flips with the system.
-    ///
-    /// Modelled as one enum rather than two near-identical views so the parts that genuinely are shared
-    /// — press feedback, the accent ring, hover, accessibility, the caption row — stay written once.
+    /// not the same picture (ADR-0097): the menu-bar specimen bakes under a fixed `.vibrantDark` on a
+    /// black plate (the menu bar is dark under a light theme too); the dropdown specimen bakes under
+    /// the *current* appearance, since that surface flips with the system.
     enum Surface {
         case menuBar
         case dropdown
 
-        /// The tile's plate — the surface the specimen's bars actually sit on.
-        ///
-        /// Black for the menu bar in both themes (and load-bearing for the press blend — see the
-        /// plate's own note in `tile(for:title:)`).
-        ///
-        /// For the dropdown it is the **card's** fill (`cardPlateFillOpaque`, i.e.
-        /// `controlBackgroundColor` — 255 in light, 30 in dark), *not* the menu plate the card floats on
-        /// (236/33). The bars sit on the card, so that is what a specimen of them sits on too. Opaque
-        /// rather than the card's own partial alpha, because a tile has no menu material beneath it to
-        /// blend with.
+        /// The tile's plate. Black for the menu bar in both themes (load-bearing for the press blend
+        /// — see `tile(for:title:)`). For the dropdown, the **card's** opaque fill
+        /// (`cardPlateFillOpaque`), not the menu plate the card floats on — the bars sit on the card,
+        /// so that's what a specimen of them sits on too.
         var plate: Color {
             switch self {
             case .menuBar:  Color.black
@@ -53,9 +35,9 @@ struct BarStylePicker: View {
             }
         }
 
-        /// Whether the plate is opaque enough for the `.lighten` press overlay to act as a floor on it
-        /// rather than a wash over everything. Black qualifies; the card colour is a mid grey in dark
-        /// and near-white in light, where lightening reads as a flash instead of a press.
+        /// Whether the plate is opaque enough for the `.lighten` press overlay to act as a floor
+        /// rather than a wash. Black qualifies; the card colour is mid grey/near-white, where
+        /// lightening reads as a flash instead of a press.
         var usesLightenPress: Bool { self == .menuBar }
     }
 
@@ -66,84 +48,54 @@ struct BarStylePicker: View {
     /// Called when the user picks a style. The caller persists it (see `SettingsModel`).
     let onSelect: (BarStyle) -> Void
 
-    /// Which tile the pointer is over, if any. Drives a slightly stronger border on hover, matching
-    /// the small lift the system picker gives its thumbnails.
+    /// Drives a slightly stronger border on hover, matching the small lift the system picker gives
+    /// its thumbnails.
     @State private var hovered: BarStyle?
 
-    /// Which tile the mouse is currently held down on, if any. Purely transient: it is set on mouse-
-    /// down and cleared on mouse-up, so the grey press layer it drives leaves nothing behind.
+    /// Purely transient: set on mouse-down, cleared on mouse-up, so the grey press layer leaves
+    /// nothing behind.
     @State private var pressed: BarStyle?
 
-    /// Read **only** to make this view depend on the theme, so a light/dark flip rebuilds it.
-    ///
-    /// The specimens are baked `NSImage`s: a non-template image does not re-resolve its semantic
-    /// colours when the appearance changes, and SwiftUI has no reason to call `image(for:)` again
-    /// unless something the body reads has changed. Without this the dropdown tile kept whichever
-    /// theme's neutrals it was first drawn under — visibly wrong the moment the system flipped, since
-    /// that surface's palette flips with it. The menu-bar tile never had the problem because its
-    /// specimen is deliberately baked under a fixed `.vibrantDark` (ADR-0097).
-    ///
-    /// It is also what the render is keyed on: `colorScheme` is SwiftUI's view of the *effective*
-    /// appearance here, which is what the specimen must match.
+    /// Read **only** to make this view depend on the theme. The specimens are baked non-template
+    /// `NSImage`s that don't re-resolve their semantic colors on their own — without this the
+    /// dropdown tile (whose palette flips with the system, ADR-0097) would keep whichever theme's
+    /// neutrals it was first drawn under. The menu-bar tile is immune (pinned `.vibrantDark`).
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Tile geometry. The specimen is shown at its **natural** size inside a roomier tile rather than
-    /// scaled up: the whole point of the preview is "this is what lands in my menu bar", and a
-    /// doubled widget answers a question nobody asked. Upscaling a 5 pt bar would also blur the very
-    /// slimness `StatusItemView.Metrics.barHeight` is chosen for — and the render already arrives at
-    /// a 2× backing, so there is no sharpness to gain by stretching it.
+    /// The specimen is shown at its **natural** size inside a roomier tile, not scaled up: the point
+    /// of the preview is "this is what lands in my menu bar", and upscaling a 5 pt bar would blur the
+    /// slimness `StatusItemView.Metrics.barHeight` is chosen for.
     private enum Tile {
         static let width: CGFloat = 80
         static let height: CGFloat = 48
         static let spacing: CGFloat = 12
         static let cornerRadius: CGFloat = 6
-        /// Ring width of the selected tile. Drawn with `strokeBorder` (inside the shape) so selecting
-        /// a tile does not change its footprint — with `stroke` the ring straddles the edge and the
-        /// whole row would jump on every click.
+        /// Drawn with `strokeBorder` (inside the shape) so selecting a tile does not change its
+        /// footprint — with `stroke` the ring straddles the edge and the row jumps on every click.
         static let activeBorder: CGFloat = 3
         static let idleBorder: CGFloat = 1
         static let hoverBorder: CGFloat = 1.5
-        /// The grey a pressed tile's black is raised to. Composited with `.lighten`, which keeps
-        /// whichever is brighter per channel, so it acts as a **floor**: the black plate comes up to
-        /// this grey, while the specimen's greens, yellows and oranges are already brighter and pass
-        /// through untouched. This only works because the plate under the render is opaque — see the
-        /// plate's own note in `tile(for:title:)`.
-        ///
-        /// A plain translucent layer cannot do this. Alpha lifts every pixel in proportion, so the
-        /// black — the part meant to change — barely moves while the bright bars visibly wash out:
-        /// exactly backwards. Hence a blend rather than an opacity.
-        ///
-        /// Tuned by eye down a ladder of rejected takes — 0.34, 0.26, 0.20, 0.16 — each of which
-        /// turned the plate into a grey tile rather than a black one acknowledging a click. The press
-        /// should be felt, not announced.
-        ///
-        /// The last step down came with the live render (#373). The specimen is smaller than the
-        /// captures it replaced (38×22 pt against 54×33), so proportionally more of the tile is bare
-        /// plate — and the same grey therefore covers more area and reads louder than it did when it
-        /// was chosen, even though the value had not changed.
+        /// The grey a pressed tile's black is raised to, composited with `.lighten` (keeps whichever
+        /// channel is brighter) so it acts as a **floor**: the black plate rises to this grey while
+        /// the specimen's bright bars pass through untouched. A plain translucent layer can't do this
+        /// — alpha would lift every pixel in proportion, washing out the bright bars instead. Only
+        /// works because the plate under the render is opaque (see `tile(for:title:)`). Tuned by eye.
         static let pressGrey = Color(white: 0.12)
 
         /// The dropdown tile's press layer: a neutral scrim at low alpha, composited normally.
-        ///
-        /// `pressGrey`'s `.lighten` trick needs a black plate to act as a floor on; this surface's plate
-        /// is a mid grey in dark and near-white in light, so the same layer would flash in one theme and
-        /// vanish in the other. A translucent neutral darkens both by the same proportion, which is what
-        /// "held down" should look like on a card.
+        /// `pressGrey`'s `.lighten` trick needs a black plate to floor on; this surface's plate is mid
+        /// grey/near-white, so the same layer would flash or vanish depending on theme.
         static let pressScrim = Color(white: 0, opacity: 0.14)
     }
 
     var body: some View {
         HStack(spacing: Tile.spacing) {
-            // Iterate the shared segment list rather than a second list of names: the order is a
-            // deliberate gradient (see `AppearanceBarStyle`), and the dropdown row still renders from
-            // the same array. Two lists would drift.
+            // Iterate the shared segment list rather than a second list of names, or the two drift.
             ForEach(AppearanceBarStyle.segments) { segment in
                 tile(for: segment.value, title: segment.title)
             }
         }
         .accessibilityElement(children: .contain)
-        // Matches the visible row label verbatim — VoiceOver naming the group differently from what the
-        // eye reads is a mismatch, not extra context.
         .accessibilityLabel("Style")
     }
 
@@ -152,63 +104,34 @@ struct BarStylePicker: View {
         let borderWidth = isActive ? Tile.activeBorder
                                    : (hovered == style ? Tile.hoverBorder : Tile.idleBorder)
 
-        // A real Button, never `.onTapGesture` — a raw gesture is swallowed by window activation, so
-        // the first click on a non-key Settings window would do nothing (the bug that shaped
-        // `SegmentedControl`). A large clickable picture invites the gesture spelling; resist it.
+        // A real Button, never `.onTapGesture`: a raw gesture is swallowed by window activation, so
+        // the first click on a non-key Settings window would do nothing.
         return Button {
             onSelect(style)
         } label: {
             VStack(spacing: 4) {
                 ZStack {
-                    // Black in BOTH themes, on purpose — not an oversight, and not a semantic colour.
-                    //
-                    // Two reasons, and the second one is structural:
-                    //
-                    // 1. It is the truth about the subject. The menu bar is dark under a light theme
-                    //    too, and the specimen is baked for a dark vibrant surface to match
-                    //    (`BarStylePreviewRenderer`), so a light plate would show it against a backing
-                    //    it never has.
-                    // 2. **The press layer below depends on it.** `.lighten` compares against what is
-                    //    underneath, and the render carries an alpha channel; over a transparent pixel
-                    //    the blend would post `pressGrey` straight out and flood the tile. This opaque
-                    //    plate flattens the render first, which is what keeps the press a floor on the
-                    //    black rather than a wash over everything. Removing it does not simplify the
-                    //    tile — it breaks the click feedback.
-                    // ...and, for the dropdown, the popup card's own colour instead — that surface is a
-                    // Control-Center card which flips with the theme, so a black plate there would show
-                    // the specimen against a backing it never has. Same argument, opposite answer.
+                    // Black in BOTH themes: (1) it's the truth about the subject — the menu bar is
+                    // dark under a light theme too, matching the specimen's dark vibrant bake; (2) the
+                    // press layer below depends on it — `.lighten` over a transparent pixel would post
+                    // `pressGrey` straight out and flood the tile, so this opaque plate flattens the
+                    // render first. For the dropdown, the popup card's own colour instead — that
+                    // surface flips with the theme, so a black plate would show the specimen against a
+                    // backing it never has.
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .fill(surface.plate)
 
                     // Drawn live by the real widget code rather than loaded from a screenshot (#371),
                     // so the tiles cannot fall out of step with the bar they advertise.
-                    //
-                    // The menu-bar specimen carries its natural size in points (no `.resizable()`, and a
-                    // 2× backing, which is exactly how it should land here). The dropdown's has no
-                    // natural size to carry — `PopupBarView` stretches to the popup card — so it is
-                    // rendered *at* the tile's size instead, with the bar width chosen inside the
-                    // renderer.
                     switch surface {
                     case .menuBar:
                         Image(nsImage: BarStylePreviewRenderer.image(for: style))
                     case .dropdown:
-                        // Baked under the **vibrant** appearance of the current theme, not the plain one.
-                        //
-                        // The live bars are drawn inside an `NSMenu`, which is a vibrant surface, and the
-                        // palette resolves very differently there. Measured, for the bar's track and its
-                        // green: aqua gives `0,0,0 α0.18` and `40,205,65`, vibrantLight `211,211,211
-                        // α1.0` and `30,195,55`. Two things follow. The tones themselves differ — the
-                        // aqua green is the wrong green — and under vibrant the track comes back
-                        // **opaque**, so it no longer depends on whatever plate happens to be behind it.
-                        // 211 is exactly the grey measured off the live preview beside this pane.
-                        //
-                        // This is the same reason `PreviewChrome.vibrantAppearance` exists for the
-                        // dropdown preview window, and the same reason the menu-bar specimen pins
-                        // `.vibrantDark` (ADR-0097) — the difference being that this surface follows the
-                        // theme instead of pinning one.
-                        //
-                        // Passed explicitly rather than read from `NSApp` inside the renderer: this view
-                        // can be hosted under a forced appearance, where `NSApp`'s would be the wrong one.
+                        // Baked under the **vibrant** appearance of the current theme: the live bars
+                        // draw inside an `NSMenu`, a vibrant surface where the palette resolves
+                        // differently (opaque track, different green) than under a plain appearance.
+                        // Passed explicitly rather than read from `NSApp`, since this view can be
+                        // hosted under a forced appearance.
                         Image(nsImage: DropdownBarStylePreviewRenderer.image(
                             for: style,
                             size: NSSize(width: Tile.width, height: Tile.height),
@@ -217,19 +140,9 @@ struct BarStylePicker: View {
                     }
                 }
                 .frame(width: Tile.width, height: Tile.height)
-                // The click feedback: one grey layer over the whole tile, for exactly as long as the
-                // mouse is down. It covers plate and specimen together — that is the point, since the
-                // widget occupies only its own few dozen points of the 80×48 pt tile, so any layer
-                // that reaches one but not the other splits the tile into two blacks.
-                //
-                // Nothing persists after mouse-up: selection is said by the ring, and a specimen of
-                // what lands in the menu bar must not keep a colour cast the widget never draws.
-                //
-                // The blend is the **menu bar's**: `.lighten` keeps whichever is brighter per channel,
-                // so it lifts a black plate to `pressGrey` while the bright bars pass through untouched.
-                // That only works against black. The dropdown's plate is a mid grey in dark and
-                // near-white in light, where lightening either does nothing or flashes — so that surface
-                // presses with a plain translucent scrim instead, which reads the same way on both.
+                // One grey layer over the whole tile, covering plate and specimen together — a layer
+                // reaching one but not the other would split the tile into two blacks. Nothing
+                // persists after mouse-up: selection is said by the ring.
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .fill(surface.usesLightenPress ? Tile.pressGrey : Tile.pressScrim)
@@ -245,38 +158,24 @@ struct BarStylePicker: View {
                                       lineWidth: borderWidth))
 
                 Text(title)
-                    // A step down from the pane's body text, but not the caption size: `.caption`
-                    // read as visibly tiny here and `.callout` as heavier than the pictures it
-                    // labels. The caption names what the picture already shows, so it should sit
-                    // just below the row's own label rather than match it.
+                    // `.caption` read as visibly tiny here, `.callout` as heavier than the picture.
                     .font(.subheadline)
                     .fontWeight(isActive ? .semibold : .regular)
                     .foregroundStyle(isActive ? Color.primary : Color.secondary)
                     .lineLimit(1)
-                    // Fixed width so the heavier selected caption cannot widen its column — without
-                    // it the row shifts a little on every click.
+                    // Fixed width so the heavier selected caption cannot widen its column.
                     .frame(width: Tile.width)
             }
             .contentShape(Rectangle())
         }
-        // Not `.plain`: that style dims the whole label — picture, caption and all — and its dimming
+        // Not `.plain`: that dims the whole label — picture, caption and all — and its dimming
         // multiplies against the opaque capture differently than against the plate around it, so a
-        // held-down tile visibly split into two blacks. This one dims nothing and only reports the
-        // press, which the label above paints as a single grey layer over the tile.
+        // held-down tile visibly split into two blacks.
         .buttonStyle(PressReportingButtonStyle(isPressed: $pressed, value: style))
         .onHover { inside in
             if inside { hovered = style } else if hovered == style { hovered = nil }
         }
-        // The caption naming the style lives in a sibling view, so the button needs its own name.
-        //
-        // Measured caveat: in the live AX tree these tiles still report `missing value` for `name` —
-        // but so do the five `SegmentedControl` buttons already on this pane, so it is how
-        // `.buttonStyle(.plain)` exposes itself here rather than anything specific to this control.
-        // The label is kept because it is the correct declaration and costs nothing; making plain
-        // buttons expose names is a pane-wide fix, not this control's to make.
         .accessibilityLabel(Text(title))
-        // `.isSelected` is what makes VoiceOver announce the current choice; without it all three
-        // tiles read identically and the state is simply absent.
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
     }
 
@@ -285,15 +184,9 @@ struct BarStylePicker: View {
 // MARK: - PressReportingButtonStyle
 
 /// A button style that draws its label unchanged and merely **reports** whether it is being pressed.
-///
-/// `.plain` — the obvious choice for a picture-shaped button — dims the entire label on press. That is
-/// wrong here twice over: the label includes the caption, which should not move with the click, and the
-/// dimming multiplies against the specimen differently than against the plate around it, so a held-down
-/// tile came apart into two blacks with a seam between them.
-///
-/// Reporting instead of drawing lets the caller put one flat layer over the tile alone, where it covers
-/// picture and plate identically. `isPressed` is bound out rather than handed to a closure so the press
-/// can drive ordinary view state; it is written on both edges, so mouse-up always clears it.
+/// `.plain` — the obvious choice for a picture-shaped button — dims the entire label on press,
+/// including the caption, and the dimming multiplies against the specimen differently than against
+/// the plate around it, so a held-down tile came apart into two blacks with a seam between them.
 struct PressReportingButtonStyle<Value: Equatable>: ButtonStyle {
     /// Set to `value` while this button is held down, and cleared back to `nil` on release.
     @Binding var isPressed: Value?

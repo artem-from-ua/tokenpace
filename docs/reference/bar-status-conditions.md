@@ -42,24 +42,13 @@ at all. Both get `blueAllowed: false` **in the model**
 [CreditsPacing.swift](../../Sources/TokenPaceKit/CreditsPacing.swift)), and `behindColor` hands them
 green at the very first check. The menu bar has no per-model bars at all.
 
-> Before [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md) this was done by the render flag
-> `PopupBarView.isBaseLimit`, set by row index. That flag was the cause of the discrepancy below: the
-> model didn't know about it.
-
 **Why "no" for idle.** The idle bar has no pacing as such — it doesn't go through `severity` and
-can't take on `farBehind`. Its fill is a "ready to start" state, not a verdict: since
-[#381](https://github.com/artem-from-ua/cc-timer/issues/381) it's **always green** (gray when
-blocked), and the weekly gate no longer factors into it at all. Details in §6.
+can't take on `farBehind`. Its fill is a "ready to start" state, not a verdict: it's **always green**
+(gray when blocked), and the weekly gate doesn't factor into it at all. Details in §6.
 
-> **Journal and UI agree — since [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md).**
-> `PacingBucket.of` reads the same `blueAllowed` the renderer does, and per-model rows have it
-> `false` **in the model**, so a scoped window can never get the `sev: "blue"` the user never saw.
->
-> This used to state the same claim on a different basis — "per-model rows carry the same weekly
-> gate" — and that basis **was wrong**. The gate closes only when the week is running ahead of pace;
-> during a calm week it's open, and blue was written to the file while the popup muted it via its own
-> `isBaseLimit`. In the maintainer's August journal this produced **2,214** scoped-blue entries.
-> The v4 migration recomputed them as green, leaving `sevRaw: "blue"` in place.
+> **Journal and UI agree.** `PacingBucket.of` reads the same `blueAllowed` the renderer does, and
+> per-model rows have it `false` **in the model**, so a scoped window can never get the `sev: "blue"`
+> the user never saw ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)).
 
 ---
 
@@ -87,9 +76,8 @@ fifth restatement: it reads `severity` and delegates to `behindColor`.
 | `blueAllowed` | Bool | whether blue is allowed for this bar at all |
 
 `behindThreshold` = `blueBehindWidthSeconds × 2 / windowDurationSeconds`, with a base of 60 min (5h)
-and 24 hours (7d). It used to be user-configurable (`FarBehindInterval`); now the multiplier is fixed,
-and the question "should blue be drawn at all" has moved entirely into `blueAllowed`
-([PacingModel.swift](../../Sources/TokenPaceKit/PacingModel.swift)).
+and 24 hours (7d). The multiplier is fixed; the question "should blue be drawn at all" lives entirely
+in `blueAllowed` ([PacingModel.swift](../../Sources/TokenPaceKit/PacingModel.swift)).
 
 ### `blueAllowed` — the weekly-capacity gate
 
@@ -190,13 +178,9 @@ with `blueAllowed == false`
 ([PopupViewController.swift](../../Sources/TokenPace/PopupViewController.swift)); they show "on
 pace" instead.
 
-**The journal matches now too — and this is new.** Before
-[ADR-0115](../adr/0115-no-blue-on-per-model-windows.md), this doc claimed they "carry
-`blueAllowed = weeklyHasHeadroom`, so `sev` is never `blue` for them." The second claim doesn't
-follow from the first. During a calm week the gate is open, and blue **was** being recorded —
-**2,214** times in the maintainer's August journal, while the popup muted it via its own
-`isBaseLimit`. Now `blueAllowed` for them is unconditionally `false`, and the v4 migration
-recomputed the archive (`sevRaw` preserves what was originally written).
+**The journal matches the UI:** `blueAllowed` for per-model rows is unconditionally `false`
+([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)), so `sev` is never `blue` for them, in
+either the popup or the archive.
 
 ---
 
@@ -248,8 +232,7 @@ This is a **separate code path**: the idle bar never goes through `barLayout`/`s
 ignores ([PopupLayout.swift:542](../../Sources/TokenPaceKit/PopupLayout.swift),
 [MenuBarLayout.swift:348](../../Sources/TokenPaceKit/MenuBarLayout.swift)).
 
-The pill is **binary** (since [#381](https://github.com/artem-from-ua/cc-timer/issues/381) — it used
-to be ternary):
+The pill is **binary**:
 
 | Condition | Fill | Word |
 |---|---|---|
@@ -259,34 +242,20 @@ to be ternary):
 - `isBlocked` = `mainWindowExhausted && !creditsCanCover`
   ([CreditsPacing.swift:150](../../Sources/TokenPaceKit/CreditsPacing.swift)) — gray only when the
   main window is exhausted **at 100%** *and* credits don't cover it: working is impossible.
-- **There is no more blue idle pill on any surface**
-  ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)). Before
-  [#381](https://github.com/artem-from-ua/cc-timer/issues/381) it was blue when the week had
-  headroom and green otherwise — and its blue color was exactly what diverged from what blue means on
-  an **active** bar. Now both renderers target green unconditionally:
-  [PopupViewController.swift:432](../../Sources/TokenPace/PopupViewController.swift)
+- **There is no blue idle pill on any surface**
+  ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)). Both renderers target green
+  unconditionally: [PopupViewController.swift:432](../../Sources/TokenPace/PopupViewController.swift)
   (`blocked ? monochromeGrey : color(.green)`) and
   [StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift).
-- The flag went away along with the color: the fields `LimitRow.weeklyHeadroom` /
-  `BarView.weeklyHeadroom` **no longer exist** — the idle bar has nothing left to ask about the week.
-- `PacingModel.weeklyHasHeadroom` still gates `blueAllowed` — but now only for the **5-hour** bar
-  ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md) still stands in that part; per-model rows
-  moved out from under it in [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md), idle even
-  earlier).
-- **The wording doesn't change** between green and (formerly) blue: you genuinely can work either
-  way. The text used to promise "ready to start, full quota available" — that part has been removed.
+- The fields `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` **do not exist** — the idle bar has
+  nothing to ask about the week.
+- `PacingModel.weeklyHasHeadroom` still gates `blueAllowed` — but only for the **5-hour** bar
+  ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)).
+- **The wording doesn't change** between green and gray: you genuinely can work either way in green.
 
 **On top of this — [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift)** (menu bar only,
 §7): the green pill gets muted to white under both muting modes (and **unconditionally** under
 Pressure); the gray pill is never muted.
-
-> **One blue, one role.** Previously the idle fill (`ColorRole.blue`) and the pacing gap
-> (`ColorRole.paceBlue`) were two separate palette entries sharing the **same** default,
-> `.systemBlue` — indistinguishable on screen, and separated only in that the tuner could pull them
-> apart (the tuner itself has since been removed —
-> [ADR-0106](../adr/0106-remove-dev-color-tuner-and-dissolve-colorstore.md)). The roles were merged
-> into a single `.blue`, and since [#381](https://github.com/artem-from-ua/cc-timer/issues/381) idle
-> doesn't read it at all — `.blue` is now purely a pacing color.
 
 **Consistency with "Back to work!"** A green pill can coexist with the notification, and that isn't a
 contradiction: `WorkAvailability.subscriptionAvailable` asks "is quota available" (exhaustion —
@@ -307,12 +276,10 @@ The color from §3-6 is an **input**, not the final pixel.
 ### `ColorAdvice` — muting to white (menu bar only)
 
 The type is named for the **advice the color carries**, not the muting mechanism
-([ColorAdvice.swift](../../Sources/TokenPaceKit/ColorAdvice.swift), renamed from `CalmColorMode` in
-[#381](https://github.com/artem-from-ua/cc-timer/issues/381) —
+([ColorAdvice.swift](../../Sources/TokenPaceKit/ColorAdvice.swift),
 [ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). The row in Settings →
 Appearance › Menu bar is called **"Colors tell me"**, with the segments listed below in the first
-column; the old raw values (`yellowGreenBlue`/`yellowGreen`/`off`) are read through
-`legacyRawValues`.
+column.
 
 | Mode (segment) | Green/yellow | Blue | Orange/red |
 |---|---|---|---|
@@ -332,28 +299,24 @@ survives is orange's "you're spending too fast," which is exactly that segment. 
 the state instead of offering a choice that wouldn't change anything; the saved value isn't
 overwritten and reverts once you switch back to Balance or Progress.
 
-**These three surfaces no longer read `ColorAdvice` at all**
-([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md),
-[#381](https://github.com/artem-from-ua/cc-timer/issues/381)), because they answer different
+**These three surfaces don't read `ColorAdvice` at all**
+([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)), because they answer different
 questions:
 
-- **The service dot**: its scale (gray → yellow → orange → red) is self-contained, and since
-  [#410](https://github.com/artem-from-ua/tokenpace/issues/410) it's identical across all three
-  surfaces — menu bar, popup, Legend ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)).
-  What changed was the **tone** of `degraded`, not who decides it: the setting never read the dot,
-  and still doesn't.
+- **The service dot**: its scale (gray → yellow → orange → red) is self-contained and identical
+  across all three surfaces — menu bar, popup, Legend
+  ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)). The setting never reads the
+  dot.
 
-  **Since [#454](https://github.com/artem-from-ua/tokenpace/issues/454) the scale reaches green in
-  exactly one position** ([ADR-0121](../adr/0121-github-as-a-status-only-provider.md) §D4): a popup
-  **provider-header dot on a calm provider**. The colour is `ColorRole.green` — the same green
-  `dotColor(_:)` has mapped `.operational` to since #341, and the same one the Legend has listed among
-  its six service states all along, so nothing new entered the vocabulary; what is new is a surface
-  that draws it. The dot appears **only** while the provider is `operational` and vanishes the moment
-  anything is wrong, because the rows that then appear each carry their own dot and name their service.
-  So there is still **no green anywhere in the menu bar's dot** — silence there remains the complete
-  answer to "can I work" ([ADR-0013](../adr/0013-claude-status-line.md) §8) — and no green on a service
-  *row*, which is drawn only for a problem or a fresh recovery. The `gray → yellow → orange → red`
-  escalation is untouched: green sits outside it, as the state where nothing escalates.
+  **The scale reaches green in exactly one position**
+  ([ADR-0121](../adr/0121-github-as-a-status-only-provider.md) §D4): a popup **provider-header dot
+  on a calm provider**. The dot appears **only** while the provider is `operational` and vanishes
+  the moment anything is wrong, because the rows that then appear each carry their own dot and name
+  their service. There is still **no green anywhere in the menu bar's dot** — silence there remains
+  the complete answer to "can I work" ([ADR-0013](../adr/0013-claude-status-line.md) §8) — and no
+  green on a service *row*, which is drawn only for a problem or a fresh recovery. The
+  `gray → yellow → orange → red` escalation is untouched: green sits outside it, as the state where
+  nothing escalates.
 - **The currency symbol (¤)**: its own white→orange→red scale is self-contained
   ([ADR-0068](../adr/0068-credits-in-use-marker-anatomy.md)).
 - **The idle pill** (§6): muted through the shared `idleMuted`, the same flag that governs the rest
@@ -365,8 +328,7 @@ questions:
 comparable across users. `blueAllowed`, by contrast, it **honors**: that's not a setting, it's a fact
 about the data ([PacingBucket.swift](../../Sources/TokenPaceKit/PacingBucket.swift)).
 
-The width of the blue zone is no longer configurable: the old `FarBehindInterval` (×1/×2/×3/off) has
-been removed, and the multiplier is fixed at ×2.
+The width of the blue zone is not configurable: the multiplier is fixed at ×2.
 
 ---
 
@@ -388,9 +350,9 @@ States the code **cannot** produce. Rendering one makes everything around it in 
 | A credits bar with ticks | Its ruler is two month-edge labels, no ticks at all (0092); and even those labels only show **under ⌥** ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) — without it, the bar has no ruler at all |
 | An idle bar with a time marker | idle draws as zero, with no marker and no zones |
 | An idle bar filled full width | idle is a pill at zero |
-| **A blue idle pill** — under any settings, in any state of the week | Since [#381](https://github.com/artem-from-ua/cc-timer/issues/381) there's no blue idle on any surface: the fill is green, or white (under muting), or gray (blocked). The `Yellow + Green` exception for idle that applied under [#343](https://github.com/artem-from-ua/cc-timer/issues/343) disappeared along with blue |
+| **A blue idle pill** — under any settings, in any state of the week | There's no blue idle on any surface: the fill is green, or white (under muting), or gray (blocked) |
 | **A colored idle pill under Pressure in the menu bar** | Under Pressure, muting is unconditional (`barStyle == .pressure \|\| colorsTell.mutesCalm`), so a green pill there is **always** white — regardless of `ColorAdvice`, which isn't even shown in Settings under this style |
-| **A white (neutral) service dot in the menu bar — in any state** | Since [#410](https://github.com/artem-from-ua/tokenpace/issues/410) ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)) `statusDotTarget` has no exception left: all six states take their tone from the scale (`degraded` is yellow, same as in the popup and on the Legend). The `calmWhite` branch no longer exists, so a neutral dot is drawn nowhere |
+| **A white (neutral) service dot in the menu bar — in any state** | `statusDotTarget` has no exception: all six states take their tone from the scale (`degraded` is yellow, same as in the popup and on the Legend, [ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)). A neutral dot is drawn nowhere |
 | Yellow on the calm side | yellow only exists when `u > t` |
 | Blue on 5h when `t < 0.40` | `t − u ≤ t`, so the headroom can never reach the threshold |
 | **Blue h5 when d7 ∈ {yellow, orange, red}** | the weekly gate is closed → `blueAllowed == false` |
@@ -435,7 +397,7 @@ it's the menu bar and that tone gets muted, the color becomes white; muting come
 | `calm-both` | both green |
 | `near-reset` | the 20-min end override (2 pp lead → orange) |
 | `bar-extremes` | 5h blue (75 pp headroom) + 7d behind pace (so the gate stays open) |
-| `idle` | **green** idle pill, "ready to start" (was blue before [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) |
+| `idle` | **green** idle pill, "ready to start" |
 | `idle-week-hot` | the week is ahead of pace — and the pill is **the same green**. This state was kept as a stub deliberately: it proves idle does **not** react to the week; a divergence from `idle` would be a regression |
 | `idle-blocked` | gray idle pill, "waiting for limit reset" |
 | `weekly-gate` | 5h deeply behind pace, but the week is exhausted → 5h is **green**, not blue |

@@ -3,9 +3,6 @@
 How to build, notarize and publish a `TokenPace` release on GitHub so that other people (friends,
 testers) can use it without Gatekeeper warnings.
 
-> **Stage 1 — manual release** (this document). Automation is planned separately:
-> a `scripts/release.sh` script and a GitHub Actions workflow — see the issues in the tracker.
-
 ## Prerequisites (one-time)
 
 - A **Developer ID Application** identity in the Keychain
@@ -23,9 +20,8 @@ Signing setup details are in [ADR-0004](../adr/0004-build-system.md),
 
 ## Preflight checks (before building)
 
-Run these **before** bumping the version and building. The goal is not to ship a release that quietly
-breaks saved settings or state for users upgrading from the previous version. The comparison base is
-the tag of the last GitHub release:
+Run these **before** bumping the version and building, to catch a release that would quietly break
+saved settings or state for users upgrading. The comparison base is the tag of the last GitHub release:
 
 ```sh
 LAST="$(gh release view --json tagName -q .tagName)"   # e.g. v0.44.0
@@ -74,9 +70,7 @@ git diff "${LAST}..HEAD" -- \
 - `MonitoredServices` (`Codable`) is serialized as a JSON blob into `monitoredServices`.
   `MonitoredServicesTests.swift` pins the raw strings precisely because they are persisted.
 - `SuppressDays`, `TopBarHiding`, `ColorAdvice`, `BarStyle`, `PopupSectionVisibility` are raw-string
-  enums, stored by raw value. (`ResetCountdownMode` was here until
-  [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) — the type was deleted, and the
-  `resetCountdownModeMenuBar` key was retired and is swept up.)
+  enums, stored by raw value.
 - **The compatibility rule:** all of them decode **forward-compatible** — an incompatible or unknown
   raw value falls back to the default quietly (no crash). If you change the shape (a new or renamed
   field, a different raw value) — **preserve that property**: an old blob must either decode correctly
@@ -121,7 +115,6 @@ The scaffolding exists, but there are **no real migration steps yet** (see
 The cheapest route is to make the change forward-compatible (like the existing enum decoding). If that
 is impossible (renaming a key while preserving its value, a real transformation of the shape) — fill
 the `.upgraded` branch in `runConfigMigrationsIfNeeded` with a from→to step and cover it with a test.
-Changing `MigrationPlan` or introducing a real step is a reason to update ADR-0023.
 
 ## Steps
 
@@ -148,11 +141,10 @@ grep -q "\"${VERSION}\"" Sources/TokenPaceKit/TokenPaceKit.swift \
 ./scripts/build-app.sh
 ```
 
-The script does all of it: builds the release binary as **universal** (arm64 + x86_64 — each
-architecture separately via `--triple`, then `lipo -create`, so the `.app` runs on both Apple
-Silicon and Intel), assembles the `.app`, signs it with Developer ID (`--options runtime`),
-notarizes it (`notarytool submit --wait`) and staples the ticket (`stapler staple`). Notarization
-can take several minutes.
+The script builds the release binary as **universal** (arm64 + x86_64 — each architecture separately
+via `--triple`, then `lipo -create`), assembles the `.app`, signs it with Developer ID
+(`--options runtime`), notarizes it (`notarytool submit --wait`) and staples the ticket
+(`stapler staple`). Notarization can take several minutes.
 
 Expect in the logs: `lipo archs: x86_64 arm64`, `status: Accepted` and
 `The staple and validate action worked!`.
@@ -217,11 +209,9 @@ RELEASE_NOTES_APPROVED=1 gh release create "v${VERSION}" \
 
 The tag goes on the current `main` (with every PR already merged).
 
-> **The release notes gate.** `gh release create` is guarded by a hook
-> (`.claude/hooks/release-notes-guard.sh`): it blocks publishing until the command is run with the
-> `RELEASE_NOTES_APPROVED=1` prefix. That prefix is added **only after** the notes have been composed
-> per this document (auto-update being the canonical path) and approved by the maintainer. It is a
-> safeguard against publishing notes written from memory without checking them against this file.
+> **The release notes gate** is enforced by `.claude/hooks/release-notes-guard.sh` — see CLAUDE.md.
+> The `RELEASE_NOTES_APPROVED=1` prefix is added only after the notes are composed per this document
+> and approved by the maintainer.
 
 ### 6. Verify from the user's side
 
@@ -327,7 +317,7 @@ version bumps). Each line is `- [ ] <human description of the feature>`, e.g.:
 ```
 
 Ticket numbers **belong here** — the maintainer needs them to open the PR quickly. They do **not**
-carry over into the **text of the notes themselves** (see the rule about numbers below).
+carry over into the **text of the notes themselves**.
 
 The maintainer puts `[x]` next to the ones going into the release; only the **ticked** items become the
 basis for the notes. Those left as `[ ]` don't make it in.
@@ -335,10 +325,7 @@ basis for the notes. Those left as `[ ]` don't make it in.
 ### How much of the checklist survives into the notes
 
 **A release is two or three items, not a changelog.** The actual "proposed → kept" ratio over recent
-releases: `v0.69.1` 10→3, `v0.65.1` 5→3, `v0.62.0` 11→4, `v0.76.0` 4→2. So the maintainer keeps roughly
-**a third**. That is not a reason to stop showing the full list (step 0 stays exactly as it is) — it's
-a calibration of expectations: if you believe all eight of your items deserve to be in the notes, you
-are almost certainly wrong about seven of them.
+releases: `v0.69.1` 10→3, `v0.65.1` 5→3, `v0.62.0` 11→4, `v0.76.0` 4→2 — roughly **a third**.
 
 **The criterion isn't "visible", it's "changes what the user does".** Visibility is far too weak a bar,
 and it is precisely the one the agent gets wrong most often. In `v0.76.0`, the single reset-time format
@@ -354,14 +341,12 @@ What systematically does **not** go into the notes, per observations from past r
 - any change you'd describe with the words "while we were at it, we tidied up".
 
 **Don't create a "Minor" / "Menu-bar odds and ends" / "For those who dig around" section.** Sections
-like that got deleted wholesale every time, along with the real fixes inside them (in `v0.74.1` — six
-items in one line, "and all the Minor stuff"). If an item is only good enough for the bucket of small
-things, it isn't good enough for the notes at all. Section headings are plain and descriptive: "For
-those who dig around" was replaced with "New Development Tools".
+like that got deleted wholesale every time, along with the real fixes inside them. If an item is only
+good enough for the bucket of small things, it isn't good enough for the notes at all. Section headings
+are plain and descriptive.
 
 **Push back once, not twice.** If you think a struck-out item deserves a mention, say so in one
-sentence and accept the answer. In `v0.74.1` the agent argued for one fix, got no reply — and that was
-a signal, not an invitation to repeat it.
+sentence and accept the answer.
 
 **What to cover:**
 
@@ -373,9 +358,8 @@ a signal, not an invitation to repeat it.
   `0.32.0` and was polished in `0.34.0` — write about the change as one whole. Only the **final** release
   version appears in the notes.
 - **Merge the text of related features where it makes sense.** Several pieces of news about the same
-  feature from different intermediate versions — fold them into one. Examples: parameters of one feature
-  added across different versions → one item; functionality added plus its behavior fixed in the next
-  version → one item (describe the end state, not the history of iterations).
+  feature from different intermediate versions — fold them into one (describe the end state, not the
+  history of iterations).
 - **The subject of the notes is the diff against the previous release, not the commit history.** Between
   releases a feature can change a great deal, or even appear and disappear entirely. The user jumps from
   the previous release straight to this one — for them only the **difference between those two points**
@@ -399,11 +383,6 @@ that appears in the published notes. The reader of a release is a user, not a co
 tells them nothing, and everyone else has the release's own Commits tab. This applies to the **text of
 the notes**, not to the **step 0 checklist** — there the numbers are useful precisely because the
 maintainer needs to get to the PR quickly and understand what an item is about.
-
-> This rule existed as a verbal agreement for a long time: on 2026-07-28 the maintainer invoked it ("I
-> did ask you not to mention ticket numbers in the release notes"), the agent couldn't find it in the
-> docs — and the requirement was withdrawn at the time precisely because it wasn't written down. Now it
-> is.
 
 **Check UI element names against the code, not against memory.** Writing "X was renamed to Y" — open
 the file where the caption is defined and quote both names from there. For bar styles that is
@@ -512,6 +491,5 @@ calm anyway — it shows it only when it's time to pay attention." An example of
 
 **Don't mention notarization or Gatekeeper in the release body.** Every build is notarized — that is an
 invariant property of the process, not news about a particular version, and it dictates no action to
-the reader. The line "the app is notarized by Apple, Gatekeeper won't complain" stood here until
-`v0.76.0` and was removed as noise. The technical notarization check isn't going anywhere — it remains
-step 3 above, it just doesn't make it into the text for the user.
+the reader. The technical notarization check stays as step 3 above; it just doesn't make it into the
+text for the user.

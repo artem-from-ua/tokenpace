@@ -93,6 +93,12 @@ only, 26 in the body only, 45 in both, and forcing one shape would rewrite 71 fi
 
 What is *not* allowed is a comment whose meaning depends on the link.
 
+**Issue numbers follow the same rule, and clear a lower bar.** `(#167)` after a claim costs little,
+but it decorates rather than explains, it rots exactly as an ADR citation does, and `git blame`
+answers the same question more precisely — it lands on the commit that wrote the line rather than on
+a ticket that may have covered five other things. Drop them when trimming; keep one where it is the
+only route to a discussion the code cannot carry.
+
 ### 5. No mechanism polices citation rot
 
 A checker could report "this file cites ADR-0086, superseded by 0090" — the frontmatter is

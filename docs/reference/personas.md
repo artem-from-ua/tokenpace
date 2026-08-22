@@ -10,17 +10,10 @@ prioritizing the roadmap, wording the positioning, and designing the enrichment 
 > [journal-analysis.md](journal-analysis.md) and [usage-api-quirks.md](usage-api-quirks.md) —
 > the resolution limits of the data that any enrichment idea has to live with.
 
-> **Evidential status: three hypotheses and one verified persona** (product interview
-> 2026-08-21). "Arthur" rests on a measured journal series **and on clarified first-hand
-> behavior**; "Viktor", "Oskar", and "Igor" are reasoned assumptions, and every feature in the
-> catalog needs checking against a real user of the matching type before it gets built.
->
-> **What the very first such check produced.** The idea billed as "the widest in the catalog"
-> ([J3](#j3-model-mix-and-the-switch-prompt)) collapsed for a persona who already works on the
-> strongest model all the time. What surfaced instead was that I had applied to **retrospective
-> analysis** a bar written for **signals**, and on that basis wrongly buried the per-project
-> breakdown — see [§ two bars](#two-bars-signal-and-retrospective-analysis). Both mistakes are of
-> one kind: the armchair archetype is wrongest exactly where it looks most convincing.
+> **Evidential status: three hypotheses and one verified persona.** "Arthur" rests on a measured
+> journal series **and on clarified first-hand behavior**; "Viktor", "Oskar", and "Igor" are
+> reasoned assumptions, and every feature in the catalog needs checking against a real user of the
+> matching type before it gets built.
 
 Every persona has a **code name** — a short handle for tickets, discussions, and verdicts
 ("this is a feature for Oskar"), so that the full archetypal description need not be dragged into
@@ -149,7 +142,7 @@ statistics on the surplus left unused ([N0](#n0-wall-hitting-statistics-from-the
 argument for "am I overpaying".
 
 **Evidence:** the only persona with a measured journal series **and confirmed first-hand
-behavior** (clarified 2026-08-21).
+behavior**.
 
 **Positioning:** *see what you paid for.*
 
@@ -279,11 +272,8 @@ enough that the answer addresses a question the user asks themselves.
 | "Arthur" | the retrospective "where did the quota go" as understanding | ✅ passes as a retrospective, ✖ as grounds for rebalancing |
 | "Viktor" | curiosity about his own projects | ❔ one or two projects, the distribution is nearly degenerate |
 
-**The correction on "Arthur" — an example of how the bar goes wrong when it is carried across.** He
-confirmed that he feels no need to *rebalance* quota between projects, and from that I concluded,
-wrongly, that JSONL gives him nothing. In fact only the **action** was disproved; retrospective
-analysis as understanding remains valuable. The mistake was applying to a retrospective a bar
-written for signals.
+**On "Arthur":** he feels no need to *rebalance* quota between projects, so only the **action** is
+disproved for him; retrospective analysis as understanding remains valuable.
 
 **What follows for the implementation.** The depth of attribution is not one size for all: for
 understanding, the project level is enough; for reporting you need PR/issue/session, because that
@@ -305,10 +295,10 @@ Opus."
 | "Arthur" | — (already on the strongest model always) | ✖ disproved against real behavior |
 | "Igor" | pick the model for the background agents | ✅ passes |
 
-**It was billed as the widest idea in the catalog — the only one that served all four personas. A
-check against a live user disproved that.** "Arthur" works on the strongest model all the time and
-does not switch down; the prompt "move to a cheaper one" does not describe an action he will take,
-and the reverse side ("you can afford Opus") is meaningless for him, because he is already there.
+"Arthur" works on the strongest model all the time and does not switch down; the prompt "move to a
+cheaper one" does not describe an action he will take, and the reverse side ("you can afford Opus")
+is meaningless for him, because he is already there — so this idea does not serve all four
+personas.
 
 **What this changes for the design of the prompt.** Switching the model is not a universal lever
 but the lever of the personas who are willing to move the model at all. For the rest, the reverse
@@ -466,10 +456,9 @@ source of signals it works only for the personas willing to move the model — a
 that such willingness is not universal.
 
 **Three personas out of four need the per-client breakdown** — "Oskar", "Arthur", and "Igor", albeit
-at different depths: from "understand where it goes" to "put it on the client's invoice". That makes
-J2 the widest idea in the catalog after the fall of [J3](#j3-model-mix-and-the-switch-prompt) — with
-the difference that J2 rests on **the need to know** rather than on a willingness to change
-behavior, and that is exactly why it proved more robust against a check with a real user.
+at different depths: from "understand where it goes" to "put it on the client's invoice". J2 rests
+on **the need to know** rather than on a willingness to change behavior, which is why it is more
+robust than [J3](#j3-model-mix-and-the-switch-prompt).
 
 **The cheapest source remains the underrated one.** The existing journal (S1, N0, watching N) needs
 no new access whatsoever and gives the most to precisely the persona backed by real data. The
@@ -499,13 +488,10 @@ checked against real users of each type, and only then should the onboarding scr
 designed (a separate ticket and, most likely, an ADR — not least about whether to ask "how do you
 work?" outright or to infer the persona from the first weeks of the journal).
 
-**"Arthur"'s column is no longer a hypothesis but a snapshot of real settings** (2026-08-21), and
-two cells in it had to be corrected: the dropdown is set to **Balance**, not Progress, and the
-sections to **When it needs attention**, not Always. Both of my initial guesses came from assuming
-that a persona who looks at distributions wants more data on screen. In fact he wants **the same way
-of reading on both surfaces** and silence until there is something to react to — which is exactly
-what the [rule about silence](users-and-goals.md#why-silence-is-a-valid-state) demands, and it
-turned out to be stronger than "more data for the analyst".
+**"Arthur"'s column is a snapshot of real settings, not a hypothesis:** the dropdown is **Balance**
+and the sections are **When it needs attention** — he wants the same way of reading on both surfaces
+and silence until there is something to react to, per the
+[rule about silence](users-and-goals.md#why-silence-is-a-valid-state).
 
 ## Positioning: one message per persona
 

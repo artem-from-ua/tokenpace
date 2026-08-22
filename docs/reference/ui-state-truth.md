@@ -146,12 +146,10 @@ works anyway.
 > cases: `.progress`, `.pressure`, `.balance`.
 >
 > **Style is a property of the surface, not of the app**
-> ([ADR-0080](../adr/0080-per-surface-bar-style.md), #329). The menu bar and the popup each store
+> ([ADR-0080](../adr/0080-per-surface-bar-style.md)). The menu bar and the popup each store
 > their own choice (`menuBarStyle` / `dropdownStyle`), so in a mockup you **cannot assume** both
-> surfaces draw the same thing — all nine pairs are available. The former fourth case `.mixed`
-> (Pressure in the menu bar + Progress in the popup) has been removed: it was the only way to make the
-> surfaces differ, and therefore it mixed two different things into one value — *which presentation*
-> and *on which surface*. Now it is simply the pair `(.pressure, .progress)`.
+> surfaces draw the same thing — all nine pairs are available. `(.pressure, .progress)` is simply
+> one of those nine pairs, like any other.
 >
 > **Bars are drawn in THREE places, not on two surfaces** (#261,
 > [ADR-0110](../adr/0110-legend-is-a-static-page-rendered-by-the-live-code.md)). The third is the
@@ -165,9 +163,8 @@ works anyway.
 > case), and **all three styles are visible at once**, because each one's anatomy is explained
 > alongside the others.
 >
-> The cases were renamed together with the UI twice — in #307 (`"pacing"`/`"simple"`) and in #388
-> (`"gauge"` → `"balance"`); stored values migrate through `BarStyle.legacyRawValues`, which now covers
-> all three. `"mixed"` is **deliberately absent** from `BarStyle.legacyRawValues`: that table maps a raw
+> Stored legacy raw values migrate through `BarStyle.legacyRawValues`, which covers all three current
+> cases. `"mixed"` is **deliberately absent** from `BarStyle.legacyRawValues`: that table maps a raw
 > value to **one** style, whereas `"mixed"` decomposes into **different** values on the two surfaces, so
 > its migration is carried by a separate `BarStyle.legacySurfaceStyles(for:)` that returns a pair.
 >
@@ -196,12 +193,11 @@ reads as "already spent", so the capsule must not start any further left than `g
 live in `PopupBarView.stripRect(pinsStart:)`.
 
 This is **not** a special case for zero spend: the floor kicks in on any gap narrower than 3.5 pt,
-which is to say every time spending tracks the pace almost exactly. At `u = 0.40, t = 0.405` the old
-geometry started the color a point to the left of `usage`. At `usage = 0` it is simply most visible,
-because there the left edge also fell into the strip snap to `minX` and the pill crept out from under
-the time marker. The invariant is checked by
-[`scripts/check-strip-geometry.py`](../../scripts/check-strip-geometry.py) on a 1001×1001 grid: 19,910
-affected states before the fix (up to 4.75 pt), zero after.
+which is to say every time spending tracks the pace almost exactly. At `usage = 0` it is simply most
+visible, because there the left edge also falls into the strip snap to `minX` and the pill would
+otherwise creep out from under the time marker. The invariant is checked by
+[`scripts/check-strip-geometry.py`](../../scripts/check-strip-geometry.py) on a 1001×1001 grid: zero
+affected states.
 
 ### What `.pressure` draws (**Pressure**)
 
@@ -360,27 +356,22 @@ On the **idle** bar the floor applies in all three styles — idle draws a pill 
 is zero on both scales, so all three styles draw zero:
 
 - **The shared base** — a gray track + a **minimum pill at zero**, **green** (`ready to start`) or gray
-  (`blocked`). The same shape any zero-length strip has. No zones. Before
-  [#381](https://github.com/artem-from-ua/cc-timer/issues/381) "ready" was blue when the weekly
-  headroom was large — there is no blue idle on any surface now, and the weekly state does not affect
-  this pill ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)).
+  (`blocked`). The same shape any zero-length strip has. No zones. There is no blue idle on any
+  surface, and the weekly state does not affect this pill
+  ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)).
 - **Progress** adds a **time marker at zero** (the window has just rolled over) — it covers the pill, so
   Progress idle reads as "track + marker on the left".
 - **Pressure** leaves the pill by itself.
 
-**There is no full-width solid fill in any style.** Before
-[ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md) Progress drew one, and it read as Pressure
-at full pressure — the loudest mark for the calmest state.
+**There is no full-width solid fill in any style** ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)) — a full-width fill would read as Pressure at full pressure, the loudest mark for the
+calmest state.
 
 The tick ruler is present in both (Pressure has no ticks — only the zero tick, ADR-0098). On the menu
 bar, under muting, idle takes the shared `calmWhite` rather than a dimmer tone of its own — and at
 exactly the same alpha (`bright()`), so it does not glow brighter than the calm bars beside it. **When
-exactly it gets muted** is a simple rule from
-[#381](https://github.com/artem-from-ua/cc-timer/issues/381): `barStyle == .pressure ||
+exactly it gets muted** is a simple rule: `barStyle == .pressure ||
 colorsTell.mutesCalm`. That is: under **Pressure always**, and under Progress/Balance in either of the
-two muting "Colors tell me" modes (`Slow down`, `Slow down or speed up`). There are no exceptions left:
-the former "blue idle stays blue under `Yellow + Green`"
-([#343](https://github.com/artem-from-ua/cc-timer/issues/343)) went away along with blue.
+two muting "Colors tell me" modes (`Slow down`, `Slow down or speed up`). There are no exceptions.
 
 **In the popup under Pressure a calm zero-length pill glows harder.** A strip collapsed to zero has no
 width to carry the color, so instead of the ambient halo (radius 21 pt, alpha 0.35) it gets a **triple**
@@ -406,11 +397,10 @@ three scales, and two of them have no marker. So a mockup without a marker still
 the way: `Pressure` measures from the **left edge**, `Balance` **signed from the center**, and the two
 are easy to confuse (see `BarScale`, [ADR-0079](../adr/0079-centred-zero-gauge-scale.md)).
 
-The per-surface flag pairs are gone from here, and they disappeared in two steps: before #326 the scale
-was encoded by `menuBarUsesPressureScale` / `popupUsesPressureScale`, before #329 by `menuBarScale` /
-`popupScale` and `menuBarShowsTimeMarker` / `popupShowsTimeMarker`. Now `BarStyle` has **one** `scale`
-and one `showsTimeMarker` ([ADR-0080](../adr/0080-per-surface-bar-style.md)): the type describes one
-surface's presentation, and which surface that is, is known by whoever reads it.
+`BarStyle` has **one** `scale` and one `showsTimeMarker`
+([ADR-0080](../adr/0080-per-surface-bar-style.md)): the type describes one surface's presentation,
+and which surface that is, is known by whoever reads it. There is no per-surface flag pair anywhere
+in the model.
 
 Before publishing a mockup with bars:
 
@@ -444,9 +434,9 @@ Similar to a fill but not one: **any** `.pressure` bar, where the strip is also 
 though its length is `pressureLength` (the gap against the time remaining), not the level. A
 left-anchored strip does **not** by itself mean a level fill: only the start matches, not the end.
 
-The **credit** row under `.pressure` used to stand here as an example — that state no longer exists: the
-credit bar is always Progress ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)), so a left-anchored
-credit strip does not occur at all.
+**The credit bar never appears under `.pressure`** — it is always Progress
+([ADR-0092](../adr/0092-extra-usage-own-ruler.md)), so a left-anchored credit strip does not occur at
+all.
 
 ## Color is computed, not chosen
 
@@ -583,7 +573,7 @@ Check before you draw a state.
 | Combination | Why it is impossible |
 |---|---|
 | **Blue 5h while 7d ∈ {yellow, orange, red}** | The weekly-capacity gate ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)): `blueAllowed == false`, so the "behind" side stays green no matter how much headroom there is. Applies to both the pacing bar and the idle pill |
-| **Blue on a per-model / scoped row** — whatever the weekly state | They are slices of the very 7-day limit blue talks about, so the advice would be addressed to itself: `blueAllowed == false` **unconditionally** ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)). The rule lives in the model, so it is not just about the pixel — before #426 it lived only in the renderer, and the journal managed to record 2,214 such blues that were never on screen |
+| **Blue on a per-model / scoped row** — whatever the weekly state | They are slices of the very 7-day limit blue talks about, so the advice would be addressed to itself: `blueAllowed == false` **unconditionally** ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)). The rule lives in the model, not just in the renderer, so the journal can never record a blue that was never on screen |
 | A `stand by …` line on the **5-hour** row | The gate is `index == PopupViewController.sevenDayRowIndex`: the signal exists **only** on 7d. A five-hour window resets at least twice a day and fixes itself, so the cost of a pause there changes no decision |
 | A `stand by …` line on a **non-orange** 7d | `standBySecondsForGreen` returns `nil` for every severity except `.ahead`. On green or blue there is nothing to wait for, on yellow the lead is within norms, and red (`usage >= 1`) is cured **only** by the reset: spending has hit the ceiling, and time will not catch up with it |
 | A `stand by …` line **without** ⌥ held | The line is built only under `optionHeld`. At rest the 7d section is two lines + a bar, like any other |
@@ -594,8 +584,8 @@ Check before you draw a state.
 | The card's **even bottom margin while the update line is showing** | The full margin belongs to a plate with no neighbour at all. The update line is a neighbour like any other, so the trimmed inset applies whenever it is visible — even with the caption off and ⌥ up |
 | `stand by` **shorter than 20 min** | Cut off by `PacingModel.standByFloorSeconds`. The state is almost unreachable: it exists only in the last ~2 hours of a window (remaining < 125 min) **and** within a spending band hundredths of a pp wide (at 120 min remaining — `u ∈ [99.0000%, 99.0079%]`). The minimum orange wait equals `0.16·(1−t)·D` itself, and mid-week that is already ≈13 hours. The threshold is a guard against "stand by 3m", not a working filter |
 | `stand by` that runs **right up to the reset** | Cut off even earlier — by the `remainingSeconds − standBy > pacingOrangeOverrideSeconds` check inside the calculation: a green that would arrive in the last 20 minutes of a window would be orange there anyway. There is **no separate "10-minute" rule and no need for one** — it is nested inside this one and would not have rejected a single case |
-| **A blue idle pill** — whatever the weekly state | Since [#381](https://github.com/artem-from-ua/cc-timer/issues/381) there is no blue idle anywhere: the pill is green (or white under muting), and gray is left only for `isBlocked`. The weekly gate no longer enters into it — the fields `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` do not exist |
-| The pause glyph **and** the currency symbol together | Guaranteed by [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md): the credits marker is zeroed out while `blockedPause`. Until recently the pair **was** reachable — at `spend_limit_reached` the icon was turned on by `isActive` (`enabled \|\| spendLimitReached`) while the block came from `!creditsCanCover` (`enabled && !spendLimitReached`); the old rationale here confused "credits are active" with "credits cover it" |
+| **A blue idle pill** — whatever the weekly state | There is no blue idle anywhere: the pill is green (or white under muting), and gray is left only for `isBlocked`. The weekly gate does not enter into it — the fields `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` do not exist |
+| The pause glyph **and** the currency symbol together | Guaranteed by [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md): the credits marker is zeroed out while `blockedPause` |
 | An exhausted limit with **neither** of them | The flip side of the same thing: at `mainWindowExhausted` the states are exhaustive — either `creditsCanCover` (the currency symbol) or `isBlocked` (the pause glyph). There is no empty variant |
 | Bars under the pause glyph or under the currency symbol | Both "not on a subscription" answers produce `MenuBarMode.iconOnlyReset` — a case with no field for bars ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)), so there is nothing to draw them from. **With no exceptions from [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md):** the stale phase that used to hold diagnostic bars next to ⚠️ has been cancelled |
 | **A countdown next to bars** | `MenuBarMode.expanded` has no field for the number ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)) — the pair is unrepresentable, not merely unreachable. The number lives only in `iconOnlyReset` (glyph + countdown, no bars) |

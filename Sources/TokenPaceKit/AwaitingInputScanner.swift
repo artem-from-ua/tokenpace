@@ -27,7 +27,7 @@ import Foundation
 /// we take its `jobId` and read **only** `jobs/<jobId>/state.json`, never scanning the whole
 /// `jobs/` tree (it holds dozens of *dead* completed-session dirs that would inflate the count).
 ///
-/// **"Live" is enforced, not assumed** (#275). A session file outlives its process: `claude` killed
+/// **"Live" is enforced, not assumed.** A session file outlives its process: `claude` killed
 /// or crashed while a permission prompt was up leaves `"status":"waiting"` on disk with nothing left
 /// to rewrite it, so the hand would never go down (the file survives until Claude Code's
 /// `cleanupPeriodDays` sweep — 30 days by default). Every session is therefore checked against the
@@ -60,7 +60,7 @@ public struct AwaitingInputScanner {
     /// The `~/.claude` directory. Injectable so a test can point at a fixture tree.
     private let claudeHome: URL
     private let fileManager: FileManager
-    /// Process-table lookup behind the dead-session filter (#275). Injectable for tests.
+    /// Process-table lookup behind the dead-session filter. Injectable for tests.
     private let liveness: ProcessLiveness
 
     public init(
@@ -133,7 +133,7 @@ public struct AwaitingInputScanner {
         return AwaitingSession(project: project, daysUntilDeletion: daysLeft, name: name)
     }
 
-    /// The session's display title, or `nil` when Claude Code never gave it one (#438).
+    /// The session's display title, or `nil` when Claude Code never gave it one.
     ///
     /// An unnamed session does not omit the key — it gets a **placeholder**: its own `jobId`, which is
     /// the sessionId's first 8 characters. Four shapes therefore all mean "unnamed", and this collapses
@@ -174,7 +174,7 @@ public struct AwaitingInputScanner {
 
     // MARK: Liveness
 
-    /// Whether the `claude` process that owns this session file is still running (#275).
+    /// Whether the `claude` process that owns this session file is still running.
     ///
     /// Two conditions, both required:
     /// 1. **The pid exists.** A session whose process is gone can never update its own file, so a
@@ -256,20 +256,16 @@ public struct AwaitingInputScanner {
     /// `linkScanPath`. For **worktree** sessions that path is derived from the non-worktree project
     /// dir and points at a journal that does not exist there, so the scanner never advances and the
     /// job state **freezes** on whatever phase it last recorded — typically `needs:"approve plan"` +
-    /// `tempo:"blocked"`. The session then keeps working (or goes idle) while `state.json` still
-    /// advertises "awaiting", producing a phantom hand that never clears. We therefore trust the
-    /// job-state signals **only while `state.json` is not meaningfully older than the session file**
-    /// (which the live daemon rewrites on every status flip). A frozen `state.json` is ignored and
-    /// the fresh session `status` wins. See ADR-0066 for the original source-of-truth choice.
+    /// `tempo:"blocked"`, producing a phantom hand that never clears. We therefore trust the job-state
+    /// signals **only while `state.json` is not meaningfully older than the session file** (which the
+    /// live daemon rewrites on every status flip). A frozen `state.json` is ignored and the fresh
+    /// session `status` wins. See ADR-0066 for the original source-of-truth choice.
     ///
     /// **Post-approval stall (`busy` guard).** The freshness guard above only catches a job state
     /// that *lags* the session. Right after a plan is approved the daemon stops rewriting **both**
-    /// files at once: `state.json` keeps `needs:"approve plan"` and the session's `statusUpdatedAt`
-    /// freezes at the same instant, so the (purely relative) freshness check sees a "fresh" pair and
-    /// lets the stale `needs` through. The session file still reports the truth — `status:"busy"` —
-    /// so a `busy` session is never awaiting, regardless of what its job state advertises. Observed
-    /// on Claude Code v2.1.220: the phantom hand lasts exactly as long as the turn, since the daemon
-    /// only rewrites the job state when the turn ends (`state:"done"`, `needs:null`).
+    /// files at once, so the (purely relative) freshness check sees a "fresh" pair and lets the stale
+    /// `needs` through. The session file still reports the truth — `status:"busy"` — so a `busy`
+    /// session is never awaiting, regardless of what its job state advertises.
     ///
     /// Internal (not private) so unit tests can exercise the join logic directly on fixture strings.
     func isAwaiting(sessionJSON: String) -> Bool {

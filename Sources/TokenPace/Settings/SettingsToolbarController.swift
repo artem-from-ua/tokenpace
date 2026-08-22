@@ -5,60 +5,34 @@ import AppKit
 /// Owns the Settings window's toolbar: the ‹ › history control and the current pane's name, laid out
 /// the way System Settings lays out its own.
 ///
-/// ### Why the toolbar, and not a row in the detail column
+/// **The toolbar, not a row in the detail column**: a SwiftUI header row would put three independent
+/// sources of vertical spacing in series (the toolbar's empty safe area, the row's own padding, the
+/// `Form`'s top inset), so tuning any one moves the other two. Putting the arrows and the title in
+/// the toolbar removes the empty strip and every compensating offset.
 ///
-/// The earlier attempt drew this header as the first view inside the SwiftUI detail column. That put
-/// three independent sources of vertical spacing in series — the empty safe area the toolbar reserves
-/// at the top of the column, the header row's own padding, and the `Form`'s top inset — so tuning any
-/// one of them moved the other two, and the header could be pushed past the first card or collapsed
-/// out of sight entirely. Putting the arrows and the title in the toolbar itself removes the empty
-/// strip (it now has contents) and with it every compensating offset. The traffic lights are the
-/// window's own children and merely share the horizontal band (measured on System Settings over the
-/// Accessibility API, #311).
-///
-/// ### Why ‹ › are one item holding a segmented control (#314)
-///
-/// They used to be two image-only `NSToolbarItem`s, which the toolbar renders as two system
-/// `NSToolbarButton`s. That shape cannot match System Settings, for a measured reason: a toolbar
-/// button's hover tracking covers **the plate it draws, not the button's frame** (probed live — with
-/// a 40 pt button the plate is 28 pt, and a pointer 1 pt outside the plate lights nothing), and the
-/// plate always renders 12 pt narrower than the button. Two separate buttons therefore always leave
-/// a strip between their plates where the pointer hovers neither — the 8 pt dead zone of #314,
-/// whatever the items' sizes (#313 tried 39/43.5/45/53; a stack with negative spacing overlaps the
-/// boxes instead, and both plates light at once).
-///
-/// A **separated `NSSegmentedControl`** is the System Settings shape. Its two segments expose the
-/// same accessibility tree the real System Settings toolbar has — measured on both, same numbers:
+/// **‹ › as one item holding a segmented control (#314, ADR-0077)**: two separate image-only
+/// `NSToolbarItem`s render as two `NSToolbarButton`s whose hover plate is narrower than the button
+/// frame, leaving an 8 pt dead zone between them whatever the items' sizes. A **separated
+/// `NSSegmentedControl`** matches System Settings' own accessibility tree exactly:
 ///
 /// ```
 /// AXGroup   76×52            ← the toolbar item's slot
 ///   AXGroup ~68×28           ← the span of the two hover plates
-///     AXButton "Back"    40×40 ┐ adjacent (921..961..1001 in System Settings):
-///     AXButton "Forward" 40×40 ┘ zero gap between hit zones, zero dead zone
+///     AXButton "Back"    40×40 ┐ adjacent, zero gap between hit zones
+///     AXButton "Forward" 40×40 ┘
 /// ```
 ///
-/// The control self-sizes to 80×40 (two 40 pt segments), draws each hover plate at 33–34 × 28, and
-/// the plates touch edge to edge — every pointer position over the pair lights exactly one of them
-/// (probed: seam−1 pt lights ‹, seam+1 pt lights ›). A disabled segment dims its template glyph and
-/// draws no plate, which is System Settings' disabled look. Nothing is sized by hand: segment width,
-/// plate metrics and glyph placement are the control's own, so the "system mechanism over measured
-/// constants" rule (ADR-0040) now covers this pair too. Decision record: ADR-0077.
-///
-/// This also retires the #312/#313 workaround stack — walking the titlebar for generated buttons,
-/// re-applying `isBordered` after every validation pass, keeping enablement in the controller so
-/// `validateToolbarItem(_:)` could answer — none of which has anything to attach to any more: the
-/// segmented control is our view, the toolbar never rebuilds it, and enablement is two plain
-/// `setEnabled(_:forSegment:)` writes.
+/// The control self-sizes to 80×40, draws each hover plate at 33–34 × 28 touching edge to edge, and
+/// a disabled segment dims its template glyph with no plate — System Settings' disabled look. Nothing
+/// is sized by hand (ADR-0040: system mechanism over measured constants).
 @MainActor
 final class SettingsToolbarController: NSObject {
 
     private enum Metrics {
-        /// Baseline lift for the title, in points, for the one pixel of vertical alignment left over
-        /// once the glyph box matched the system's in width (measured: rows 41–62 against 40–61).
-        ///
-        /// Applied as a `.baselineOffset` attribute rather than a stack inset: the toolbar centres the
-        /// item vertically in the bar, so neither `edgeInsets` nor a half-point on the spacer moved
-        /// the label at all — both were measured and left the glyphs on the same rows.
+        /// The one pixel of vertical alignment left over once the glyph box matched the system's in
+        /// width (measured: rows 41–62 against 40–61). Applied as a `.baselineOffset` attribute rather
+        /// than a stack inset: the toolbar centres the item vertically in the bar, so neither
+        /// `edgeInsets` nor a spacer offset moves the label at all.
         static let titleLift: CGFloat = 0.5
     }
 
@@ -72,10 +46,8 @@ final class SettingsToolbarController: NSObject {
     /// Invoked when › is clicked.
     var onForward: (() -> Void)?
 
-    /// The ‹ › pair. Built once here and handed to the toolbar as the nav item's view — the toolbar
-    /// styles a segmented control in an item exactly like System Settings' own back/forward cluster
-    /// (borderless at rest, a rounded plate under the hovered segment) and never rebuilds it, so
-    /// nothing needs re-applying on validation passes (the #312 flicker class of bugs).
+    /// Built once here and handed to the toolbar as the nav item's view; the toolbar never rebuilds
+    /// it, so nothing needs re-applying on validation passes (the #312 flicker class of bugs).
     private let navControl = NSSegmentedControl()
     private let titleLabel = NSTextField(labelWithString: "")
 
@@ -100,9 +72,8 @@ final class SettingsToolbarController: NSObject {
     /// Reflect the current pane and what the history buttons can reach.
     func update(title: String, canGoBack: Bool, canGoForward: Bool) {
         // Every write is guarded, because this runs on **any** model change, not just a navigation
-        // one: `observeToolbarState` re-arms `withObservationTracking` on each fire, so toggling an
-        // unrelated setting lands here too. Re-assigning the same value makes AppKit repaint, which
-        // once showed up as a flicker under the pointer (#312).
+        // one. Re-assigning the same value makes AppKit repaint, which once showed up as a flicker
+        // under the pointer (#312).
         if titleLabel.stringValue != title {
             titleLabel.attributedStringValue = NSAttributedString(
                 string: title,
@@ -126,9 +97,8 @@ final class SettingsToolbarController: NSObject {
         // Buttons, not a sticky selection: the clicked segment reports through `selectedSegment`
         // inside the action and then releases.
         navControl.trackingMode = .momentary
-        // The old toolbar-generated buttons took a bare symbol and sized it themselves (13 pt medium
-        // at `.large`, measured 17×29 px @2x in #313). A segment applies no such treatment, so the
-        // same configuration is set explicitly to keep the glyphs pixel-identical.
+        // A segment applies no automatic symbol treatment, so it's set explicitly (13 pt medium,
+        // `.large` scale, measured 17×29 px @2x).
         let glyph = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium, scale: .large)
         for (segment, back) in [(0, true), (1, false)] {
             let symbol = NSImage(
@@ -151,17 +121,9 @@ final class SettingsToolbarController: NSObject {
     }
 
     private func configureTitle() {
-        // Sized against the system's own pane title, compared pixel-for-pixel at the same window size:
-        // theirs renders 22 px tall (@2x), `.headline` gave 19 and `systemFontSize` (the *body* size)
-        // was further off still. 15 pt semibold lands on 22.
-        // Matched against a System Settings window showing the *same word* ("VPN") at the same window
-        // size — the only comparison that works here. Earlier attempts measured our all-caps pane name
-        // against a system pane with lowercase and descenders ("Обліковий запис Apple"), whose glyph
-        // box is not comparable, and that pointed the size the wrong way twice.
-        //
-        // Final render matches the system's exactly: glyph box x 180–238, y 40–61 (@2x, x relative to
-        // the column divider), with 57.9% ink coverage against their 57.9%. `.semibold` is what
-        // carries the weight — at `.medium` the stems came out 4–5 px against the system's 5–6.
+        // Sized against the system's own pane title, compared pixel-for-pixel at the same window
+        // size: theirs renders 22 px tall (@2x). 15 pt semibold lands on 22 (glyph box x 180–238,
+        // y 40–61, 57.9% ink coverage matching theirs exactly).
         titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
         // `labelColor` is the one that dims when the window resigns key, which is what System Settings'
         // title does — a hardcoded white stayed bright on a background window.
@@ -180,9 +142,9 @@ final class SettingsToolbarController: NSObject {
 
 extension SettingsToolbarController: NSToolbarDelegate {
 
-    /// Leading order, no `.flexibleSpace` in front: a flexible space here shoves the items into the
-    /// right corner (measured), while System Settings keeps them at the left of the detail column.
-    /// The `.sidebarTrackingSeparator` supplies the sidebar-width offset that puts them there.
+    /// No `.flexibleSpace` in front: it would shove the items into the right corner. The
+    /// `.sidebarTrackingSeparator` supplies the sidebar-width offset that keeps them at the left of
+    /// the detail column, like System Settings.
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.sidebarTrackingSeparator, ItemID.nav, ItemID.title]
     }
@@ -196,28 +158,21 @@ extension SettingsToolbarController: NSToolbarDelegate {
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch identifier {
         case ItemID.nav:
-            // One item for the pair, with the segmented control as its view. Two separate image
-            // items are what produced the #314 dead zone (see the type doc); a custom *plain-button*
-            // view is no alternative either — an `NSButton` outside the toolbar's own generation
-            // never shows the hover plate at all (probed, #314).
-            //
-            // No min/max sizes anywhere: the control self-sizes to the system's 80×40 and the
-            // toolbar wraps it in the same 76×52 slot System Settings' pair occupies.
+            // One item for the pair, with the segmented control as its view (see the type doc for
+            // why two separate items or a plain-button view don't work). No min/max sizes: the
+            // control self-sizes to the system's 80×40 and the toolbar wraps it in the same 76×52
+            // slot System Settings' pair occupies.
             let item = NSToolbarItem(itemIdentifier: identifier)
             item.view = navControl
             item.label = "Back/Forward"
             item.paletteLabel = item.label
-            // `isNavigational` is what these two are: AppKit reserves it for back/forward pairs and
-            // positions them accordingly.
+            // `isNavigational` is what these two are: AppKit reserves it for back/forward pairs.
             item.isNavigational = true
-            // Enablement flows from `update(...)` straight into the segments; there is nothing for
-            // the toolbar's validation pass to manage (for a view item it would be a no-op anyway).
+            // Enablement flows from `update(...)` straight into the segments; nothing for the
+            // toolbar's validation pass to manage.
             item.autovalidates = false
             return item
         case ItemID.title:
-            // The label is the item's view directly. It used to be wrapped in a stack whose
-            // `edgeInsets` supplied a leading gap, which existed to clear a hand-positioned chevron
-            // pair; the toolbar spaces its own items now.
             let item = NSToolbarItem(itemIdentifier: identifier)
             item.view = titleLabel
             return item

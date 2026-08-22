@@ -360,26 +360,12 @@ This is **not a flaw in the filter but the limit of its purpose**. The consequen
   an event timeline or a distribution of durations. Mixing them in one diagram means comparing
   quantities of different natures.
 
-## Isolating work
-
-The journal has no "the user was working" field. All it has is the counter going up.
-
-```python
-# a "moment of work" = an adjacent pair of measurements between which util rose inside ONE window
-same_window = r5 and prev_r5 and abs((r5 - prev_r5).total_seconds()) < 90
-delta = (util - prev_util) if same_window else (util if util > 0 else 0)
-if delta > 0:
-    work.append((prev_t, t, delta))
-```
-
-The `same_window` check is mandatory: without it a window reset (a drop from 94% to 0%) reads as a
-negative increment, and the first measurement of the new window as a jump.
-
 ## Stitching sessions: the threshold is a parameter, not a constant
 
-A "session" does not exist in the journal. It is **constructed** by stitching together moments of work
-separated by pauses shorter than a threshold. The analyst picks the threshold, and everything depends
-on it:
+The journal has no "the user was working" field — a moment of work is detected the same way as in
+["Detecting work by `util` growth"](#detecting-work-by-util-growth) above. A "session" does not exist
+in the journal either. It is **constructed** by stitching together moments of work separated by
+pauses shorter than a threshold. The analyst picks the threshold, and everything depends on it:
 
 | Stitching threshold | Sessions | Median | Typical (lognormal) |
 |---|---|---|---|
@@ -820,17 +806,6 @@ from `util` increments and the schedule of windows.
 until they change model or effort. When comparing series captured in different periods, you have to
 assume the fourth component may have changed silently — it leaves no trace whatsoever in the journal.
 
-**Why this may become a setting.** The profile is not a characteristic the app has to guess, but a
-quantity the user knows about themselves better than any algorithm — especially the fourth
-component, which the app cannot see at all. The plausible form is not threshold sliders (those must
-not be twiddled, see above) but **choosing a mode that already carries a coherent set of
-parameters**: say "tight limit, long runs on a heavy model" versus "roomy limit, scattered work".
-Internally that sets both the thresholds and which signal is even allowed to appear.
-
-The key difference from adjustable thresholds: the user is describing **themselves**, not the
-verdict they want. Choosing "my tasks are big" is a fact about the work; choosing "show me less
-orange" is an attempt to switch off an unwelcome answer.
-
 **Consequence for analysis:** the result of a formula comparison is reported **per profile
 separately**, and a profile is described by all three components, not by the plan alone. Series with
 different profiles are not mixed — otherwise the averaging hides the very difference the signal
@@ -997,11 +972,6 @@ not using", so it is `false` whenever that statement is untrue, addressed to nob
 | `opus` / `sonnet` / `scoped` | **`false`** | they **are** slices of that week — the advice is addressed to itself |
 | credits, idle | `false` | they give no pacing advice at all |
 
-The third row is new. Before #426, per-model windows carried `weeklyHasHeadroom`, and because of
-that **2,214** `scoped.sev == "blue"` records settled in the journal that were never on screen (the
-popup suppressed them with its own render flag). The v4 migration recomputed them; in migrated lines
-the original verdict is preserved in `sevRaw`.
-
 The source of truth is `PacingBucket.of(_:)` and the `PacingModel` constants; when reproducing this
 in analysis, port **all** the branches, otherwise the distributions will diverge from what the user
 saw.
@@ -1122,25 +1092,17 @@ must equal zero.**
 
 ### An example of how this looks in practice
 
-The request "let me twiddle the color switching thresholds" was checked in exactly this order — and
-**failed step 1**:
+A request to "twiddle the color switching thresholds" fails step 1: stretching `aheadThreshold` from
+0.16 to 0.25 (by 56%) removes **less than half a point** of orange — the parameter is nearly
+insensitive in the direction you would want to turn it — and moving the boundary changes the verdict
+without changing the spending, contradicting the "value is input, color is output" principle from
+[users-and-goals.md](users-and-goals.md).
 
-- **Sensitivity measured:** stretching `aheadThreshold` from 0.16 to 0.25 (by 56%) removes **less
-  than half a point** of orange, because the threshold narrows to zero at the end of the window
-  anyway. The parameter is almost insensitive in the direction you would want to turn it.
-- **A conceptual flaw found:** moving the boundary means **changing the verdict without changing the
-  spending**. That directly contradicts the "the value is the model's input, the color is its
-  output" principle from [users-and-goals.md](users-and-goals.md). For toning colors down there is
-  already `Colors tell me`, which damps the calm tones rather than shifting the alarm.
-- **A replacement proposed that yields an action:** a "how close to the threshold" panel — the
-  distribution of `lead = util − timePct` against the dynamic threshold curve. It answers the real
-  question ("why do I so rarely see orange") without letting anyone break the scale.
-
-The panel's result on the two series turned out to be opposite, and in both cases it yielded an
-action: on one, the median was **31% of the threshold** (typically it does not reach the boundary,
-so the warning stays rare and therefore noticeable), on the other — **174%** (typically already past
-the boundary, meaning orange has become the normal working state and stopped being a signal; the
-thing to watch is the weekly bar).
+**A replacement that yields an action instead:** a "how close to the threshold" panel — the
+distribution of `lead = util − timePct` against the dynamic threshold curve. On the two series its
+median came out opposite (**31%** of the threshold on one, typically far from the boundary; **174%**
+on the other, typically already past it and effectively the normal working state) — both readings
+are actionable, unlike a bare accuracy number.
 
 ## Which charts to build, and when
 
@@ -1250,45 +1212,20 @@ one: the row sum and the column sum. They stand **before** the intersection bloc
 by a gap, because they are read first — first "how is each bar distributed", then "how do they
 combine". The corner where they meet stays empty: the intersection of two marginals has no meaning.
 
-> **The gap is needed on both sides — these are two different elements, and the second one is easy
-> to forget.** The empty column between the marginal column and the matrix suggests itself, since in
-> an HTML table it is a visible cell; the empty **row** between the marginal row and the matrix has
-> to be added as its own `<tr>`, and without it the "total" band reads as an ordinary state row.
-> The symptom on a real render: the 7d marginal row visually sticks to the first intersection row,
-> and the eye takes it for a "blue × something" combination that does not exist.
+> **The empty row between the marginal row and the matrix has to be added as its own `<tr>`** —
+> the empty column falls out naturally from an HTML table, but the row does not, and without it the
+> "total" band reads as an ordinary state row.
 >
-> **Both gaps must look equal — and the gap is not what is at fault here.** The symptom: the break
-> between the marginal band and the intersection block is several times larger than the row gap, no
-> matter how much you narrow the spacer column. The cause is different: in the marginal **row** the
-> corner cell is empty (the corner has no meaning), but it still takes up the **full width of the
-> marginal column**. Measured on a real render: `td.zero` = 82 px + spacer 12 px = 94 px of
-> emptiness against 10 px between rows.
+> **The corner cell (marginal row × marginal column) has no meaning but still takes up width.**
+> Absorb it with `colspan="2"` on the marginal row's header so the "total" band starts exactly where
+> the intersection block starts. Side effect: the header is now twice as wide, so `text-align: right`
+> pushes the label to the edge of the doubled width — fix with an inner `<span>` of the track's fixed
+> width, not a change of alignment.
 >
-> Narrowing the spacer does nothing here — it was already 10–12 px. **The cure is absorbing the
-> corner**: the marginal row's header gets `colspan="2"` and covers the empty cell, after which the
-> "total" band starts exactly where the intersection block starts, and the only visible break left
-> is the spacer.
->
-> **The moral is broader than this case: measure geometry, don't read CSS.** The `width` value in
-> the style matched what had been set on all three failed attempts — what lied was not the property
-> but the assumption about which element creates the emptiness. A single run that prints
-> `getBoundingClientRect()` for every cell in the row (`L`, `R`, `w`) finds the culprit immediately.
->
-> **The reliable way to set the tracks is a `<colgroup>` with explicit widths**, not `width` on the
-> cells. Under `table-layout: fixed` the browser takes widths from the first row, and the spacer
-> column remains the only track with no content of its own, so any leftover width settles right
-> there. `<col>` plus `min-width`/`max-width` on the spacer cell itself removes that freedom
-> entirely.
->
-> **Separately: verify in the environment the reader is looking at.** The local headless render
-> showed a 16 px break at every window width, while in the published artifact the maintainer saw one
-> roughly ten times larger. Until the cause is reproduced, "it looks right on my end" is not an
-> answer — and every fix made "from the description" spends a cycle blind.
->
-> **A side effect of `colspan` that is not visible right away:** the row header is now twice as
-> wide, and `text-align: right` pushes the label to the right edge of the **doubled** width — it
-> stops lining up with the labels of the other rows. The cure is an inner `<span>` of the track's
-> fixed width, not a change of alignment.
+> **Set track widths via `<colgroup>`, not `width` on cells.** Under `table-layout: fixed` the
+> browser takes widths from the first row, and the spacer column — the only track with no content of
+> its own — absorbs any leftover width. `<col>` plus `min-width`/`max-width` on the spacer removes
+> that freedom entirely.
 
 **The horizontal axis label is centered over the grid, not over the container.** It describes the
 intersection columns, so pushed to the left it ends up over the row-name column, which it has

@@ -187,17 +187,14 @@ Measured reference points (`monospacedDigitSystemFont(ofSize: 11)`):
 | `10h` · `22h` · `15d` | 20.5–20.8 pt |
 | `10m` · `45m` | 23.6 pt — **today's widest label** |
 | `20:40` | 31.3 pt — **in the popup only**; there is no clock time in the menu bar ([ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md)) |
-| `4h41m` | 37.2 pt — the former maximum; the combined format is gone |
 | `€13.32` | 38.3 pt |
 | `$54,321.00` | 62.6 pt |
 
-The widest label dropped from 37.2 to 23.6 pt along with the removal of the 90-minute threshold
-([#284](https://github.com/artem-from-ua/tokenpace/issues/284)), and
-[#303](https://github.com/artem-from-ua/tokenpace/issues/303)
-([ADR-0075](../adr/0075-reset-label-reserved-slot.md)) made it **constant**: the label is drawn in a
-fixed-width slot (24 pt — the widest of `10m`/`45m`/`<1m`) with the text centered, so a change in
-the number of digits (`10h` → `9h`) or in the unit (`49m` → `1h`) no longer shifts the widget. The
-price is up to 10 pt of emptiness around short labels, split evenly on either side of the text.
+The label's width is **constant** ([ADR-0075](../adr/0075-reset-label-reserved-slot.md)): it is
+drawn in a fixed-width slot (24 pt — the widest of `10m`/`45m`/`<1m`) with the text centered, so a
+change in the number of digits (`10h` → `9h`) or in the unit (`49m` → `1h`) does not shift the
+widget. The price is up to 10 pt of emptiness around short labels, split evenly on either side of
+the text.
 
 The slot is reserved **only while the label is on screen**: under the default `smart` the countdown
 is absent most of the time, and holding space for it would mean making the calm state pay for the
@@ -221,10 +218,10 @@ Not everything that looks like the app's decision is one.
 | Quantity | Who sets it | Consequence |
 |---|---|---|
 | The monthly spending cap | The user, in Anthropic billing | `spend.limit: null` → the credits row collapses into a plain counter with no bar and no verdict |
-| Whether the 5-hour bar hides while calm | The row **"Hide the top 5h bar"** — [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift): `Until it needs attention` / `Never`, default **`Until it needs attention`** ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md), which narrowed the three-way choice of [ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md); the type and segment names — [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) | The top 5-hour bar disappears while it is calm and comes back on orange/red; the 7-day one always stays |
+| Whether the 5-hour bar hides while calm | The row **"Hide the top 5h bar"** — [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift): `Until it needs attention` / `Never`, default **`Until it needs attention`** ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)) | The top 5-hour bar disappears while it is calm and comes back on orange/red; the 7-day one always stays |
 | The bar style — **separately for the menu bar and for the dropdown** | `menuBarStyle` / `dropdownStyle`, each of them progress / pressure / balance ([ADR-0080](../adr/0080-per-surface-bar-style.md)) | The time marker is there or it is not — and the scale changes with it: Progress measures in fractions of the window; Pressure measures against the time remaining, so **width carries urgency** ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)); Balance measures the same thing **with a sign, from the center**, so **direction carries which side of plan you are on**, and the left half shows the surplus you will not manage to spend ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md)). The surfaces are independent — a denser style in the roomy popup and a quieter one in the cramped bar are set separately |
-| What exactly the bar colors should be telling you | The row **"Colors tell me"** — [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift): `Slow down` / `Slow down or speed up` (the default) / `How it's going` ([ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md), [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) | Muting the calm tones toward white — and **only for the pacing bars** ([ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md): the service dot, the currency glyph, and the idle pill do not read this setting — the dot still does not, even after [ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md), which changed its tone but not who decides it). Under the **Pressure** style the row is **disabled and shows `Slow down`**: there the calm side is muted unconditionally, so the choice would change nothing, and `Slow down` is a truthful description of what is drawn. The stored value is not overwritten and returns on Balance/Progress |
-| The popup sections | [`PopupSectionVisibility`](../../Sources/TokenPaceKit/PopupSectionVisibility.swift) — `When it needs attention` / `Once used` / `Always` (ordered quieter→louder, [ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md) — which superseded [ADR-0087](../adr/0087-above-zero-section-visibility.md) and §5–§6 of [ADR-0100](../adr/0100-dropdown-style-tiles-and-retired-option-segment.md), [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) | Per-model and credits, each under its own key. The credits row **does not offer** `whenItNeedsAttention` (`creditsOffered`): with no spending ceiling there is no bar, and therefore no severity. The `optionOnly` case has been **removed from the enum** — ⌥ reveals the group under any choice anyway; the old raw value is read through `legacyRawValues` |
+| What exactly the bar colors should be telling you | The row **"Colors tell me"** — [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift): `Slow down` / `Slow down or speed up` (the default) / `How it's going` ([ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)) | Muting the calm tones toward white — and **only for the pacing bars** ([ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md): the service dot, the currency glyph, and the idle pill do not read this setting). Under the **Pressure** style the row is **disabled and shows `Slow down`**: there the calm side is muted unconditionally, so the choice would change nothing, and `Slow down` is a truthful description of what is drawn. The stored value is not overwritten and returns on Balance/Progress |
+| The popup sections | [`PopupSectionVisibility`](../../Sources/TokenPaceKit/PopupSectionVisibility.swift) — `When it needs attention` / `Once used` / `Always` (ordered quieter→louder, [ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)) | Per-model and credits, each under its own key. The credits row **does not offer** `whenItNeedsAttention` (`creditsOffered`): with no spending ceiling there is no bar, and therefore no severity |
 
 **Before proposing "remove X, it isn't always appropriate", check whether the user cannot already
 remove it themselves.** Often the switch sits in the very place the quantity itself is set — and

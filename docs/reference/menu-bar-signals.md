@@ -57,9 +57,8 @@ Two caveats:
 
 - **"One bar = 5h is calm" holds under the default
   [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift)` = .untilItNeedsAttention`** — the
-  `Until it needs attention` segment in the "Hide the top 5h bar" row (renamed from
-  `CalmBarHiding.fiveHour` in [#381](https://github.com/artem-from-ua/cc-timer/issues/381)). Anyone
-  who picked `Never` always sees both.
+  `Until it needs attention` segment in the "Hide the top 5h bar" row. Anyone who picked `Never`
+  always sees both.
 - **Idle is a different reason for one bar.** When there's no active session, the 5-hour window
   doesn't exist at all ([ADR-0027](../adr/0027-session-idle-no-phantom-reset.md)), and its bar is
   drawn as zero ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)). Same pixel, different
