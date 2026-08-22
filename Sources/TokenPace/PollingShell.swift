@@ -973,7 +973,11 @@ actor StubUsageTransport: UsageTransport {
         let actions = mode == .githubDegraded ? "degraded_performance" : "operational"
         // Long-settled, well outside `PopupViewController.recoveryWindow`, so a healthy component
         // never renders as "just recovered" in a frame whose subject is something else.
-        let changed = Self.isoString(Date(timeIntervalSinceNow: -6 * 3600))
+        // Stamped against the **stub's** clock, not the wall clock. Most scenarios freeze time at a
+        // fixed anchor, and a real-time stamp would sit in that anchor's future — every component
+        // would read as having changed "0m" ago, which puts the healthy ones inside the
+        // recently-recovered window and shows all five rows in a frame that should show one.
+        let changed = Self.isoString(now().addingTimeInterval(-6 * 3600))
         func entry(_ name: String, _ status: String) -> String {
             "{\"name\":\"\(name)\",\"status\":\"\(status)\",\"updated_at\":\"\(changed)\"}"
         }
@@ -991,9 +995,29 @@ actor StubUsageTransport: UsageTransport {
             entry("Codespaces", "operational"),
             entry("Copilot AI Model Providers", "operational"),
         ].joined(separator: ",")
+        // An incident on the frames that have one, so ⌥ has something to switch to for this provider
+        // (#454). Shaped like the real feed: its own `components[]` naming the affected service, an
+        // update with a body, and a shortlink the row links to.
+        let incidents: String
+        if mode == .githubDegraded || mode == .githubOutage {
+            let affected = mode == .githubOutage ? "Git Operations" : "Actions"
+            let affectedStatus = mode == .githubOutage ? "major_outage" : "degraded_performance"
+            let started = Self.isoString(now().addingTimeInterval(-40 * 60))
+            incidents = """
+            {"id":"gh1","name":"Incident with \(affected)","status":"investigating",\
+            "shortlink":"https://www.githubstatus.com/incidents/gh1","created_at":"\(started)",\
+            "updated_at":"\(started)",\
+            "components":[{"name":"\(affected)","status":"\(affectedStatus)"}],\
+            "incident_updates":[{"id":"u1","status":"investigating",\
+            "body":"We are investigating reports of degraded performance.",\
+            "created_at":"\(started)"}]}
+            """
+        } else {
+            incidents = ""
+        }
         let body = """
         {"page":{"name":"GitHub","url":"https://www.githubstatus.com"},\
-        "components":[\(components)],"incidents":[],"scheduled_maintenances":[]}
+        "components":[\(components)],"incidents":[\(incidents)],"scheduled_maintenances":[]}
         """
         return Data(body.utf8)
     }

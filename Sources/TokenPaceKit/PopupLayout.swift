@@ -202,6 +202,13 @@ public struct PopupLayout: Sendable, Equatable {
     /// the localisation/colour seam, this layer carries only the semantic ``ServiceStatus`` values.
     /// Independent of `warning`: the usage poll and the status poll fail and succeed separately.
     public let serviceStatus: StatusHealth?
+    /// Age of the **GitHub** provider's last successful status poll, in seconds, or `nil` when it has
+    /// never succeeded or the provider is not monitored (#454).
+    ///
+    /// Its own field rather than a reuse of ``lastUpdateAge``: GitHub polls on a cadence of its own,
+    /// so Claude's age says nothing about it, and one number standing for two independently-polled
+    /// sources would be the kind of quiet lie `withStatusAge`'s docblock already refuses.
+    public let githubStatusAge: TimeInterval?
     /// The "Extra usage" money-credits section (#145), or `nil` when credits are inactive for this
     /// snapshot (`snapshot.spend == nil` or `!CreditsPacing.isActive`). A **separate** field from
     /// ``rows`` — a credits section is not a limit window (see ``CreditsRow``). The view renders it as
@@ -342,7 +349,8 @@ public struct PopupLayout: Sendable, Equatable {
         subscription: EpisodeSubscriptionState? = nil,
         planLabel: String? = nil,
         monitoringMode: MonitoringMode = .usageAndServices,
-        weeklyResetUnknown: Bool = false
+        weeklyResetUnknown: Bool = false,
+        githubStatusAge: TimeInterval? = nil
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -364,6 +372,7 @@ public struct PopupLayout: Sendable, Equatable {
         self.subscription = subscription
         self.monitoringMode = monitoringMode
         self.weeklyResetUnknown = weeklyResetUnknown
+        self.githubStatusAge = githubStatusAge
     }
 
     /// A copy of this layout with **one** field replaced, everything else carried over.
@@ -377,7 +386,8 @@ public struct PopupLayout: Sendable, Equatable {
         awaitingInput: AwaitingSessions?? = nil,
         incidents: [VisibleIncident]? = nil,
         subscription: EpisodeSubscriptionState?? = nil,
-        planLabel: String?? = nil
+        planLabel: String?? = nil,
+        githubStatusAge: TimeInterval?? = nil
     ) -> PopupLayout {
         PopupLayout(
             lastUpdateAge: lastUpdateAge ?? self.lastUpdateAge,
@@ -392,7 +402,8 @@ public struct PopupLayout: Sendable, Equatable {
             subscription: subscription ?? self.subscription,
             planLabel: planLabel ?? self.planLabel,
             monitoringMode: monitoringMode,
-            weeklyResetUnknown: weeklyResetUnknown)
+            weeklyResetUnknown: weeklyResetUnknown,
+            githubStatusAge: githubStatusAge ?? self.githubStatusAge)
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
@@ -436,6 +447,12 @@ public struct PopupLayout: Sendable, Equatable {
     /// not the usage snapshot — doesn't have to thread through `make`.
     public func withPlanLabel(_ planLabel: String?) -> PopupLayout {
         copy(planLabel: .some(planLabel))
+    }
+
+    /// A copy carrying the GitHub status poll's age (#454) — grafted on like the plan label, since it
+    /// comes from the shell's own poll bookkeeping rather than from any usage snapshot.
+    public func withGitHubStatusAge(_ age: TimeInterval?) -> PopupLayout {
+        copy(githubStatusAge: .some(age.map { max(0, $0) }))
     }
 
     // MARK: make

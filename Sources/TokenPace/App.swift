@@ -283,7 +283,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The incidents the last successful status poll deemed visible (#279). Retained like
     /// `lastStatusHealth` so a re-render between polls (⌥ pressed, a usage tick) keeps showing them
     /// instead of blanking the section.
-    private var lastVisibleIncidents: [VisibleIncident] = []
+    private var lastClaudeIncidents: [VisibleIncident] = []
+    /// GitHub's visible incidents (#454), kept apart from Claude's for the same reason the healths
+    /// are: the two arrive on independent polls, so a single list would be rewritten by whichever
+    /// landed last and the other provider's incidents would vanish until its own next poll.
+    private var lastGitHubIncidents: [VisibleIncident] = []
+    /// Both providers' incidents as one list — what the popup renders under Option, and what the
+    /// episode subscription and its notifications read. That is what makes GitHub incidents flow
+    /// through the existing notification mechanism with no toggle of their own (#454).
+    private var lastVisibleIncidents: [VisibleIncident] { lastClaudeIncidents + lastGitHubIncidents }
     /// Routes taps on incident banners (#279). Held for the process's lifetime — `UNUserNotificationCenter`
     /// keeps only a weak reference to its delegate, so letting this go would silently stop routing.
     private lazy var incidentNotificationDelegate = IncidentNotificationDelegate(
@@ -1685,9 +1693,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard config.isMonitoringAnything else {
             // Nothing to watch. Drop any stale health so the popup's GitHub section disappears with
             // the switch rather than lingering until the next launch.
-            if lastGitHubHealth != nil {
+            if lastGitHubHealth != nil || !lastGitHubIncidents.isEmpty {
                 lastGitHubHealth = nil
                 lastGitHubSuccess = nil
+                lastGitHubIncidents = []
                 reRenderForCurrentTime()
             }
             return
@@ -1702,6 +1711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let health: StatusHealth
             var succeeded = false
             var rateLimited: TimeInterval??
+            var fetchedSummary: StatusSummary?
             do {
                 let summary = try await StatusClient.fetch(
                     transport: transport,
@@ -1710,6 +1720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // misleading anywhere else (ADR-0119 §4).
                     userAgent: "TokenPace/\(TokenPaceKit.version)")
                 health = .fromGitHub(summary, config: config)
+                fetchedSummary = summary
                 succeeded = true
             } catch StatusFetchError.rateLimited(let retryAfter) {
                 health = .unknownGitHub(for: config)
@@ -1719,6 +1730,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             guard let self, !Task.isCancelled else { return }
             self.lastGitHubHealth = health
+            if succeeded, let summary = fetchedSummary {
+                // GitHub's incidents, filtered against GitHub's own monitored names — never Claude's,
+                // or a generic name like `Issues` could match across providers. A failed poll leaves
+                // the previous list alone: an unreachable status page is not evidence an incident
+                // ended.
+                self.lastGitHubIncidents = IncidentVisibility.visible(
+                    in: summary,
+                    monitoredComponentNames: StatusHealth.monitoredGitHubComponentNames(for: config),
+                    now: self.currentDate(),
+                    maxAge: PersistedConfig.incidentMaxAge)
+                self.advanceEpisodeSubscription()
+            }
             if succeeded {
                 self.lastGitHubSuccess = self.currentDate()
                 if self.githubBackoff.isHolding {
@@ -1815,7 +1838,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // subscription. A failed poll leaves the previous list in place — an unreachable status
             // page is not evidence that an incident ended.
             if succeeded, let summary = fetchedSummary {
-                self.lastVisibleIncidents = IncidentVisibility.visible(
+                self.lastClaudeIncidents = IncidentVisibility.visible(
                     in: summary, config: config, usageApiEnabled: usageApiEnabled,
                     now: self.currentDate(),
                     maxAge: PersistedConfig.incidentMaxAge)
@@ -2563,6 +2586,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // #341: in the services-only mode the age shown is the **status** poll's, since that is the
             // only thing being fetched. A no-op in every other mode.
             .withStatusAge(lastStatusSuccess.map { max(0, now.timeIntervalSince($0)) })
+            // GitHub's own poll age (#454) — a separate number because it is a separate cadence.
+            .withGitHubStatusAge(lastGitHubSuccess.map { max(0, now.timeIntervalSince($0)) })
             // #279: graft the incidents (⌥ swaps the service rows for them) and the state of the one
             // subscribe row. Both ride the status poll, not this usage poll, so they are grafted for
             // the same reason the awaiting-input breakdown is.
