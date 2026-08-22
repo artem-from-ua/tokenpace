@@ -1642,6 +1642,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startGitHubLoop() {
         let scheduler = LivePollScheduler(signals: signals.newStream(for: .github))
         githubLoopTask = Task { [weak self] in
+            // Poll **before** the first wait. `waitForNextPoll` sleeps the whole interval up front, so
+            // starting with it would leave the section empty for the five-minute politeness floor
+            // after every launch — a monitored provider showing nothing, which is exactly the state
+            // the header dot exists to rule out. Claude never had this problem because its status
+            // also rides the usage tick; this source has no second heartbeat to cover for it.
+            self?.pollGitHubIfDue()
             while !Task.isCancelled {
                 guard let self else { return }
                 let wait = self.githubPollInterval()
