@@ -1,9 +1,24 @@
 ---
 status: accepted
 date: 2026-08-13
+superseded_by: [0119]
 ---
 
 # ADR-0085: Usage collection and service monitoring are two different things
+
+> **Postscript (#455): the open debt below is resolved.** The Consequences section records
+> "**`StatusCadence` loses problem-floor acceleration**" — in `servicesOnly` mode the interval was
+> `max(floor, usageInterval)` against a heartbeat that no longer accelerated for an incident, so the
+> 60-s problem floor was unreachable. [ADR-0119](0119-status-polling-own-cadence-and-backoff.md)
+> closes it: the status loop has a `LivePollScheduler` of its own, `usageInterval` became an optional
+> input that may only *slow* polling down, and with no usage tick the interval collapses to the
+> applicable floor — the problem floor included. The debt line stays in the body (it is an immutable
+> record of what was accepted at the time); read it as **closed**.
+>
+> §7's "the same heartbeat, a different request" is narrowed accordingly: the usage tick still calls
+> `pollStatusIfDue`, but it is now a second, opportunistic entrance rather than the only one.
+> Everything else §7 decides — the live `@Sendable () -> Bool` seam, `pollOnce` never being called,
+> the Keychain never being read — is untouched.
 
 > Refines [ADR-0024](0024-configurable-logical-services.md) and
 > [ADR-0013](0013-claude-status-line.md): `Claude API` is no longer "always monitored

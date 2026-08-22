@@ -150,6 +150,8 @@ In the tables below, `<…>` marks an interpolated value.
 | — | `lifecycle` | `.info` | `incident: unfollowed the episode` | `toggleEpisodeSubscription` — the user clicked the row again to stop following |
 | — | `lifecycle` | `.notice` | `incident: preview (forced) notifications` | `previewIncidentBanners` — the Settings "Preview" button; posts one of every incident banner at once, bypassing quiet hours (#279) |
 | — | `journal` | `.info` | `status-payload-log: recorded a material change` | `pollStatusIfDue` (App) — the status payload differed from the last written line and was appended to the dev JSONL (#279, ADR-0071 §10) |
+| — | `network` | `.notice` | `status backoff holding for <seconds>s` | `pollStatusIfDue` (App) — a `429` armed **this status source's own** `PollingBackoff` (ADR-0119). `<seconds>` is the honoured `Retry-After`, or `180` when the server sent no usable hint. A repeat `429` re-logs the same line at the same value — the hold is re-set, never escalated, so a growing number here would be a bug |
+| — | `network` | `.notice` | `status backoff cleared by a successful poll` | `pollStatusIfDue` (App) — the first `200` after a hold, releasing the source back to the ordinary politeness floor. Logged only when a hold was actually active, so an ordinary healthy poll stays silent |
 
 ## `Sources/TokenPace/LogArchiver.swift`
 
@@ -358,11 +360,12 @@ clears the indicator; the screen reasons only park it, keeping the last count fo
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 52 | `network` | `.error` | `status decode failed` | `decode(from:)` — JSON `DecodingError` |
-| 84 | `network` | `.error` | `status request transport error: <error>` | `transport.data(for:)` threw |
-| 90 | `network` | `.error` | `status response not HTTP` | response was not `HTTPURLResponse` |
-| 97 | `network` | `.notice` | `status 200 ok components=<count> incidents=<n>` | HTTP 200; logs the component count and, since #279, the number of incidents the payload carried |
-| 104 | `network` | `.error` | `status request failed: HTTP <statusCode>` | non-200 status |
+| 75 | `network` | `.error` | `status decode failed` | `decode(from:)` — JSON `DecodingError` |
+| 116 | `network` | `.error` | `status request transport error: <error>` | `transport.data(for:)` threw |
+| 122 | `network` | `.error` | `status response not HTTP` | response was not `HTTPURLResponse` |
+| 129 | `network` | `.notice` | `status 200 ok components=<count> incidents=<n>` | HTTP 200; logs the component count and, since #279, the number of incidents the payload carried |
+| 137 | `network` | `.error` | `status rate-limited: HTTP 429 retryAfter=<n>` | HTTP 429 (ADR-0119). `<n>` is the parsed `Retry-After` in seconds, or **`-1`** when the server sent none / an unparseable one (the same `-1` sentinel the usage client uses) — `-1` means "no hint", not "retry in −1 s". Arms that source's own `PollingBackoff` |
+| 144 | `network` | `.error` | `status request failed: HTTP <statusCode>` | any other non-200 status |
 
 ## `Sources/TokenPaceKit/GitHubRelease.swift`
 
