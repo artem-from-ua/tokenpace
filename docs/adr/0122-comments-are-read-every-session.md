@@ -15,11 +15,11 @@ superseded_by: []
 
 > **Draft — not yet accepted.** Parts were decided by the maintainer in review, parts were not.
 > His: rule 2's scope ("a comment describes the current behavior — only that"), rule 4 in its
-> current form (an earlier draft said *link the ADR instead of retelling it*; he rejected it), and
-> the issue-number clause. Mine, pending review: the per-read framing, rule 3, the decision in
-> rule 5 not to build a checker, and recording any of this as an ADR at all. The pass already ran
-> against these rules, so accepting ratifies work that is done; rejecting a rule means revisiting
-> that work, not only this file.
+> current form (an earlier draft said *link the ADR instead of retelling it*; he rejected it), the
+> issue-number clause, and rule 11. Mine, pending review: the per-read framing, rule 3, rules 5–7,
+> the decision in rule 8 not to build a checker, and recording any of this as an ADR at all. The
+> pass already ran against these rules, so accepting ratifies work that is done; rejecting a rule
+> means revisiting that work, not only this file.
 
 ## Context
 
@@ -51,6 +51,9 @@ reader meets them first. One misleads: `MenuBarLayout.swift` described eliding t
 the user picked it", a three-way choice [ADR-0090](0090-menu-bar-answers-can-we-work.md) removed.
 
 ## Decision
+
+Rules 1–4 say what to cut, 5–7 what must be written, 8–12 how to cut without losing it, and 13–15
+how to check afterwards.
 
 ### 1. A comment is priced per read, so length is a cost
 
@@ -89,7 +92,45 @@ same way, and `git blame` answers more precisely — it lands on the commit that
 ticket that covered five other things. Drop them when trimming; keep one where it is the only route
 to a discussion the code cannot carry.
 
-### 5. No mechanism polices citation rot
+### 5. Write the comment the code cannot write for itself
+
+Rules 1–4 say what to cut. This one says what must be there, because a trim guided only by
+subtraction finds nothing to protect. Four things earn their bytes:
+
+- **A probe result.** What you tried and what the platform did — *an `NSButton` outside the
+  toolbar's own generation never draws the hover plate*; *these tiles report `missing value` in the
+  AX tree, and so do the five buttons beside them*. Someone spent an afternoon learning it and the
+  code shows no trace.
+- **A declaration that looks redundant and is not.** `.isSelected` reads as decoration next to
+  `.isButton`; it is what makes VoiceOver announce the current choice, and all three tiles read
+  identically without it.
+- **A constraint that lives in another file.** A constant mirroring another constant, an ordering
+  two functions must agree on, a raw string still on disk in someone's `UserDefaults`.
+- **A measurement with its method** — 33–34 × 28 measured on System Settings' own tree, a colour
+  taken with Digital Color Meter in sRGB. Re-deriving it means repeating the measurement.
+
+Everything else is optional, and rule 1 applies to it.
+
+### 6. Mark a probe as a probe
+
+Write *probed*, *measured*, or *verified* where the claim came from an experiment. Thirteen comments
+in this codebase assert platform behaviour — an API that misbehaves, a control that draws nothing —
+and **none of them says how that was learned**. A trim cannot distinguish a finding from an opinion,
+and cut three of them.
+
+The word is also the reader's cue: a probed claim is checkable by repeating the probe, and a claim
+without one is somebody's belief until proven otherwise.
+
+### 7. State a shared trap at every site, not the tidiest one
+
+`.isSelected` appears three times and is explained once. The two silent copies are what the next
+"remove the redundant trait" edit will find. When the same non-obvious thing recurs, either repeat
+the one-line reason at each site or make the sites share a symbol whose own doc carries it — a
+single explanation two files away is a comment that will be deleted from the two that lack it.
+
+This is the one place duplication is right: the alternative is not less prose, it is a regression.
+
+### 8. No mechanism polices citation rot
 
 A checker could report "this file cites ADR-0086, superseded by 0090" — the frontmatter is
 machine-readable and the references grep cleanly. It is deliberately not built: acting on that
@@ -97,7 +138,7 @@ report means reading both ADRs to decide whether the cited clause is one of the 
 judgment call 381 times over. A gate that makes a backlog loud without making it smaller gets
 bypassed. Rule 4 is the mitigation; individually misleading comments are fixed as they are found.
 
-### 6. Never leave an orphaned token
+### 9. Never leave an orphaned token
 
 Before deleting a sentence carrying a **number with a unit**, a **symbol name**, or the word
 *measured*/*verified*, grep for that token. If it survives elsewhere, delete freely. If it does not,
@@ -108,14 +149,14 @@ which reads as correct and is not. After one trim, `agent-workflow.md` still sai
 and "phase 3" while `quarter-point` had zero hits left in the repository — in a section about a
 0.075 pt effect. A reader cannot tell that a unit is missing; they conclude the fault is theirs.
 
-### 7. Cross-references come in pairs; fix both ends or neither
+### 10. Cross-references come in pairs; fix both ends or neither
 
 When a document names a file and that file names the document back, the two are one fact stored
 twice, and repairing one end silently breaks the other. `releasing.md` was corrected to point at
 `BarStyle.displayName`; `AppearancePanes.swift` went on claiming the titles are grepped out of
 itself. Grep for the counterpart before committing the fix.
 
-### 8. Don't state a count you would have to maintain
+### 11. Don't state a count you would have to maintain
 
 "18 named roles" above an enum breaks the next time a case is added, and it buys nothing — the enum
 is right there, and anyone who needs the number counts it. A trim found that comment saying 18 while
@@ -124,14 +165,14 @@ the enum held 20, in both the code and the doc that mirrored it. Write "named ro
 The test is whether the claim can be kept true for free. A measurement nobody can re-derive is worth
 its maintenance; a number the reader can see for themselves is not.
 
-### 9. Any path or command written in prose must be executable
+### 12. Any path or command written in prose must be executable
 
 `releasing.md` carried a `grep` recipe against `Sources/TokenPace/Settings/UIPanes.swift`, a file
 that had not existed for months. Nothing failed until someone tried to cut a release. A path, a
 filename, a shell snippet or an env var in documentation is an assertion about the tree, and
 assertions rot silently. Run them.
 
-### 10. Audit a large trim by filtering, not by reading
+### 13. Audit a large trim by filtering, not by reading
 
 Seventy of the pass's 748 hunks were audited by nine reviewers at high effort: **0 critical losses,
 6 minor, 64 clean**. Reviewing all 748 that way costs roughly ten times the edit. It is also
@@ -149,14 +190,14 @@ Cheapest step first:
    alone: fact or narration?
 3. **Expensive, and only now.** The remainder goes to a high-effort reviewer with the file open.
 
-### 11. Sample deliberately, and state what the sample was
+### 14. Sample deliberately, and state what the sample was
 
 The first audit drew one hunk per file, reported 0 critical losses, and its own reviewer then
 observed the sample was favourable: the files it happened to hit were the ones with ADR coverage.
 The second was widened on that advice — documentation, the pure-logic layer, two to three hunks per
 file. An audit that does not describe its selection is not evidence.
 
-### 12. `docs/adr/` is exempt
+### 15. `docs/adr/` is exempt
 
 History is the product in an ADR. A record states what was decided at a date, and a supersession
 postscript is the intended home for exactly the content rules 2 and 3 remove from code. ADRs are

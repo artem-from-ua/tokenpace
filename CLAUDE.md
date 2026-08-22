@@ -97,6 +97,19 @@ the method, the target values, the swatch mode.
   (`sizingOptions`/`safeAreaRegions`), not the SwiftUI modifiers —
   [ADR-0088](docs/adr/0088-settings-hosting-safe-area-and-manual-separator.md).
 
+## Trimming comments or docs in bulk — read the ADR first
+
+The four comment rules under "Critical rules" are what you need while *writing* a comment, and they
+are here because `docs/` is not loaded into context automatically. **Before a pass that deletes
+prose across many files, open
+[docs/adr/0122-comments-are-read-every-session.md](docs/adr/0122-comments-are-read-every-session.md)** —
+it carries the eleven rules that only matter at that scale: how to delete without orphaning a token
+the surviving text still leans on, why cross-references break in pairs, and the three-step filter
+that audits a large trim for the cost of one cheap model instead of reviewing every hunk.
+
+The first such pass here ran without those rules and had to be corrected four times. They exist
+because it did.
+
 ## ADRs — read the guide before creating or changing one
 
 **Before creating, superseding, or editing ANY file under `docs/adr/` — including a one-line
@@ -192,6 +205,17 @@ text in force is this one**.
   `PopupViewController.swift` spends ~45 000 tokens on prose against ~22 000 on code. Write the
   shortest comment that answers what the next editor must know; where a paragraph and a sentence
   carry the same information, the sentence is right.
+- **Write the comment the code cannot write for itself, and mark a probe as a probe.** The rules
+  below say what to cut; four things must be *there*: a **probe result** (what you tried and what
+  the platform did — "an `NSButton` outside the toolbar's own generation never draws the hover
+  plate"), a **declaration that looks redundant and is not** (`.isSelected` is what makes VoiceOver
+  announce the current choice), a **constraint living in another file**, and a **measurement with
+  its method**. Say *probed* / *measured* / *verified* when the claim came from an experiment —
+  thirteen comments here assert platform behavior and none says how it was learned, so a trim
+  cannot tell a finding from an opinion, and cut three of them. When the same non-obvious thing
+  recurs at several sites, **repeat the one-line reason at each** — `.isSelected` appears three
+  times and was explained once, and the silent copies are what the next "remove the redundant
+  trait" edit finds.
 - **A comment describes the current behavior — only that.** Not what the code used to do, not what
   a constant was before, not which issue changed it, and **never where the code came from** — a
   bash prototype's line numbers cannot be followed. When you catch yourself writing "used to" /
