@@ -1,7 +1,7 @@
 ---
 status: superseded
 date: 2026-06-23
-superseded_by: [0024, 0071]
+superseded_by: [0024, 0071, 0119]
 ---
 
 # ADR-0013: Claude services status line in the popup (status.claude.com)
@@ -15,6 +15,15 @@ superseded_by: [0024, 0071]
 > `incidents[]` is **now decoded** — but only as *context* and a *subscription object*. The core of
 > §2 **still stands**: the source of a service's state remains exclusively `components[].status`;
 > no incident field (`status`, `impact`, `resolved_at`) affects the state.
+>
+> **§7 was revisited by** [ADR-0119](0119-status-polling-own-cadence-and-backoff.md) (#455). The
+> *requirement* it recorded — a separate, polite cadence, never a copy of the usage cadence, never
+> sharing the usage 429 backoff — **still stands and is now literally true**. What no longer holds is
+> the *mechanism*: the status loop no longer rides the usage tick. It runs on its own
+> `LivePollScheduler`, `usageInterval` became an optional input that may only slow polling down, and
+> the loop holds a `PollingBackoff` of its own — one per status source — fed by a new
+> `StatusFetchError.rateLimited(retryAfter:)`. Where §7 says the status poll has no timer, read
+> ADR-0119 §D4.
 
 ## Context
 

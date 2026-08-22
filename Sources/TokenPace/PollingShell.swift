@@ -16,32 +16,52 @@ import Network
 ///
 /// A single `AsyncStream` is **single-consumer**: once one `PollingEngine` iterates it, a second
 /// engine subscribing to the same stream would not receive signals. The live stub selector (#187)
-/// rebuilds the engine at runtime, so the hub vends a **fresh** stream per engine via ``newStream()``,
-/// finishing the previous one and routing subsequent `send`s to the new continuation under a lock.
-/// The observers (`WorkspaceSleepWake`, `ScreenLockObserver`, `NetworkMonitor`) call `send` without
-/// caring which engine is current — they always reach the active continuation.
+/// rebuilds the engine at runtime, so the hub vends a **fresh** stream per subscriber via
+/// ``newStream(for:)``, finishing that subscriber's previous one and routing subsequent `send`s to
+/// the new continuation under a lock. The observers (`WorkspaceSleepWake`, `ScreenLockObserver`,
+/// `NetworkMonitor`) call `send` without caring which engine is current — they always reach every
+/// active continuation.
+///
+/// **Two subscribers, not one** (ADR-0119). Since the status loop got its own heartbeat it needs the
+/// same `.sleep` / `.wake` / `.networkRestored` / `.manualRefresh` signals the usage loop gets — and
+/// it must get them *as well as*, not *instead of*. Hence the ``Subscriber`` key: a rebuild of the
+/// usage engine finishes only the usage stream, and the status loop keeps listening. Getting this
+/// wrong is silent and nasty — a single-slot hub would have let whichever loop started second steal
+/// sleep/wake from the first, and neither would log anything about it.
 final class SignalHub: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: AsyncStream<PollSignal>.Continuation?
+    /// Who is listening. One slot each; a fresh stream for a subscriber finishes only *its* previous
+    /// stream, leaving the other subscriber's untouched.
+    enum Subscriber: Hashable {
+        /// The `PollingEngine`'s scheduler — rebuilt on every live scenario swap (#187).
+        case usage
+        /// The status loop's scheduler (ADR-0119) — built once, at launch.
+        case status
+    }
 
-    /// Create a fresh stream, finish any previous one, and make its continuation the active target for
-    /// `send`. Called once per engine build (launch + every live scenario swap). The old engine's
-    /// iteration ends when its stream finishes.
-    func newStream() -> AsyncStream<PollSignal> {
+    private let lock = NSLock()
+    private var continuations: [Subscriber: AsyncStream<PollSignal>.Continuation] = [:]
+
+    /// Create a fresh stream for `subscriber`, finish any previous one **of that subscriber**, and
+    /// make its continuation the active target for `send`. Called once per engine build (launch +
+    /// every live scenario swap) and once for the status loop. The old engine's iteration ends when
+    /// its stream finishes.
+    func newStream(for subscriber: Subscriber) -> AsyncStream<PollSignal> {
         let (stream, continuation) = AsyncStream.makeStream(
             of: PollSignal.self, bufferingPolicy: .bufferingNewest(1))
         lock.lock()
-        self.continuation?.finish()
-        self.continuation = continuation
+        continuations[subscriber]?.finish()
+        continuations[subscriber] = continuation
         lock.unlock()
         return stream
     }
 
+    /// Fan out to every active subscriber. A signal is a fact about the machine ("we are awake",
+    /// "we are online"), not a message addressed to one loop, so both loops see all of them.
     func send(_ signal: PollSignal) {
         lock.lock()
-        let continuation = self.continuation
+        let targets = Array(continuations.values)
         lock.unlock()
-        continuation?.yield(signal)
+        for continuation in targets { continuation.yield(signal) }
     }
 }
 
