@@ -1458,7 +1458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// What the popup's single subscribe row should show right now, or `nil` to omit it.
     private func currentSubscriptionState() -> EpisodeSubscriptionState? {
         EpisodeEvaluator.rowState(
-            incidents: lastVisibleIncidents,
+            incidents: lastClaudeIncidents,
             subscription: PersistedConfig.episodeSubscription)
     }
 
@@ -1471,7 +1471,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func advanceEpisodeSubscription() {
         let (events, next) = EpisodeEvaluator.evaluate(
             subscription: PersistedConfig.episodeSubscription,
-            incidents: lastVisibleIncidents,
+            incidents: lastClaudeIncidents,
             now: currentDate())
         PersistedConfig.episodeSubscription = next
 
@@ -2588,6 +2588,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .withStatusAge(lastStatusSuccess.map { max(0, now.timeIntervalSince($0)) })
             // GitHub's own poll age (#454) — a separate number because it is a separate cadence.
             .withGitHubStatusAge(lastGitHubSuccess.map { max(0, now.timeIntervalSince($0)) })
+            .withGitHubIncidents(lastGitHubIncidents)
             // #279: graft the incidents (⌥ swaps the service rows for them) and the state of the one
             // subscribe row. Both ride the status poll, not this usage poll, so they are grafted for
             // the same reason the awaiting-input breakdown is.

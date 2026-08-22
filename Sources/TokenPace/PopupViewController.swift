@@ -1974,7 +1974,7 @@ final class PopupViewController: NSViewController {
     /// by weight, not colour (the plan itself is deliberately **not** bold; the `･` separator is, to
     /// match "Claude"). Returns a single attributed label so the parts share one baseline.
     private static func brandTitleLabel(plan: String?) -> NSTextField {
-        brandTitleLabel(title: claudeCodeSectionTitle, color: claudeBrandColor, plan: plan, dot: nil)
+        brandTitleLabel(title: claudeCodeSectionTitle, color: claudeBrandColor, plan: plan)
     }
 
     /// The general form (#454): any provider's brand mark, optionally preceded by a status dot.
@@ -1994,26 +1994,10 @@ final class PopupViewController: NSViewController {
     private static func brandTitleLabel(
         title titleText: String,
         color: NSColor,
-        plan: String?,
-        dot: ServiceStatus?
+        plan: String?
     ) -> NSTextField {
         let bold: [NSAttributedString.Key: Any] = [.font: menuItemFont, .foregroundColor: color]
         let title = NSMutableAttributedString()
-        if let dot, let attachment = dotAttachment(color: dotColor(dot), accessibility: word(dot)) {
-            // The gap is kerning on a single space, not a wider glyph: a space plus the attachment's
-            // own side bearing lands short, and stacking two spaces overshoots. `headerDotGap` is the
-            // measured total.
-            title.append(NSAttributedString(attachment: attachment))
-            // Kerning **adds** to the space's own advance, so the target gap is the row gap minus the
-            // width the space already contributes — measured from the font rather than guessed, so it
-            // holds if the dropdown text size changes.
-            let spaceWidth = (" " as NSString)
-                .size(withAttributes: [.font: menuItemFont]).width
-            let kern = max(0, Metrics.headerDotGap - spaceWidth)
-            title.append(NSAttributedString(
-                string: " ",
-                attributes: bold.merging([.kern: kern]) { _, new in new }))
-        }
         title.append(NSAttributedString(string: titleText, attributes: bold))
         if let plan, !plan.isEmpty {
             // Bold `･` separator (halfwidth katakana middle dot, U+FF65), then the regular-weight plan.
@@ -2235,6 +2219,21 @@ final class PopupViewController: NSViewController {
     /// redundant line in a menu this small is not free.
     private var showsOptionHint: Bool { optionHintEnabled && !optionHeld }
 
+    /// A section header's leading half: the provider's status dot beside its title stack.
+    ///
+    /// `.centerY` on purpose — the title stack inside is `.firstBaseline`, which is right for text
+    /// meeting text but would drop a fixed-size dot onto the baseline. The gap is the rows' own
+    /// (`statusDotGap - statusDotNudge`) with the same nudge inset, so the header's dot lands on the
+    /// identical vertical line as every dot below it.
+    private static func headerRow(dot: GlowDotView, title: NSView) -> NSStackView {
+        let row = NSStackView(views: [dot, title])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Metrics.statusDotGap - Metrics.statusDotNudge
+        row.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.statusDotNudge, bottom: 0, right: 0)
+        return row
+    }
+
     // MARK: GitHub plate (#454)
 
     /// Fill (or collapse) the GitHub provider's plate.
@@ -2264,8 +2263,7 @@ final class PopupViewController: NSViewController {
         let header = Self.brandTitleLabel(
             title: Self.githubSectionTitle,
             color: Self.brandColor(for: .github),
-            plan: nil,
-            dot: status.aggregate(of: .github))
+            plan: nil)
 
         // Under ⌥, the age of this provider's **own** last successful poll — GitHub polls on its own
         // cadence, so Claude's "2m ago" says nothing about it. Same slot and same styling as Claude's,
@@ -2282,20 +2280,40 @@ final class PopupViewController: NSViewController {
         leading.alignment = .firstBaseline
         leading.spacing = 4
 
-        let headerRow = addSplitRow(leadingView: leading, rightView: NSView(), to: githubStack)
+        let dot = makeStatusDot(
+            status: status.aggregate(of: .github) ?? .unknown, animatorKey: "provider-github")
+        let headerRow = addSplitRow(
+            leadingView: Self.headerRow(dot: dot, title: leading), rightView: NSView(),
+            to: githubStack)
         githubStack.setCustomSpacing(Metrics.sectionSpacing, after: headerRow)
 
-        // Same visibility rule Claude's rows follow: only what is broken, plus what just recovered.
-        // ⌥ is not consulted — it switches the popup to the incident dimension (ADR-0071 §2), and the
-        // incident list on Claude's plate already spans both providers.
-        for component in status.checks(of: .github).flatMap(\.components)
-            .filter({ $0.status.isProblem || Self.isRecentlyRecovered($0, now: now) }) {
+        // ⌥ switches the dimension here exactly as it does on Claude's plate (ADR-0071 §2): the
+        // service rows are replaced by **this provider's** incidents. Each plate shows its own —
+        // rendering both providers' incidents under one header would attribute GitHub's outage to
+        // Claude, which is precisely what the two plates exist to prevent.
+        let incidents = layout.githubIncidents
+        if optionHeld, !incidents.isEmpty {
+            for incident in incidents {
+                addIncidentRow(incident, now: now, to: githubStack)
+            }
+        } else if optionHeld {
             addServiceStatusRow(
-                label: Self.displayName(component),
-                status: component.status,
-                age: component.stateAge(at: now),
-                pageURL: StatusHealth.githubPageURL,
+                label: "No ongoing incidents",
+                status: .operational,
+                age: layout.githubStatusAge.flatMap { $0 > 0 ? $0 : nil },
+                showsStatusWord: false,
                 to: githubStack)
+        } else {
+            // Only what is broken, plus what just recovered — the same rule Claude's rows follow.
+            for component in status.checks(of: .github).flatMap(\.components)
+                .filter({ $0.status.isProblem || Self.isRecentlyRecovered($0, now: now) }) {
+                addServiceStatusRow(
+                    label: Self.displayName(component),
+                    status: component.status,
+                    age: component.stateAge(at: now),
+                    pageURL: StatusHealth.githubPageURL,
+                    to: githubStack)
+            }
         }
     }
 
@@ -2365,8 +2383,7 @@ final class PopupViewController: NSViewController {
         let brand = Self.brandTitleLabel(
             title: Self.claudeCodeSectionTitle,
             color: Self.claudeBrandColor,
-            plan: optionHeld ? layout.planLabel : nil,
-            dot: claudeDot)
+            plan: optionHeld ? layout.planLabel : nil)
         // The age rides the ⌥ layer with the plan label (#396): at rest the header is the bare "Claude"
         // mark, and ⌥ restores the whole tail — `Claude ･ Max (20x) ･ updated just now`.
         //
@@ -2388,6 +2405,13 @@ final class PopupViewController: NSViewController {
         leading.orientation = .horizontal
         leading.alignment = .firstBaseline
         leading.spacing = 4
+        // The header's status dot is the **same** `GlowDotView` the rows use — same diameter, same
+        // glow, same colour animator — so the column of dots down the popup is one mark repeated,
+        // not a flat one on top of glowing ones (#454).
+        //
+        // It wraps the text stack rather than joining it: that stack is `.firstBaseline`, which would
+        // drop a fixed-size view to the text baseline, and the dot has to sit on the optical centre.
+        let claudeLeading = claudeDot.map { Self.headerRow(dot: makeStatusDot(status: $0, animatorKey: "provider-claude"), title: leading) } ?? leading
         // Right slot: the summary badge when there is an awaiting count and ⌥ is up; nothing when ⌥ is
         // held (the per-project breakdown below supersedes it — but the age stays put next to the brand
         // title, it does not move to where the badge was) or when there is no awaiting count at all.
@@ -2397,7 +2421,7 @@ final class PopupViewController: NSViewController {
         } else {
             right = NSView()
         }
-        let sectionHeader = addSplitRow(leadingView: leading, rightView: right)
+        let sectionHeader = addSplitRow(leadingView: claudeLeading, rightView: right)
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
         // #233/#438: while ⌥ is held, reveal the awaiting breakdown right under the header — a bare
@@ -3592,7 +3616,9 @@ final class PopupViewController: NSViewController {
     /// which a stack view cannot express. The stage word is the link, and unlike the service rows it
     /// points at **this** incident (`shortlink`) — ADR-0071 §3.
     @discardableResult
-    private func addIncidentRow(_ incident: VisibleIncident, now: Date) -> NSView {
+    private func addIncidentRow(
+        _ incident: VisibleIncident, now: Date, to target: NSStackView? = nil
+    ) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let dot = makeStatusDot(status: incident.severity, animatorKey: "incident-\(incident.id)")
         dot.toolTip = Self.word(incident.severity)
@@ -3642,7 +3668,7 @@ final class PopupViewController: NSViewController {
         let dotTop = (lineHeight - Metrics.statusDotDiameter) / 2
         dot.topAnchor.constraint(equalTo: row.topAnchor, constant: dotTop).isActive = true
 
-        stack.addArrangedSubview(row)
+        (target ?? stack).addArrangedSubview(row)
         row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         return row
     }
