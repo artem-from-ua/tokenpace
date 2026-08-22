@@ -211,8 +211,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// would render an age that is negative or jumps.
     private var lastStatusSuccess: Date?
     /// The in-flight status fetch, if any — held so a new tick can cancel a slow one rather than
-    /// overlap (the status loop hangs off the usage poll's heartbeat, it owns no timer).
+    /// overlap.
     private var statusTask: Task<Void, Never>?
+    /// The status loop's own heartbeat (ADR-0119) — a `LivePollScheduler` on its own `SignalHub`
+    /// subscription, so status polling runs whether or not the usage poll is ticking (or enabled at
+    /// all, #341). Cancelled on terminate.
+    private var statusLoopTask: Task<Void, Never>?
+    /// The **status source's own** 429 hold — one `PollingBackoff` per status source, never shared
+    /// (ADR-0119 §2). Reused verbatim from the usage side: hold at exactly `Retry-After` (or 180 s),
+    /// no escalation across consecutive 429s, first 200 clears it. Independent of the usage engine's
+    /// backoff in both directions.
+    ///
+    /// One source exists today, so one value does. #454 adds the second; the shape is already
+    /// per-source, so that lands as another stored value, not as an unpicking of a shared one.
+    private var statusBackoff = PollingBackoff()
 
     // MARK: update check (#37)
 
@@ -788,13 +800,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Force an immediate refresh of both data streams (the Troubleshoot window's button, ADR-0020):
-    /// send `.manualRefresh` so the usage loop polls now and clears any 429 backoff to the base
-    /// interval, and clear `lastStatusSuccess` so the status poll — which rides the usage heartbeat —
-    /// is due again and re-fetches on that same immediate tick.
+    /// send `.manualRefresh` so **both** loops wake now, and clear the status side's own due-marker
+    /// and 429 hold so its next poll actually fetches.
+    ///
+    /// Clearing the status backoff here mirrors what `.manualRefresh` already means for the usage
+    /// engine — "a deliberate user action, honoured even mid-rate-limit" (`PollSignal.manualRefresh`).
+    /// Since ADR-0119 the status loop has a hold of its own, so it needs the same clearing; leaving it
+    /// would make the button silently do nothing for up to `Retry-After` seconds.
     private func forceRefresh() {
         AppLogger.lifecycle.notice("manual refresh requested (Troubleshoot)")
         lastStatusSuccess = nil            // make the status poll due on the next (immediate) tick
-        signals.send(.manualRefresh)       // wake the usage loop now + reset backoff (engine)
+        statusBackoff = statusBackoff.reset()
+        signals.send(.manualRefresh)       // wake both loops now + reset backoff (engine)
     }
 
     // MARK: - Optimistic reset (#36)
@@ -1033,6 +1050,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         pollTask?.cancel()
         statusTask?.cancel()
+        statusLoopTask?.cancel()
         updateTask?.cancel()
         installTask?.cancel()
         archiveTask?.cancel()
@@ -1089,6 +1107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // data source without a restart, so the observers + age timer above stay put and only the
         // engine is rebuilt.
         buildAndRunEngine(for: currentScenario)
+        // The status loop's own heartbeat (ADR-0119) — started once, alongside the engine but not
+        // inside `buildAndRunEngine`: a live scenario swap rebuilds the engine, and the status loop
+        // must survive that (it re-reads `statusTransport` on each poll, so it picks up the new
+        // transport without being torn down).
+        startStatusLoop()
         updateColorCycle(for: currentScenario)   // arm the colour walk when launched under that stub
         startAwaitingCycleIfRequested()          // and the awaiting-input walk (ADR-0073)
 
@@ -1150,7 +1173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             transport: transport,
             tokenProvider: tokenProvider,
             refresher: refresher,
-            scheduler: LivePollScheduler(signals: signals.newStream()),
+            scheduler: LivePollScheduler(signals: signals.newStream(for: .usage)),
             probe: TranscriptActivityProbe(index: FileSystemActivityIndex()),
             now: clock,
             // #341: read the switch **live** on every iteration, not once at construction — a toggle
@@ -1229,8 +1252,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 
     /// Map one poll result into the menu-bar image and the popup model, and retain it so the age
-    /// timer can re-render it against a later `now`. Also rides this heartbeat to poll the Claude
-    /// status page when due (#31) — no separate timer.
+    /// timer can re-render it against a later `now`. Also offers this heartbeat to the status poll
+    /// (#31): since ADR-0119 the status loop has a timer of its own, so this is a second, opportunistic
+    /// entrance rather than the only one — both go through the same `isDue` gate.
     private func apply(_ output: PollOutput) {
         detectBackToWorkEdge(output)
         detectExtraUsageEdge(output)
@@ -1530,15 +1554,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reRenderForCurrentTime()
     }
 
-    /// Fetch the Claude status page when `StatusCadence` says it is due — riding the usage poll's
-    /// heartbeat with a 5-min politeness floor (`max(floor, usageInterval)`), so it never hammers a
-    /// third-party page even when the usage cadence is fast or thrashing on 429.
-    private func pollStatusIfDue(usageInterval: TimeInterval) {
+    /// The status loop's own heartbeat (ADR-0119): wait ``StatusCadence/nextInterval(backoff:usageInterval:hasProblem:)``,
+    /// then poll if due — repeating for the process's lifetime.
+    ///
+    /// Built once at launch on its **own** `SignalHub` subscription, so it sees the same platform
+    /// signals as the usage loop without competing for them: `.sleep` parks it (screen lock under
+    /// `pausePollingWhenScreenLocked`, and system sleep) until `.wake`/`.networkRestored`, exactly as
+    /// `PollingEngine` does; `.wake`, `.networkRestored` and `.manualRefresh` cut the wait short and
+    /// re-ask `isDue` rather than fetching unconditionally — a blinking screen must not turn into a
+    /// burst of requests at a third-party page.
+    ///
+    /// The usage tick still calls `pollStatusIfDue` too. Both entrances funnel through the same
+    /// `isDue` gate and the same in-flight `statusTask`, so the two heartbeats cannot double the
+    /// request rate; what the second one buys is that status keeps running when the first one is slow,
+    /// off, or absent.
+    private func startStatusLoop() {
+        let scheduler = LivePollScheduler(signals: signals.newStream(for: .status))
+        statusLoopTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let wait = self.statusPollInterval()
+                switch await scheduler.waitForNextPoll(interval: wait) {
+                case .interrupted(.sleep):
+                    await scheduler.waitWhileAsleep()   // park: no status fetch while asleep/locked
+                case .elapsed, .interrupted:
+                    break
+                }
+                guard !Task.isCancelled else { return }
+                self.pollStatusIfDue()
+            }
+        }
+    }
+
+    /// How long the status loop should wait before its next poll: this source's 429 hold if one is
+    /// active, else the applicable politeness floor, stretched to the usage cadence when *that* is
+    /// slower and actually running.
+    ///
+    /// `usageInterval` is `nil` when the usage API is off (#341) — there is no usage cadence to settle
+    /// with, so the floor stands on its own. `hasProblem` is this source's own signal; with a single
+    /// source it comes from `lastStatusHealth`, and #454 hands each source its own.
+    private func statusPollInterval() -> TimeInterval {
+        StatusCadence.nextInterval(
+            backoff: statusBackoff,
+            usageInterval: providerMonitoring.usageApiEnabled ? lastOutput?.interval : nil,
+            hasProblem: lastStatusHealth?.worstProblem != nil)
+    }
+
+    /// Fetch the Claude status page when `StatusCadence` says it is due. Called from the status loop's
+    /// own heartbeat and from each usage tick; the `isDue` gate below is what makes calling it from
+    /// both harmless.
+    ///
+    /// - Parameter usageInterval: The usage cadence to settle with when one is running, or `nil` to
+    ///   stand on the politeness floor alone.
+    private func pollStatusIfDue(usageInterval: TimeInterval? = nil) {
         // While a service problem is in progress, poll faster (down to the 60-s problem floor) to
-        // catch escalation/recovery quickly; otherwise the polite 5-min floor applies.
+        // catch escalation/recovery quickly; otherwise the polite 5-min floor applies. An active 429
+        // hold outranks both — the page named a number and we honour it.
         let hasProblem = lastStatusHealth?.worstProblem != nil
         guard StatusCadence.isDue(
-            lastSuccess: lastStatusSuccess, usageInterval: usageInterval,
+            lastSuccess: lastStatusSuccess, backoff: statusBackoff, usageInterval: usageInterval,
             hasProblem: hasProblem, now: Date()) else { return }
         // Cancel any slow in-flight fetch rather than overlap.
         statusTask?.cancel()
@@ -1553,6 +1627,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let succeeded: Bool
             var fetchedSummary: StatusSummary?
             var fetchedBody: Data?
+            // The 429's `Retry-After` (or `nil` for "no usable hint"), when this attempt was rate
+            // limited. `nil` outer value = not rate limited at all — two different nils, hence the
+            // double optional rather than a bare `TimeInterval?`.
+            var rateLimitHint: TimeInterval??
             do {
                 let (summary, body) = try await StatusClient.fetchRaw(transport: transport)
                 health = .from(summary, config: config, usageApiEnabled: usageApiEnabled)
@@ -1561,13 +1639,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 succeeded = true
             } catch {
                 // Any failure → honest "unknown" (grey), and don't advance lastStatusSuccess so the
-                // next usage tick retries.
+                // next tick retries. A 429 additionally arms this source's own hold, so "retries"
+                // means "no sooner than the page asked for".
+                if case StatusFetchError.rateLimited(let retryAfter) = error {
+                    rateLimitHint = .some(retryAfter)
+                }
                 health = .unknown(for: config, usageApiEnabled: usageApiEnabled)
                 succeeded = false
             }
             guard let self, !Task.isCancelled else { return }
             self.lastStatusHealth = health
-            if succeeded { self.lastStatusSuccess = self.currentDate() }
+            if succeeded {
+                self.lastStatusSuccess = self.currentDate()
+                // The first 200 clears any hold — PollingBackoff's own rule (ADR-0008/0032), reused
+                // verbatim rather than re-decided here.
+                if self.statusBackoff.isHolding {
+                    AppLogger.network.notice("status backoff cleared by a successful poll")
+                    self.statusBackoff = self.statusBackoff.reset()
+                }
+            } else if let retryAfter = rateLimitHint {
+                // Re-set (never escalate) the hold at the server's number, or 180 s without one.
+                self.statusBackoff = self.statusBackoff.honoring(retryAfter: retryAfter)
+                AppLogger.network.notice(
+                    "status backoff holding for \(self.statusBackoff.interval, privacy: .public)s")
+            }
             // #279: recompute which incidents are worth showing, then fold the poll into the episode
             // subscription. A failed poll leaves the previous list in place — an unreachable status
             // page is not evidence that an incident ended.

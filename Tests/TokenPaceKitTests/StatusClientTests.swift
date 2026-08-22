@@ -60,9 +60,12 @@ private struct StubStatusTransport: UsageTransport {
         try result.get()
     }
 
-    static func http(_ status: Int, body: Data = Data()) -> StubStatusTransport {
+    static func http(
+        _ status: Int, body: Data = Data(), headers: [String: String] = [:]
+    ) -> StubStatusTransport {
         let response = HTTPURLResponse(
-            url: StatusClient.endpoint, statusCode: status, httpVersion: "HTTP/1.1", headerFields: [:])!
+            url: StatusClient.endpoint, statusCode: status, httpVersion: "HTTP/1.1",
+            headerFields: headers)!
         return StubStatusTransport(result: .success((body, response)))
     }
 
@@ -244,5 +247,124 @@ struct StatusFetchTests {
         await #expect(throws: StatusFetchError.self) {
             _ = try await StatusClient.fetch(transport: StubStatusTransport.nonHTTP())
         }
+    }
+}
+
+// MARK: - 429 / Retry-After (ADR-0119)
+
+/// The one status code the client models individually, because it is the only one the caller reacts
+/// to differently — it arms the status source's own `PollingBackoff`.
+@Suite("StatusClient — 429 and Retry-After")
+struct StatusRateLimitTests {
+
+    @Test func rateLimitedCarriesDeltaSeconds() async {
+        let stub = StubStatusTransport.http(429, headers: ["Retry-After": "120"])
+        await #expect(throws: StatusFetchError.rateLimited(retryAfter: 120)) {
+            _ = try await StatusClient.fetch(transport: stub)
+        }
+    }
+
+    @Test func rateLimitedWithoutHeaderCarriesNil() async {
+        // No hint → `nil`, which `PollingBackoff.honoring` answers with its 180 s default.
+        await #expect(throws: StatusFetchError.rateLimited(retryAfter: nil)) {
+            _ = try await StatusClient.fetch(transport: StubStatusTransport.http(429))
+        }
+    }
+
+    @Test func httpDateFormMapsToNil() async {
+        // The HTTP-date form is deliberately not parsed (same as the usage client): it is rare in
+        // practice, and `nil` already means "no usable hint, use the default hold".
+        let stub = StubStatusTransport.http(
+            429, headers: ["Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"])
+        await #expect(throws: StatusFetchError.rateLimited(retryAfter: nil)) {
+            _ = try await StatusClient.fetch(transport: stub)
+        }
+    }
+
+    @Test func malformedHeaderMapsToNil() async {
+        let stub = StubStatusTransport.http(429, headers: ["Retry-After": "soon"])
+        await #expect(throws: StatusFetchError.rateLimited(retryAfter: nil)) {
+            _ = try await StatusClient.fetch(transport: stub)
+        }
+    }
+
+    @Test func fractionalSecondsAreHonoured() async {
+        let stub = StubStatusTransport.http(429, headers: ["Retry-After": "2.5"])
+        await #expect(throws: StatusFetchError.rateLimited(retryAfter: 2.5)) {
+            _ = try await StatusClient.fetch(transport: stub)
+        }
+    }
+
+    /// The narrowness of the change: 429 moved out of `.decode`, and **nothing else did**. The client
+    /// still refuses to model individual codes beyond the one that changes behaviour.
+    @Test func otherNon200CodesStillDecode() async {
+        for code in [400, 401, 403, 404, 500, 503] {
+            await #expect(throws: StatusFetchError.decode) {
+                _ = try await StatusClient.fetch(transport: StubStatusTransport.http(code))
+            }
+        }
+    }
+}
+
+// MARK: - Endpoint / User-Agent parameterisation (ADR-0119 §4)
+
+@Suite("StatusClient — parameterised endpoint and User-Agent")
+struct StatusClientParameterTests {
+
+    private let other = URL(string: "https://www.example-status.com/api/v2/summary.json")!
+
+    @Test func defaultsAreClaudes() {
+        let request = StatusClient.buildRequest()
+        #expect(request.url == StatusClient.endpoint)
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == "claude-code/\(TokenPaceKit.version)")
+    }
+
+    @Test func honoursACustomEndpoint() {
+        #expect(StatusClient.buildRequest(endpoint: other).url == other)
+    }
+
+    /// `claude-code/<version>` is right for Anthropic's page and wrong for anyone else's — which is
+    /// the whole reason the User-Agent is a parameter and not a constant.
+    @Test func honoursACustomUserAgent() {
+        let request = StatusClient.buildRequest(endpoint: other, userAgent: "TokenPace/1.2.3")
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == "TokenPace/1.2.3")
+    }
+
+    /// **The stub-routing guard.** `StubUsageTransport.data(for:)` routes on
+    /// `request.url == StatusClient.endpoint` — *exact* equality — so every stub scenario keeps
+    /// returning status JSON to the status decoder only as long as the default request still carries
+    /// that exact URL. The transport lives in the app target and cannot be imported here; this pins
+    /// the seam it matches on, which is what a parameterisation change could plausibly break.
+    @Test func theDefaultRequestStillMatchesTheStubRoutingKey() {
+        _ = StatusClient.buildRequest(endpoint: other, userAgent: "TokenPace/1.2.3")
+        #expect(StatusClient.buildRequest().url == StatusClient.endpoint)
+        #expect(StatusClient.endpoint.absoluteString == "https://status.claude.com/api/v2/summary.json")
+        // No query string / trailing-slash drift either — exact equality is unforgiving.
+        #expect(StatusClient.buildRequest().url?.absoluteString == StatusClient.endpoint.absoluteString)
+    }
+
+    @Test func fetchSendsTheGivenEndpointAndAgent() async throws {
+        // A recording transport: proves the parameters reach the wire, not just `buildRequest`.
+        actor Recorder {
+            var seen: URLRequest?
+            func record(_ request: URLRequest) { seen = request }
+        }
+        struct RecordingTransport: UsageTransport {
+            let recorder: Recorder
+            let body: Data
+            func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+                await recorder.record(request)
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+                return (body, response)
+            }
+        }
+        let recorder = Recorder()
+        _ = try await StatusClient.fetch(
+            transport: RecordingTransport(recorder: recorder, body: realSummaryJSON),
+            endpoint: other, userAgent: "TokenPace/1.2.3")
+        let seen = try #require(await recorder.seen)
+        #expect(seen.url == other)
+        #expect(seen.value(forHTTPHeaderField: "User-Agent") == "TokenPace/1.2.3")
     }
 }

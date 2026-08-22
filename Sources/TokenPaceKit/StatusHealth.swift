@@ -474,9 +474,22 @@ public struct StatusHealth: Sendable, Equatable {
 /// Why a status poll failed — a narrow error type kept distinct from ``UsageError`` so a status
 /// failure never escalates the usage-API 429 backoff or surfaces auth detail. The shell catches it
 /// and substitutes ``StatusHealth/unknown``; it never reaches the view verbatim.
+///
+/// Only **one** code is modelled individually — `429` — because it is the only one the caller reacts
+/// to differently: it feeds the status source's own ``PollingBackoff`` hold (ADR-0119). Everything
+/// else still collapses into ``decode``, deliberately: a status page carries no auth detail and no
+/// per-code meaning for us beyond "not 200".
 public enum StatusFetchError: Error, Equatable {
     /// A transport/connectivity failure (offline, TLS, timeout, DNS, non-HTTP response).
     case transport(String)
-    /// A non-2xx HTTP status, or a 200 body that did not decode as a ``StatusSummary``.
+    /// HTTP 429. Carries the parsed `Retry-After` seconds when the server sent them in the
+    /// delta-seconds form, so the status source's backoff can hold for exactly that long; `nil`
+    /// (absent, malformed, or the HTTP-date form) → the backoff's own 180 s default.
+    ///
+    /// Mirrors ``UsageError/rateLimited(retryAfter:)`` in shape, but is a **separate** value in a
+    /// **separate** error type: a rate-limited status page must never advance the usage backoff, nor
+    /// the other way round.
+    case rateLimited(retryAfter: TimeInterval?)
+    /// Any other non-2xx HTTP status, or a 200 body that did not decode as a ``StatusSummary``.
     case decode
 }

@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-07-24
-superseded_by: [0036]
+superseded_by: [0036, 0119]
 ---
 
 # ADR-0025: Update checking — dual fetch path, system banner, launch-time check
@@ -11,6 +11,19 @@ superseded_by: [0036]
 > notifications; the signal is consolidated into a single dropdown item (0036). The fetch path (§1),
 > `SemanticVersion` (§2), the cadence marker (§4), and the launch-time check (§5) still stand. The
 > record below is unchanged historical context; read about the signal UX in 0036.
+
+> **Postscript (#455).** The **analogy** this record draws to the status poll has gone stale, though
+> nothing it decides about update checking has. §5 says `pollUpdateIfDue` "rides the usage heartbeat
+> (like `pollStatusIfDue`, #31), with no separate timer" — that is still exactly how the *update*
+> check works, but it is no longer how the *status* poll works:
+> [ADR-0119](0119-status-polling-own-cadence-and-backoff.md) gave the status loop a
+> `LivePollScheduler` of its own. Read the comparison as historical.
+>
+> The one contrast §4 draws **survives and is worth keeping**: `UpdateCheckCadence` advances its
+> marker on every *attempt*, `StatusCadence` only on *success* — unchanged by 0119, and still the
+> reason a private-repo 404 does not re-fetch each tick. ADR-0119 does add a wrinkle
+> `UpdateCheckCadence` has no equivalent of: an active `Retry-After` hold outranks the status floors
+> entirely.
 
 ## Context
 

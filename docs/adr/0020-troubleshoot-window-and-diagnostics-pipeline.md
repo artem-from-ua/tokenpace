@@ -1,10 +1,18 @@
 ---
 status: partially superseded
 date: 2026-07-22
-superseded_by: [0117]
+superseded_by: [0117, 0119]
 ---
 
 # ADR-0020: The Troubleshoot window and a diagnostics channel through a pure pipeline
+
+> **Postscript (#455).** The "Refresh now" description below (§ *manual refresh*) says the status
+> poll "rides the usage poll's heartbeat". Since
+> [ADR-0119](0119-status-polling-own-cadence-and-backoff.md) it does not — it has a heartbeat of its
+> own. The button's **behaviour is unchanged and its guarantee is stronger**: alongside clearing
+> `lastStatusSuccess`, `forceRefresh` now also clears the status source's own 429 hold, and
+> `.manualRefresh` reaches the status loop too (`SignalHub` fans out to both subscribers). Without
+> that clearing, the button would have silently done nothing for up to `Retry-After` seconds.
 
 > **Postscript (#475).** §3's *visibility* decision no longer holds. It made "Settings…" a normal,
 > always-visible item with "Troubleshoot…" as the sole ⌥-gated one;
