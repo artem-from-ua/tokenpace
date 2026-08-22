@@ -1,5 +1,5 @@
 ---
-status: partially superseded
+status: accepted
 date: 2026-08-12
 superseded_by: [0099]
 ---

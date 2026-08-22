@@ -22,6 +22,8 @@ The four main documents worth starting from:
 - [ui-verification.md](guides/ui-verification.md) — live verification of menu-bar / Settings changes
   before a PR: the list of stubs (`TOKENPACE_STUB=…`), scenarios without a stub, features that need
   signing.
+- [writing-adrs.md](guides/writing-adrs.md) — creating, superseding and indexing ADRs: numbering,
+  frontmatter, the body's sections, the supersession postscript, and what the index row may hold.
 - [guides/agent-workflow.md](guides/agent-workflow.md) — operational rules for the AI agent:
   worktrees, branches/PRs, launching the app for UI checks, stopping the app and reading logs, the
   GitHub Project.

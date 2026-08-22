@@ -336,5 +336,7 @@ run** — they are all for diagnostics, screenshots or walking a UI flow.
 
 - A module changes → update `docs/architecture.md`.
 - Logging changes → update `docs/log-messages.md` (see the "Logging" section).
-- A decision between two approaches → a new ADR in `docs/adr/`.
+- A decision between two approaches → a new ADR in `docs/adr/`. Creating one, or superseding an
+  existing one, follows [writing-adrs.md](../guides/writing-adrs.md) — the numbering, the
+  frontmatter, the postscript, and the one-row index entry it must produce.
 - A new convention or tool → update this file.
