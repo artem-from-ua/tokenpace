@@ -1151,7 +1151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tokenProvider: tokenProvider,
             refresher: refresher,
             scheduler: LivePollScheduler(signals: signals.newStream()),
-            probe: ProcessClaudeActivityProbe(),
+            probe: TranscriptActivityProbe(index: FileSystemActivityIndex()),
             now: clock,
             // #341: read the switch **live** on every iteration, not once at construction — a toggle
             // in Settings then takes effect on the next tick, and `providerMonitoringChanged` sends

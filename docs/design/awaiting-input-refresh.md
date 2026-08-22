@@ -186,10 +186,11 @@ display-wake event is ever missed.
 
 ### Why there is no "claude is running" term
 
-The original draft had one, and `ProcessClaudeActivityProbe` (sysctl `KERN_PROC`) already exists for
-the poll cadence. It was dropped in #275 after costing it out:
+The original draft had one, and an activity probe already exists for the poll cadence
+(`TranscriptActivityProbe` since ADR-0118; `ProcessClaudeActivityProbe` at the time this was
+written). It was dropped in #275 after costing it out:
 
-- **Nothing to silence.** With no `claude` alive nothing writes to `~/.claude/sessions|jobs`, so
+- **Nothing to silence.** With no Claude Code running nothing writes to `~/.claude/sessions|jobs`, so
   FSEvents is already quiet. The residual cost is one ~0.18 ms scan per 45 s safety tick — less than
   the timer wakeup that gating it would itself require.
 - **The gate would need its own timer.** Once parked on "claude exited", the watcher's safety timer

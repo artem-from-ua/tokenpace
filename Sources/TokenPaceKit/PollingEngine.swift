@@ -66,10 +66,13 @@ public struct KeychainTokenProvider: TokenProviding {
     }
 }
 
-/// Whether a Claude **Code** session is running on this Mac — the gate for the 15-min idle override
-/// (no active session → poll every 15 min; a session → the 3-min base). A seam because process
-/// enumeration is a platform side-effect; production is `ProcessClaudeActivityProbe` in the shell,
-/// tests inject a `StubProbe` returning a fixed `Bool`.
+/// Whether Claude **Code** is working on this Mac — the gate for the 15-min idle override (no
+/// activity → poll every 15 min; activity → the 3-min base). A seam because the evidence lives
+/// outside the engine; production is ``TranscriptActivityProbe`` (recent writes to Claude Code's own
+/// journals, ADR-0118), tests inject a `StubProbe` returning a fixed `Bool`.
+///
+/// The method name predates ADR-0118, when the answer really did come from the process table. It is
+/// kept because the *question* is unchanged — only the evidence used to answer it moved.
 public protocol ClaudeActivityProbe: Sendable {
     func isClaudeRunning() -> Bool
 }
