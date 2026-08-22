@@ -39,7 +39,42 @@ struct JournalRecordCodableTests {
             svc: [.init(n: "Claude Code", s: "operational"),
                   .init(n: "Claude API (api.anthropic.com)", s: "degraded_performance")],
             worst: "degraded_performance")
+        #expect(sample.v == StatusSample.currentVersion)
+        #expect(sample.provider == ProviderID.claude.rawValue)
         #expect(try roundTrip(.status(sample)) == .status(sample))
+    }
+
+    /// An **old** build reading a **new** journal: the added keys are unknown to it and must simply be
+    /// ignored, leaving `t`/`svc`/`worst` correct. Simulated the only way a single build can — by
+    /// decoding a line that carries a key this shape does not declare.
+    @Test func aStatusLineWithUnknownKeysStillDecodesItsPayload() throws {
+        let line = #"""
+        {"kind":"status","v":2,"t":"2026-08-03T09:12:10Z","provider":"claude","futureKey":{"x":1},\#
+        "svc":[{"n":"Claude Code","s":"operational"}],"worst":"operational"}
+        """#
+        let record = try JSONDecoder().decode(JournalRecord.self, from: Data(line.utf8))
+        guard case let .status(sample) = record else { Issue.record("expected .status"); return }
+        #expect(sample.t == "2026-08-03T09:12:10Z")
+        #expect(sample.svc.first?.n == "Claude Code")
+        #expect(sample.worst == "operational")
+    }
+
+    /// A **new** build reading an **un-migrated** line: it must not crash, and it must not misattribute.
+    /// Claude is the only page a v1 line can have come from, so the fallback is a recovered fact rather
+    /// than a guess — and the migration removes the need for it on anything stored.
+    @Test func anUntaggedStatusLineReadsAsV1Claude() throws {
+        let line = #"{"kind":"status","t":"2026-08-03T09:12:10Z","svc":[],"worst":"operational"}"#
+        let record = try JSONDecoder().decode(JournalRecord.self, from: Data(line.utf8))
+        guard case let .status(sample) = record else { Issue.record("expected .status"); return }
+        #expect(sample.v == 1)
+        #expect(sample.provider == ProviderID.claude.rawValue)
+    }
+
+    /// The two `v` counters are independent: `kind` decides which one a reader is looking at. Pinned
+    /// because they are both spelled `v` on the wire, which is the whole trap.
+    @Test func statusAndUsageVersionsAreSeparateCounters() {
+        #expect(StatusSample.currentVersion == 2)
+        #expect(UsageSample.currentVersion == 4)
     }
 
     @Test func errorRoundTripsHTTPAndCategory() throws {

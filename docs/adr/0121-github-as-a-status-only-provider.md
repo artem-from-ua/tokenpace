@@ -12,7 +12,7 @@ superseded_by: []
 > model is generalised, not replaced. Extends [ADR-0094](0094-provider-row-brand-badge.md) §4 with the
 > rule that follows from a *second* provider existing. Consumes the per-source seams built by
 > [ADR-0119](0119-status-polling-own-cadence-and-backoff.md) and the journal's provider tag from
-> [#456](https://github.com/artem-from-ua/tokenpace/issues/456). The menu bar's "silence means fine" rule
+> [ADR-0120](0120-status-records-carry-their-provider.md). The menu bar's "silence means fine" rule
 > ([ADR-0013](0013-claude-status-line.md) §8) is **untouched**.
 
 ## Context
@@ -267,7 +267,7 @@ Incidents are filtered against **each provider's own** monitored names, never a 
 name like `Issues` exists on both pages and would otherwise match across providers.
 
 Journal records carry the provider tag from
-[#456](https://github.com/artem-from-ua/tokenpace/issues/456); this record only writes GitHub polls
+[ADR-0120](0120-status-records-carry-their-provider.md); this record only writes GitHub polls
 with it already set. `ProviderID`'s raw values are stable
 snake-case strings for that reason — they outlive any build, like `ServiceStatus`'s journal spelling.
 

@@ -54,6 +54,24 @@ struct LiveJournalMigrationCheck {
             let again = JournalMigration.migrate(contents: migrated, state: .init())
             #expect(again.outcome.migrated == 0, "\(name): second pass rewrote lines")
             #expect(again.outcome.resetsRepaired == 0, "\(name): second pass repaired resets")
+            #expect(again.outcome.statusTagged == 0, "\(name): second pass re-tagged status lines")
+            #expect(!again.outcome.changedAnything, "\(name): second pass reports a change")
+
+            // The #456 invariant: after the pass, no stored `status` line relies on "absent means
+            // Claude". Read back from the migrated text, not from the counters — the counters describe
+            // the pass, this describes the file.
+            let statuses = migrated
+                .split(separator: "\n")
+                .compactMap { line -> StatusSample? in
+                    guard let data = line.data(using: .utf8),
+                          let record = try? JSONDecoder().decode(JournalRecord.self, from: data),
+                          case let .status(sample) = record else { return nil }
+                    return sample
+                }
+            let untagged = statuses.filter { $0.v < StatusSample.currentVersion }.count
+            #expect(untagged == 0, "\(name): \(untagged) status lines still carry no provider")
+            #expect(statuses.allSatisfy { $0.provider == ProviderID.claude.rawValue },
+                    "\(name): a status line carries an unexpected provider")
 
             let samples = migrated
                 .split(separator: "\n")
@@ -115,7 +133,9 @@ struct LiveJournalMigrationCheck {
             ── \(name)
                lines            : \(before)
                usage samples    : \(samples.count)
+               status samples   : \(statuses.count)
                rewritten        : \(outcome.migrated)
+               status tagged    : \(outcome.statusTagged)
                resets repaired  : \(outcome.resetsRepaired)
                severities recomputed : \(outcome.severitiesRecomputed)\(matrix)
                out of order     : \(outcome.outOfOrder)
@@ -132,7 +152,12 @@ struct LiveJournalMigrationCheck {
             // over it. They only have to agree when this pass is the one that put them there — pointed
             // at an already-migrated journal (a re-run, or a copy someone migrated yesterday) the file
             // still carries its `sevRaw`/`resetSrc` while the pass correctly reports zero.
-            if outcome.changedAnything {
+            //
+            // Keyed on `migrated`, **not** on `changedAnything`: since #456 the latter also flips for a
+            // pass whose only work was tagging status lines, and these two assertions are about usage
+            // samples. A journal with stale status lines and current usage lines would otherwise be
+            // asked to explain `sevRaw` markers this pass never wrote.
+            if outcome.migrated > 0 {
                 #expect(transitions.values.reduce(0, +) == outcome.severitiesRecomputed,
                         "\(name): transition matrix disagrees with the counter")
                 #expect(repairedSeen == outcome.resetsRepaired,

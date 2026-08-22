@@ -39,9 +39,26 @@ import Foundation
 /// The two version counters follow from the same split: `v` says how to read a line, `sevV` says which
 /// colour model judged it, and a future threshold change bumps only the second.
 ///
+/// ## Why `status` lines are rewritten too (#456)
+///
+/// They were pass-through until a second status provider became possible (#454). A `status` line
+/// records one page's components and one derived `worst`, and nothing in it said *whose* page — with
+/// one provider the answer was always Claude, so the absence cost nothing. It becomes ambiguous
+/// retroactively the moment a second page writes the same `kind`, and "absent means Claude" is exactly
+/// the downstream branch the first section of this docblock argues against. So the provider is
+/// backfilled onto every archived line, under a `v` counter of the status shape's own.
+///
+/// The pass is a **relabelling, not a recomputation**: `t`, `svc` and `worst` are carried across
+/// verbatim. Unlike `util` (replayable through the algorithm that should have produced it) or `sev`
+/// (re-judgeable under the current model), nothing about a historical status poll can be recomputed —
+/// its inputs were the page's response at that instant, which is gone. The provider is the one fact
+/// that is knowable in retrospect, precisely because there was only ever one it could have been.
+///
 /// ## What the migration must survive
 ///
-/// - **Lines that are not usage samples** (`status`, `error`, `resume`) pass through verbatim.
+/// - **Lines that are not usage or status samples** (`error`, `resume`) pass through verbatim.
+///   `status` lines did too until #456; now they are rewritten when their format is behind, and pass
+///   through untouched once current.
 /// - **Unparseable lines** pass through verbatim too, and are counted. A corrupt tail from a crash
 ///   mid-append must not cost the whole file.
 /// - **Out-of-order timestamps.** Found in a real journal: one line at 11:03 sitting before one at
@@ -74,6 +91,14 @@ public enum JournalMigration {
         /// ``resetsRepaired`` in kind as well as in count — that one restores a fact the app got wrong,
         /// this one re-judges a fact it recorded correctly under rules that have since changed.
         public let severitiesRecomputed: Int
+        /// `status` lines rewritten to carry their provider explicitly (#456).
+        ///
+        /// Its **own** counter rather than a share of ``migrated``, and the reason is the same one that
+        /// gave `status` a `v` of its own: the two count different kinds. ``migrated`` is read as
+        /// "usage samples reshaped" by every caller and by ``migratedFromVersion``, which names the
+        /// backup after a *usage* generation; folding status lines into it would make a file whose only
+        /// change was a relabelling claim its usage history had been rewritten.
+        public let statusTagged: Int
         /// The **lowest** format version found among the lines this pass rewrote, or `nil` when it
         /// rewrote nothing.
         ///
@@ -93,6 +118,7 @@ public enum JournalMigration {
 
         public init(migrated: Int, passedThrough: Int, skipped: Int, outOfOrder: Int,
                     resetsRepaired: Int = 0, severitiesRecomputed: Int = 0,
+                    statusTagged: Int = 0,
                     migratedFromVersion: Int? = nil) {
             self.migrated = migrated
             self.passedThrough = passedThrough
@@ -100,23 +126,31 @@ public enum JournalMigration {
             self.outOfOrder = outOfOrder
             self.resetsRepaired = resetsRepaired
             self.severitiesRecomputed = severitiesRecomputed
+            self.statusTagged = statusTagged
             self.migratedFromVersion = migratedFromVersion
         }
 
         /// Whether the pass changed anything — `false` means the file is already current and the
         /// caller can skip the rewrite (and the backup) entirely.
         ///
-        /// Keyed on `migrated`, which counts every line the pass rewrote **for any reason**: a stale
-        /// format, a stale colour model, or both. A future pass that only re-judges colours must keep
-        /// incrementing it, or the shell would compute a new file and then silently decline to write
-        /// it.
-        public var changedAnything: Bool { migrated > 0 }
+        /// Keyed on `migrated` **or** `statusTagged` — every counter that corresponds to a rewritten
+        /// line. `migrated` counts usage samples rewritten for any reason (a stale format, a stale
+        /// colour model, or both); `statusTagged` counts status lines relabelled with their provider
+        /// (#456).
+        ///
+        /// The `||` is load-bearing rather than defensive. An August journal can hold thousands of
+        /// status lines and not a single stale usage line, and while this read `migrated > 0` such a
+        /// file computed a correct rewrite and was then silently declined by the shell — the pass would
+        /// have reported success and changed nothing on disk. **Any future counter that marks a
+        /// rewritten line must be added here too**, or it will fail the same way.
+        public var changedAnything: Bool { migrated > 0 || statusTagged > 0 }
 
         /// A `.public`-safe one-liner for the migration log.
         public var logMessage: String {
             var out = "journal migrated: \(migrated) rewritten, \(passedThrough) unchanged"
             if resetsRepaired > 0 { out += ", \(resetsRepaired) weekly resets repaired" }
             if severitiesRecomputed > 0 { out += ", \(severitiesRecomputed) severities recomputed" }
+            if statusTagged > 0 { out += ", \(statusTagged) status lines tagged" }
             if skipped > 0 { out += ", \(skipped) unparseable" }
             if outOfOrder > 0 { out += ", \(outOfOrder) out of order" }
             return out
@@ -155,7 +189,7 @@ public enum JournalMigration {
         var interpolator = state
         var lastAccepted: Date?
         var migrated = 0, passedThrough = 0, skipped = 0, outOfOrder = 0, resetsRepaired = 0
-        var severitiesRecomputed = 0
+        var severitiesRecomputed = 0, statusTagged = 0
         var out: [String] = []
         // The oldest generation this pass had to rewrite — what the file *was*, which is what its
         // backup should be named after (#401).
@@ -174,17 +208,45 @@ public enum JournalMigration {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty { out.append(line); continue }
 
-            guard let data = trimmed.data(using: .utf8),
-                  let record = try? decoder.decode(JournalRecord.self, from: data),
-                  case let .usage(sample) = record else {
-                // Not a usage line, or not parseable at all: keep the original bytes. A file that
-                // cannot be fully understood is still a file worth preserving exactly.
-                out.append(line)
-                if (try? decoder.decode(JournalRecord.self, from: Data(trimmed.utf8))) == nil {
-                    skipped += 1
-                } else {
+            let parsed = trimmed.data(using: .utf8).flatMap {
+                try? decoder.decode(JournalRecord.self, from: $0)
+            }
+
+            // `status` lines are rewritten in place when their format is behind (#456) — a relabelling,
+            // not a recomputation, so it is handled here rather than in the usage pipeline below, which
+            // would have nothing to offer it.
+            if case let .status(sample) = parsed {
+                guard sample.v < StatusSample.currentVersion else {
+                    out.append(line)                 // already tagged
                     passedThrough += 1
+                    continue
                 }
+                // Backfilled, not defaulted. A v1 status line predates the second provider entirely, so
+                // Claude is the only page it can have come from — the fact is recoverable *because* of
+                // the very ambiguity that made the tag necessary. `t`, `svc` and `worst` carry across
+                // untouched: their inputs are gone and nothing about them is re-derivable.
+                let tagged = StatusSample(
+                    v: StatusSample.currentVersion,
+                    t: sample.t,
+                    provider: ProviderID.claude.rawValue,
+                    svc: sample.svc,
+                    worst: sample.worst)
+                guard let encoded = try? encoder.encode(JournalRecord.status(tagged)),
+                      let text = String(data: encoded, encoding: .utf8) else {
+                    out.append(line)                 // encoding failed: never lose the original
+                    skipped += 1
+                    continue
+                }
+                out.append(text)
+                statusTagged += 1
+                continue
+            }
+
+            guard case let .usage(sample) = parsed else {
+                // Not a usage or status line, or not parseable at all: keep the original bytes. A file
+                // that cannot be fully understood is still a file worth preserving exactly.
+                out.append(line)
+                if parsed == nil { skipped += 1 } else { passedThrough += 1 }
                 continue
             }
 
@@ -290,6 +352,7 @@ public enum JournalMigration {
                 Outcome(migrated: migrated, passedThrough: passedThrough,
                         skipped: skipped, outOfOrder: outOfOrder, resetsRepaired: resetsRepaired,
                         severitiesRecomputed: severitiesRecomputed,
+                        statusTagged: statusTagged,
                         migratedFromVersion: lowestVersion))
     }
 

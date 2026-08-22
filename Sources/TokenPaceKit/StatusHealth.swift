@@ -100,8 +100,11 @@ public enum ServiceID: Sendable, Equatable {
 /// the status page. The distinction matters wherever a value that used to be global becomes
 /// per-provider — the popup's section headers, the poll cadence, the journal's records.
 ///
-/// The raw values are stable snake-case strings **on purpose**: they are written into the usage
-/// journal, where they outlive any build, exactly like ``ServiceStatus``'s journal spelling.
+/// The raw values are **journal-stable snake_case strings**, matching how ``ServiceStatus`` is
+/// already serialised into a `status` line (#456). Deliberately not enum ordinals: a reordered case
+/// list would silently re-attribute every archived record, which is the one failure mode a
+/// written-down series cannot recover from. A case added later must keep that spelling — the string
+/// is what the archive stores.
 public enum ProviderID: String, Sendable, Equatable, Codable, CaseIterable {
     case claude
     case github
@@ -249,6 +252,15 @@ public struct StatusHealth: Sendable, Equatable {
     /// to prevent (#454, #455).
     public func worstProblem(of provider: ProviderID) -> ServiceStatus? {
         aggregate(of: provider).flatMap { $0.isProblem ? $0 : nil }
+    }
+
+    /// The per-provider worst-of under the name the journal layer uses (#456).
+    ///
+    /// A thin alias for ``worstProblem(of:)``, kept because `JournalRecordDomain` already calls it
+    /// and the two arrived from different tickets on the same day. Same semantics, same result — the
+    /// spelling difference is historical, not meaningful.
+    public func worstProblem(for provider: ProviderID) -> ServiceStatus? {
+        worstProblem(of: provider)
     }
 
     // MARK: matching names
