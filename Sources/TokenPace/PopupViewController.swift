@@ -2225,8 +2225,23 @@ final class PopupViewController: NSViewController {
     /// meeting text but would drop a fixed-size dot onto the baseline. The gap is the rows' own
     /// (`statusDotGap - statusDotNudge`) with the same nudge inset, so the header's dot lands on the
     /// identical vertical line as every dot below it.
-    private static func headerRow(dot: GlowDotView, title: NSView) -> NSStackView {
-        let row = NSStackView(views: [dot, title])
+    private static func headerRow(dot: GlowDotView?, title: NSView) -> NSStackView {
+        // A `nil` dot still occupies its column: a spacer of the dot's own diameter keeps the title
+        // in one place across the cold start, so the first poll changes a colour rather than the
+        // layout.
+        let leading: NSView
+        if let dot {
+            leading = dot
+        } else {
+            let spacer = NSView()
+            spacer.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                spacer.widthAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
+                spacer.heightAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
+            ])
+            leading = spacer
+        }
+        let row = NSStackView(views: [leading, title])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = Metrics.statusDotGap - Metrics.statusDotNudge
@@ -2414,7 +2429,13 @@ final class PopupViewController: NSViewController {
         //
         // It wraps the text stack rather than joining it: that stack is `.firstBaseline`, which would
         // drop a fixed-size view to the text baseline, and the dot has to sit on the optical centre.
-        let claudeLeading = claudeDot.map { Self.headerRow(dot: makeStatusDot(status: $0, animatorKey: "provider-claude"), title: leading) } ?? leading
+        // Wrapped whether or not a dot exists yet, so the title never shifts sideways when the first
+        // status poll lands — the wrapper carries the dot's column, and before the poll that column
+        // simply holds an empty space of the same width. Drawing a grey `unknown` dot instead would
+        // claim we looked and could not tell, which is a different statement from "not yet".
+        let claudeLeading = Self.headerRow(
+            dot: claudeDot.map { makeStatusDot(status: $0, animatorKey: "provider-claude") },
+            title: leading)
         // Right slot: the summary badge when there is an awaiting count and ⌥ is up; nothing when ⌥ is
         // held (the per-project breakdown below supersedes it — but the age stays put next to the brand
         // title, it does not move to where the badge was) or when there is no awaiting count at all.
