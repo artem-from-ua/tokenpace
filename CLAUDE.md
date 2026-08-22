@@ -97,11 +97,44 @@ the method, the target values, the swatch mode.
   (`sizingOptions`/`safeAreaRegions`), not the SwiftUI modifiers —
   [ADR-0088](docs/adr/0088-settings-hosting-safe-area-and-manual-separator.md).
 
+## Writing a comment — four rules, and they apply to every one
+
+- **A comment is paid for on every read — length is a cost, not a virtue** ([ADR-0122](docs/adr/0122-comments-are-read-every-session.md)).
+  Comments are 47% of the lines in `Sources/` and **64% of the bytes**: opening
+  `PopupViewController.swift` spends ~45 000 tokens on prose against ~22 000 on code. Write the
+  shortest comment that answers what the next editor must know; where a paragraph and a sentence
+  carry the same information, the sentence is right.
+- **Write the comment the code cannot write for itself, and mark a probe as a probe.** The other
+  three rules say what to cut; four things must be *there*: a **probe result** (what you tried and what
+  the platform did — "an `NSButton` outside the toolbar's own generation never draws the hover
+  plate"), a **declaration that looks redundant and is not** (`.isSelected` is what makes VoiceOver
+  announce the current choice), a **constraint living in another file**, and a **measurement with
+  its method**. Say *probed* / *measured* / *verified* when the claim came from an experiment —
+  thirteen comments here assert platform behavior and none says how it was learned, so a trim
+  cannot tell a finding from an opinion, and cut three of them. When the same non-obvious thing
+  recurs at several sites, **repeat the one-line reason at each** — `.isSelected` appears three
+  times and was explained once, and the silent copies are what the next "remove the redundant
+  trait" edit finds.
+- **A comment describes the current behavior — only that.** Not what the code used to do, not what
+  a constant was before, not which issue changed it, and **never where the code came from** — a
+  bash prototype's line numbers cannot be followed. When you catch yourself writing "used to" /
+  "previously" / "was removed", **rewrite the sentence in the present tense**: if a fact survives,
+  keep the fact and drop the history; if nothing survives, delete the sentence. **Prefer deleting
+  to rewording** — a pass that rephrased 37 sites while preserving their length moved total volume
+  by 0.05%.
+- **State the reason so it stands without a citation.** An ADR reference is a footnote, never the
+  explanation itself — a comment that says only "see ADR-0081" is unreadable the day 0081 is
+  partially superseded, and nothing signals that day: 45 references in this codebase already point
+  at fully superseded records ([#489](https://github.com/artem-from-ua/tokenpace/issues/489)). Give
+  the reason in physical terms the code can be checked against — a 9 pt dot and a 15 pt glyph put
+  their centres 3 pt apart whatever any ADR later says. Then a stale link costs convenience, not
+  meaning. The one thing always worth writing is the case where the obvious move is wrong and the
+  code cannot show it (`.momentaryChange` restores the image on mouse-up and wipes the checkmark).
+
 ## Trimming comments or docs in bulk — read the ADR first
 
-The four comment rules under "Critical rules" are what you need while *writing* a comment, and they
-are here because `docs/` is not loaded into context automatically. **Before a pass that deletes
-prose across many files, open
+The four rules above are what you need while *writing* a comment, and they are here because `docs/`
+is not loaded into context automatically. **Before a pass that deletes prose across many files, open
 [docs/adr/0122-comments-are-read-every-session.md](docs/adr/0122-comments-are-read-every-session.md)** —
 it carries the eleven rules that only matter at that scale: how to delete without orphaning a token
 the surviving text still leans on, why cross-references break in pairs, and the three-step filter
@@ -200,37 +233,6 @@ text in force is this one**.
   — **stop and tell the maintainer**, instead of merging with "docs later" in mind. A separate docs
   PR after the merge breaks atomicity: `main` keeps a commit where code and docs disagree, and
   nothing signals it. Proceeding without docs takes the maintainer's explicit word in this session.
-- **A comment is paid for on every read — length is a cost, not a virtue** ([ADR-0122](docs/adr/0122-comments-are-read-every-session.md)).
-  Comments are 47% of the lines in `Sources/` and **64% of the bytes**: opening
-  `PopupViewController.swift` spends ~45 000 tokens on prose against ~22 000 on code. Write the
-  shortest comment that answers what the next editor must know; where a paragraph and a sentence
-  carry the same information, the sentence is right.
-- **Write the comment the code cannot write for itself, and mark a probe as a probe.** The rules
-  below say what to cut; four things must be *there*: a **probe result** (what you tried and what
-  the platform did — "an `NSButton` outside the toolbar's own generation never draws the hover
-  plate"), a **declaration that looks redundant and is not** (`.isSelected` is what makes VoiceOver
-  announce the current choice), a **constraint living in another file**, and a **measurement with
-  its method**. Say *probed* / *measured* / *verified* when the claim came from an experiment —
-  thirteen comments here assert platform behavior and none says how it was learned, so a trim
-  cannot tell a finding from an opinion, and cut three of them. When the same non-obvious thing
-  recurs at several sites, **repeat the one-line reason at each** — `.isSelected` appears three
-  times and was explained once, and the silent copies are what the next "remove the redundant
-  trait" edit finds.
-- **A comment describes the current behavior — only that.** Not what the code used to do, not what
-  a constant was before, not which issue changed it, and **never where the code came from** — a
-  bash prototype's line numbers cannot be followed. When you catch yourself writing "used to" /
-  "previously" / "was removed", **rewrite the sentence in the present tense**: if a fact survives,
-  keep the fact and drop the history; if nothing survives, delete the sentence. **Prefer deleting
-  to rewording** — a pass that rephrased 37 sites while preserving their length moved total volume
-  by 0.05%.
-- **State the reason so it stands without a citation.** An ADR reference is a footnote, never the
-  explanation itself — a comment that says only "see ADR-0081" is unreadable the day 0081 is
-  partially superseded, and nothing signals that day: 45 references in this codebase already point
-  at fully superseded records ([#489](https://github.com/artem-from-ua/tokenpace/issues/489)). Give
-  the reason in physical terms the code can be checked against — a 9 pt dot and a 15 pt glyph put
-  their centres 3 pt apart whatever any ADR later says. Then a stale link costs convenience, not
-  meaning. The one thing always worth writing is the case where the obvious move is wrong and the
-  code cannot show it (`.momentaryChange` restores the image on mouse-up and wipes the checkmark).
 - **Don't assert from memory** facts about external APIs/tools — verify them (curl/--help/docs).
 - **`gh release create` runs only after the maintainer's explicit go-ahead.** A direct instruction to publish this release — "релізь", "make release", "publish the release" or equivalent — is required each time. Building, notarizing, tagging and drafting release notes may proceed without it, but the actual `gh release create` waits for that explicit word. This is separate from and additional to the `RELEASE_NOTES_APPROVED=1` notes-approval gate (that gate guards the notes; this rule guards the act of publishing).
 
