@@ -343,6 +343,12 @@ final class SettingsModel {
     /// Whether the usage journal records each poll to an append-only JSONL file. Default-off (opt-in).
     var journalEnabled = false
 
+    // MARK: Dropdown — the ⌥ caption (#475)
+
+    /// Whether the dropdown draws "hold ⌥ Option for more" where the action items sit while ⌥ is up.
+    /// Default-**on**: it is the only thing announcing that the menu has actions at all.
+    var showOptionHint = true
+
     // MARK: Awaiting-input indicator (#233, ADR-0066)
 
     /// Master toggle: show the "N sessions awaiting input" indicator. Default-off. Placement is
@@ -656,6 +662,7 @@ final class SettingsModel {
         awaitingInputEnabled = PersistedConfig.awaitingInputEnabled
 
         journalEnabled = PersistedConfig.journalEnabled
+        showOptionHint = PersistedConfig.showOptionHint
     }
 
     // MARK: Setters (persist first, then fire the callback — the ordering invariant)
@@ -679,6 +686,15 @@ final class SettingsModel {
         journalEnabled = on
         PersistedConfig.journalEnabled = on
         AppLogger.lifecycle.notice("journal: enabled set \(on, privacy: .public)")
+    }
+
+    /// Toggle the dropdown's ⌥ caption (#475). No callback: `menuWillOpen` re-reads
+    /// `PersistedConfig.showOptionHint` on every open, so the change lands on the next open without a
+    /// restart or a wiring hop — the same seam `devToolsEnabled` uses.
+    func setShowOptionHint(_ on: Bool) {
+        showOptionHint = on
+        PersistedConfig.showOptionHint = on
+        AppLogger.lifecycle.notice("dropdown: option hint set \(on, privacy: .public)")
     }
 
     func setColorAdvice(_ mode: ColorAdvice) {

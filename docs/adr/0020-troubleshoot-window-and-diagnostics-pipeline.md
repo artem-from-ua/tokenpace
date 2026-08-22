@@ -1,9 +1,18 @@
 ---
-status: accepted
+status: partially superseded
 date: 2026-07-22
+superseded_by: [0117]
 ---
 
 # ADR-0020: The Troubleshoot window and a diagnostics channel through a pure pipeline
+
+> **Postscript (#475).** §3's *visibility* decision no longer holds. It made "Settings…" a normal,
+> always-visible item with "Troubleshoot…" as the sole ⌥-gated one;
+> [ADR-0117](0117-dropdown-actions-behind-option.md) gates **every** action item the same way and
+> puts a caption where the column was. **§3's mechanism is untouched and still current** — the
+> modifier-polling timer, and the two findings that force it: `isAlternate` is inert in a
+> status-item menu, and an event monitor is starved by menu tracking. 0117 changed what the timer
+> reveals, not how it reveals it.
 
 > **Postscript.** §4 below says `setFrameAutosaveName` remembers the window's size/position
 > between openings. This was removed: the window now opens centered by default with a fixed

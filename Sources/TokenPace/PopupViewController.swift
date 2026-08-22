@@ -1596,6 +1596,9 @@ final class PopupViewController: NSViewController {
         didSet {
             guard isViewLoaded, optionHeld != oldValue else { return }
             rebuild()
+            // The ⌥ caption is the one thing ⌥ takes *away* (#475), and it lives outside `stack`, so
+            // `rebuild()` never touches it.
+            applyOptionHintVisibility()
         }
     }
 
@@ -1683,6 +1686,30 @@ final class PopupViewController: NSViewController {
         /// Bottom outer margin — trimmed below `cardInset` so the gap between the card and the native
         /// "Settings…" item beneath it is tighter (NSMenu adds its own pad there too).
         static let cardBottomInset: CGFloat = 4
+        /// Bottom outer margin when **nothing follows the card** — no ⌥ caption, and (with ⌥ up, #475)
+        /// no native items either.
+        ///
+        /// ``cardBottomInset``'s 4 is not a smaller margin for its own sake — it is trimmed *because*
+        /// something follows and `NSMenu` pads above it. Take the neighbour away and the reason goes with
+        /// it, leaving the card almost flush with the popup's edge.
+        ///
+        /// **Not** ``cardInset``, though the goal is to match it optically. `NSMenu` adds padding of its
+        /// own *below* the hosted view too, so a literal 14 here rendered as 18.5 against the sides' 13 —
+        /// measured off a 2× capture of the real menu (bottom gap 37 px vs 26 at the sides). Subtracting
+        /// that 5.5 pt of menu padding leaves 8.5, which is what puts the rendered margin on the sides'
+        /// number. Same reasoning as ``cardTopInset``'s 10-instead-of-14, and the same trap: the constant
+        /// here is not what ends up on screen.
+        static let cardBottomInsetAlone: CGFloat = 8.5
+        /// Gap between the card's bottom edge and the ⌥ hint caption below it (#475).
+        ///
+        /// Deliberately larger than ``cardBottomInset``: that number is tight because a native menu item
+        /// follows the card and `NSMenu` adds its own padding above it. Nothing pads the hint — it is our
+        /// own view in the same hosted item — so the gap has to be drawn here in full, or the caption
+        /// reads as part of the plate rather than as the line standing in for the items below it.
+        static let optionHintTopGap: CGFloat = 8
+        /// Gap below the ⌥ hint, before the hosted view ends. Matched to ``cardBottomInset`` so the hint
+        /// sits in the same relationship to what follows it as the card does when the hint is away.
+        static let optionHintBottomGap: CGFloat = 4
         /// Corner radius of the section card — matches Control Center's ~10 pt rounded plate.
         static let cardCornerRadius: CGFloat = 10
         /// Hairline width of the card's subtle edge.
@@ -1758,6 +1785,73 @@ final class PopupViewController: NSViewController {
     /// margin around it; the popup has no opaque backdrop of its own (always translucent).
     private var cardView: CardBackdropView?
 
+    /// The caption standing in for the action items while ⌥ Option is up (#475).
+    ///
+    /// Lives **outside** the card, as a sibling of it in the container: it speaks for the native items
+    /// below rather than being part of the widget, and it must not be rebuilt by `rebuild()` — that
+    /// method owns the gap after the last bar, and a row appended inside `stack` would change what
+    /// "last" means.
+    ///
+    /// Outside the card, but aligned to the **text** inside it: the caption's right edge sits under the
+    /// column of right-aligned status words ("on pace", "2h at 00:50"), so the popup ends as one column
+    /// of text rather than with a line reaching past it to the plate's edge.
+    ///
+    /// `nil` until `loadView` builds it, like `cardView`.
+    private var optionHintLabel: NSTextField?
+
+    /// The bottom constraint that holds while the hint is hidden — the card owns the container's bottom,
+    /// which is the layout as it stood before #475. Swapped against ``hintBottomConstraints`` rather
+    /// than toggled by height, so a hidden hint costs no vertical space at all.
+    private var cardBottomConstraint: NSLayoutConstraint?
+
+    /// The bottom constraints that hold while the hint is shown: the card stops at the hint, and the
+    /// hint owns the container's bottom.
+    private var hintBottomConstraints: [NSLayoutConstraint] = []
+
+    /// Whether the ⌥ hint may be drawn at all — the Settings → General switch (#475), read live.
+    ///
+    /// Not an appearance preset value on purpose: it records that *this person on this Mac* already
+    /// knows the shortcut, which is not a look worth carrying to another machine.
+    var optionHintEnabled = true {
+        didSet {
+            guard isViewLoaded, optionHintEnabled != oldValue else { return }
+            applyOptionHintVisibility()
+        }
+    }
+
+    /// Whether this popup is hosted in an `NSMenu` (the real dropdown) rather than in a plain window
+    /// (the Settings live preview).
+    ///
+    /// Only the bottom margin depends on it. In the menu, what sits under the card varies — the ⌥
+    /// caption, the native items, or nothing at all — so the popup has to size that gap itself. The
+    /// preview's window frames the card on its own (`SettingsPreviewWindowController.Metrics.belowCard`)
+    /// and must keep doing exactly that, so it opts out and keeps the historical trimmed value the
+    /// window's own margin is measured against.
+    var hostedInMenu = true {
+        didSet {
+            guard isViewLoaded, hostedInMenu != oldValue else { return }
+            applyOptionHintVisibility()
+        }
+    }
+
+    /// The gap under the card when the card owns the popup's bottom edge.
+    ///
+    /// The trimmed ``Metrics/cardBottomInset`` is trimmed **because something follows** — a native menu
+    /// item, with `NSMenu`'s own padding above it. So the full margin applies in exactly one case: the
+    /// menu, with the caption off *and* ⌥ up, where the action items are hidden too (#475) and the plate
+    /// genuinely has no neighbour.
+    ///
+    /// Getting this wrong is visible in both directions. Keeping the trim when nothing follows leaves the
+    /// card almost flush with the popup's edge; taking the full margin while the items are showing adds
+    /// it to `NSMenu`'s own padding and opens a gap between the widget and "Settings…".
+    ///
+    /// The preview always keeps the trimmed value: its window tops that up to an even margin itself
+    /// (`SettingsPreviewWindowController.Metrics.belowCard`), and doing it twice would double the gap.
+    private var cardBottomConstant: CGFloat {
+        guard hostedInMenu, !optionHeld else { return Metrics.cardBottomInset }
+        return Metrics.cardBottomInsetAlone
+    }
+
     /// The bold header of the popup's first section — "Claude" covers the update-cadence line and the
     /// per-component service status rows beneath it (see `rebuild`).
     private static let claudeCodeSectionTitle = "Claude"
@@ -1786,6 +1880,14 @@ final class PopupViewController: NSViewController {
     /// The heading of the "Extra usage" money-credits section (#145) — the localisation seam. Styled
     /// like the limit-window titles (plain label colour), the section reads from its numbers/bar.
     static let extraUsageTitle = "Extra usage"
+
+    /// What stands where the action items were, while ⌥ Option is up (#475) — the localisation seam.
+    ///
+    /// Deliberately vague about what "more" is. The column it stands for changes with the build and the
+    /// state (Troubleshoot and Development tools are themselves conditional, the update line comes and
+    /// goes), so a caption promising "actions" or "details" would be wrong in some of those states and
+    /// right in none of them for certain. "More" is true whatever ⌥ turns out to reveal.
+    static let optionHintText = "hold ⌥ Option for more"
 
     /// The weekly window has no reset instant and no history to reconstruct one from (ADR-0107).
     ///
@@ -1875,23 +1977,122 @@ final class PopupViewController: NSViewController {
         container.addSubview(stack)
         cardView = card
 
+        // The ⌥ hint (#475), a sibling of the card rather than a row inside it — see `optionHintLabel`.
+        let hint = makeOptionHintLabel()
+        container.addSubview(hint)
+        optionHintLabel = hint
+
+        // Two ways to end the popup, swapped by `applyOptionHintVisibility`: the card owns the bottom
+        // when the caption is away, the caption owns it when it is there.
+        //
+        // The card's own constant is not fixed — see `cardBottomConstant`. With the caption gone and the
+        // action items ⌥-hidden (#475), nothing follows the plate at all, and the margin trimmed for a
+        // neighbour that no longer exists left it sitting almost on the popup's edge.
+        let cardBottom = container.bottomAnchor.constraint(
+            equalTo: card.bottomAnchor, constant: cardBottomConstant)
+        cardBottomConstraint = cardBottom
+        hintBottomConstraints = [
+            hint.topAnchor.constraint(equalTo: card.bottomAnchor, constant: Metrics.optionHintTopGap),
+            container.bottomAnchor.constraint(
+                equalTo: hint.bottomAnchor, constant: Metrics.optionHintBottomGap),
+        ]
+
         NSLayoutConstraint.activate([
             // Card inset from the container. Top uses the trimmed `cardTopInset` to offset NSMenu's own
             // vertical padding above our item view, so the visible top gap matches the sides.
             card.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.cardTopInset),
             card.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.cardInset),
             container.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: Metrics.cardInset),
-            container.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: Metrics.cardBottomInset),
+            cardBottom,
             // Content pinned inside the card with the existing inner padding.
             stack.topAnchor.constraint(equalTo: card.topAnchor, constant: Metrics.topPadding),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Metrics.hPadding),
             card.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.hPadding),
             card.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.bottomPadding),
             container.widthAnchor.constraint(equalToConstant: Metrics.width),
+            // Aligned to the widget's **text**, not to the box: the caption's right edge lands under the
+            // column of right-aligned status words ("on pace", "2h at 00:50"), so the popup reads as one
+            // column of text ending on one line. Flush with the card's own edge it cleared that column
+            // by `hPadding` and looked like a separate element pinned to the plate.
+            //
+            // Expressed as the card's edge less `hPadding`, which is where the content sits, rather than
+            // by pinning to `stack`: that view is `alignment: .leading` and shrink-wraps its widest row,
+            // so its trailing edge stops wherever that row happens to end.
+            hint.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Metrics.hPadding),
+            card.trailingAnchor.constraint(equalTo: hint.trailingAnchor, constant: Metrics.hPadding),
         ])
         self.view = container
+        applyOptionHintVisibility()
         rebuild()
     }
+
+    /// The ⌥ hint caption (#475): dim, italic, right-aligned, and inert.
+    ///
+    /// Italic for the reason the style caption beside a row title is italic — it is a note *about* the
+    /// menu rather than a fact reported in it, and the dimmed ink alone would put it in the same class as
+    /// the numbers. Sized at ``dropdownTextSize``, the size the native items use through
+    /// `AppDelegate.dropdownMenuItemText`, so the caption and the items it stands for are one size.
+    ///
+    /// `labelWithString:` is already non-editable, non-selectable and non-bezeled; the two lines below
+    /// close what it leaves open. It must never highlight, take focus or read as something to click:
+    /// there is nothing behind it, and a caption that looks actionable in a menu is a promise the popup
+    /// cannot keep.
+    private func makeOptionHintLabel() -> NSTextField {
+        let label = NSTextField(labelWithString: Self.optionHintText)
+        label.font = Self.italic(NSFont.systemFont(ofSize: dropdownTextSize))
+        // `secondaryLabelColor`, not the popup's own `dimmedLabelColor`. That one is
+        // `tertiaryLabelColor` blended halfway to secondary — right for a caption sitting *inside* the
+        // card, against the plate's own fill, and too faint out here on the menu's material, where this
+        // line is the only thing on the row and has to be read at a glance. Both are dynamic system
+        // colours, so either follows a light/dark switch on its own with no second rule and no redraw
+        // of ours; this one simply starts a step brighter.
+        label.textColor = .secondaryLabelColor
+        label.alignment = .right
+        // Without this the field hugs its own text and the frame ends where the string does — so
+        // `.right` has nothing to align *within* and the caption sits wherever the label happens to
+        // start. Lowering the hugging lets it take the full content width, which is what makes the
+        // right edge land under the status column.
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.refusesFirstResponder = true
+        // Out of the accessibility tree as an element of its own: VoiceOver reading "hold ⌥ Option for
+        // more" as a row would suggest a control, and the popup's own description already covers it.
+        label.setAccessibilityElement(false)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }
+
+    /// Show or hide the ⌥ hint and swap which view owns the container's bottom edge.
+    ///
+    /// Hidden is the *absence* of the row, not an empty one: the card's own bottom constraint comes back,
+    /// so a popup with the hint off measures exactly as it did before #475. `NSMenu` re-measures nothing
+    /// on its own, so the caller re-fits the hosted view afterwards (`AppDelegate`), and the Settings
+    /// preview resizes its window.
+    private func applyOptionHintVisibility() {
+        guard let hint = optionHintLabel, let cardBottom = cardBottomConstraint else { return }
+        let shows = showsOptionHint
+        hint.isHidden = !shows
+        // Re-read rather than set once at build time: it depends on `optionHeld` (whether the action
+        // items are showing) and on `hostedInMenu`, which the preview assigns after `loadView`. Written
+        // before the branch, so it is right whichever constraint ends up holding — an inactive
+        // constraint keeps its constant, and this one is reactivated the moment ⌥ goes back down.
+        cardBottom.constant = cardBottomConstant
+        if shows {
+            cardBottom.isActive = false
+            NSLayoutConstraint.activate(hintBottomConstraints)
+        } else {
+            NSLayoutConstraint.deactivate(hintBottomConstraints)
+            cardBottom.isActive = true
+        }
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
+    }
+
+    /// Whether the caption belongs on screen right now: the switch is on and ⌥ is up.
+    ///
+    /// The two conditions are not symmetric. `optionHintEnabled` is the user saying they already know
+    /// the shortcut; `optionHeld` is them using it. Either one makes the caption redundant, and a
+    /// redundant line in a menu this small is not free.
+    private var showsOptionHint: Bool { optionHintEnabled && !optionHeld }
 
     // MARK: Rendering
 
