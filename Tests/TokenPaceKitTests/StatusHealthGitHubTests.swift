@@ -208,9 +208,18 @@ struct StatusHealthMergeTests {
 @Suite("GitHubMonitoring")
 struct GitHubMonitoringTests {
 
-    @Test func defaultsToOff() {
-        #expect(GitHubMonitoring.default.developmentServicesEnabled == false)
-        #expect(GitHubMonitoring.default.isMonitoringAnything == false)
+    @Test func defaultsToOn() {
+        #expect(GitHubMonitoring.default.developmentServicesEnabled == true)
+        #expect(GitHubMonitoring.default.isMonitoringAnything == true)
+    }
+
+    @Test func anExplicitOffSurvivesTheDefault() throws {
+        // The default decides what an **absent** key means. A user who turned the provider off has a
+        // stored `false`, and no change to the default may hand it back to them.
+        let data = Data(#"{"developmentServicesEnabled":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(GitHubMonitoring.self, from: data)
+        #expect(decoded.developmentServicesEnabled == false)
+        #expect(decoded.isMonitoringAnything == false)
     }
 
     @Test func roundTripsThroughJSON() throws {

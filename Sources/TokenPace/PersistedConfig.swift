@@ -249,10 +249,11 @@ enum PersistedConfig {
     /// The GitHub provider's config (#454) — today the single `Development services` group.
     ///
     /// Persisted as JSON like ``monitoredServices``, and falling back to ``GitHubMonitoring/default``
-    /// (everything off) when the key is absent or the blob will not decode. Note the default differs
-    /// in kind from every other monitoring flag here: this one is **opt-in**. A provider that appears
-    /// on upgrade must not start polling a third party, or put a new dot in the menu bar, until the
-    /// user asks for it.
+    /// — **monitored** — when the key is absent or the blob will not decode, the same opt-out shape
+    /// every other monitoring flag here has.
+    ///
+    /// The fallback applies only to an **absent or unreadable** key. A user who switched the provider
+    /// off has a stored `false`, which decodes normally and is never overridden by the default.
     static var githubMonitoring: GitHubMonitoring {
         get {
             guard let data = defaults.data(forKey: Key.githubMonitoring),

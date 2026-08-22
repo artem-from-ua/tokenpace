@@ -7,6 +7,16 @@ superseded_by: []
 
 # ADR-0121: GitHub as a status-only provider — one group, two plates, and a dot that only appears while calm
 
+> **Postscript (2026-08-22, same day): the provider ships _on_ by default.** The opt-in argument
+> below stands as written, and was overruled on a practical reading of who runs this app: TokenPace
+> sits beside `gh` and a browser full of pull requests, so the provider that must be discovered in
+> Settings is the one that never gets switched on — and a monitor nobody enabled reports nothing,
+> which is indistinguishable from not shipping it. The cost the section names is real and now belongs
+> in the release notes: an existing install gains a plate in the dropdown, and a dot in the menu bar
+> during a GitHub incident, without having asked. An explicit `false` already in `UserDefaults` still
+> wins, because a default only decides what an **absent** key means — nobody who turned it off gets
+> it back.
+
 > Narrows §6 of [ADR-0024](0024-configurable-logical-services.md) — "status lines appear only on a
 > real problem" and "no aggregation in the popup" — for **section headers only**; §1's logical-service
 > model is generalised, not replaced. Extends [ADR-0094](0094-provider-row-brand-badge.md) §4 with the
