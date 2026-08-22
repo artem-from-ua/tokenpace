@@ -1,58 +1,26 @@
 # Architecture decisions (ADRs)
 
-The project's architecture decision records. Every **accepted** ADR is immutable; a `draft` can be
-reworked until it becomes `accepted`. When a decision goes out of date its record stays — it is
-never deleted or rewritten.
+The project's architecture decision records — what was decided, when, and why. Each one is a record
+of a moment: an **accepted** ADR is never rewritten or deleted, even once it stops describing the
+current design, because the reasoning is worth as much as the outcome.
 
-**Creating or changing anything under `docs/adr/` — read
-[writing-adrs.md](../guides/writing-adrs.md) first.** The numbering, the frontmatter, the shape of
-a supersession postscript, and what this index is allowed to contain are all decided there. This
-file is the index; that one is the procedure.
+**How to read the table.** The status tells you how much of a record is still in force:
 
-## The index, and what belongs in it
+- **`accepted`** — in force as written.
+- **`partially superseded → NNNN`** — mostly in force; a later ADR replaced a part of it. The
+  record is **not** struck through, because you still need it. A postscript at the top of the file
+  says which part went and which still stands.
+- **`superseded → NNNN`** — replaced in full, and struck through in the table. Read it for the
+  history, not for the current design; follow the arrow for what is in force now.
+- **`draft`** — not decided yet. It describes a direction, not a commitment.
+- **`rejected`** — a draft that did not take off, kept with a one-line reason.
 
-**The Title column is the ADR's H1, verbatim — nothing else.** It drifted: cell by cell the column
-stopped being a title and became a summary of the Decision section, until the average row passed
-1 kB, the worst reached 5.2 kB, a stray fragment split the table's markup mid-row, and six rows
-carried an unescaped `|` that silently broke their column count. None of that prose was unique —
-every supersession it described was already written, in more detail, in the postscript of the ADR
-it described. A second copy of a fact is a copy that drifts from the first, which is how one index
-came to spell the same status eleven different ways.
+Every number in the Status column links to the record that replaced it, so a lineage can be
+followed forward without searching the table.
 
-- **Title** — the H1 text, minus the `ADR-NNNN:` prefix and the `(draft)` marker.
-- **Status** — one of exactly five: `accepted`, `draft`, `rejected`, `superseded → NNNN`,
-  `partially superseded → NNNN`. No prose, no parenthetical reason, no "what exactly." **Every
-  number in it is a link** — the arrow is what a reader follows out of this table.
-- **What was superseded, and what still stands, goes in the ADR's own postscript**, not here.
-
-**Strikethrough marks a fully superseded record — and only that.** The number and title are struck
-when `status: superseded`; a partially superseded ADR is not struck, because it is still mostly in
-force and still meant to be read. Its `partially superseded → NNNN` status already says what
-changed, and striking it through would tell the reader to skip a record they need.
-
-**Full vs partial supersession.** The two cases differ in the frontmatter, and the index follows
-from it:
-
-| Frontmatter | Status in the index | Struck through |
-|---|---|---|
-| `status: accepted`, no `superseded_by` | `accepted` | no |
-| `status: accepted` + `superseded_by: [NNNN]` | `partially superseded → [NNNN](NNNN-….md)` | no |
-| `status: superseded` + `superseded_by: [NNNN]` | `superseded → [NNNN](NNNN-….md)` | yes |
-| `status: draft` | `draft` | no |
-| `status: rejected` | `rejected` | no |
-
-A **partial** supersession keeps `status: accepted` — the decision mostly still holds, and calling
-it `superseded` would be inaccurate — but gains `superseded_by: [NNNN]` and a postscript drawing
-the line between what was replaced and what still stands. Examples:
-[0025](0025-check-for-updates.md) and [0033](0033-automatic-update-install.md), both partially
-superseded by [0036](0036-update-signals-single-dropdown-item.md).
-
-**Drafts.** An ADR whose decision is *not* final yet — it sits behind a gate (a spike, research,
-external validation), or describes a proposed but unimplemented direction — carries `status: draft`
-and is not struck through, because a draft is not out of date. When the decision is made,
-`draft → accepted` in the same file, and from that moment the ADR is immutable; `draft` is the only
-status that may be rewritten. A draft that did not take off gets `status: rejected` with a one-line
-reason. The lifecycle: `draft → accepted → (superseded)`, with a `draft → rejected` branch.
+Some ADRs are in Ukrainian: [0002](0002-ukrainian-documentation.md) is the decision that made them
+so, kept in the original as an immutable record, and
+[0116](0116-english-as-documentation-language.md) is the one that reversed it.
 
 | # | Title | Status |
 |---|---|---|
@@ -177,3 +145,50 @@ reason. The lifecycle: `draft → accepted → (superseded)`, with a `draft → 
 | [0119](0119-status-polling-own-cadence-and-backoff.md) | Status polling gets its own heartbeat and a per-source 429 backoff | accepted |
 | [0120](0120-status-records-carry-their-provider.md) | `status` journal records carry their provider, and the archive is backfilled | accepted |
 | [0121](0121-github-as-a-status-only-provider.md) | GitHub as a status-only provider — one group, two plates, and a dot that only appears while calm | accepted |
+
+## Maintaining this index
+
+**Creating or changing anything under `docs/adr/` — read
+[writing-adrs.md](../guides/writing-adrs.md) first.** The numbering, the frontmatter, the sections
+of a body, and the shape of a supersession postscript are decided there; start a new record from
+[TEMPLATE.md](TEMPLATE.md). This file is the index; that one is the procedure. What follows is only
+the part that governs the table above.
+
+**The Title column is the ADR's H1, verbatim — nothing else.** It drifted: cell by cell the column
+stopped being a title and became a summary of the Decision section, until the average row passed
+1 kB, the worst reached 5.2 kB, a stray fragment split the table's markup mid-row, and six rows
+carried an unescaped `|` that silently broke their column count. None of that prose was unique —
+every supersession it described was already written, in more detail, in the postscript of the ADR
+it described. A second copy of a fact is a copy that drifts from the first, which is how one index
+came to spell the same status eleven different ways.
+
+- **Title** — the H1 text, minus the `ADR-NNNN:` prefix and the `(draft)` marker.
+- **Status** — one of exactly five: `accepted`, `draft`, `rejected`, `superseded → NNNN`,
+  `partially superseded → NNNN`. No prose, no parenthetical reason, no "what exactly." **Every
+  number in it is a link** — the arrow is what a reader follows out of this table.
+- **What was superseded, and what still stands, goes in the ADR's own postscript**, not here.
+
+**Strikethrough marks a fully superseded record — and only that.** The number and title are struck
+when `status: superseded`; a partially superseded ADR is not struck, because it is still mostly in
+force and still meant to be read. Its `partially superseded → NNNN` status already says what
+changed, and striking it through would tell the reader to skip a record they need.
+
+The row follows from the file's frontmatter, with nothing left to judge:
+
+| Frontmatter | Status in the index | Struck through |
+|---|---|---|
+| `status: accepted`, no `superseded_by` | `accepted` | no |
+| `status: accepted` + `superseded_by: [NNNN]` | `partially superseded → [NNNN](NNNN-….md)` | no |
+| `status: superseded` + `superseded_by: [NNNN]` | `superseded → [NNNN](NNNN-….md)` | yes |
+| `status: draft` | `draft` | no |
+| `status: rejected` | `rejected` | no |
+
+A **partial** supersession keeps `status: accepted` — the decision mostly still holds, and calling
+it `superseded` would be inaccurate — but gains `superseded_by: [NNNN]` and a postscript drawing
+the line between what was replaced and what still stands. Examples:
+[0025](0025-check-for-updates.md) and [0033](0033-automatic-update-install.md), both partially
+superseded by [0036](0036-update-signals-single-dropdown-item.md).
+
+**The lifecycle** is `draft → accepted → (superseded)`, with a `draft → rejected` branch. `draft`
+is the only status that may be rewritten: once an ADR is accepted it is immutable, and a decision
+that stops holding is replaced by a new record rather than edited in place.
