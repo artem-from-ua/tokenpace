@@ -906,6 +906,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem?.isHidden = !optionHeld
         quitSeparatorItem?.isHidden = !optionHeld
         quitItem?.isHidden = !optionHeld
+        // The update line itself stays visible in both states — it is a notice, not an action. Its
+        // separator does not: it divides that line from the items above, and with ⌥ up there is nothing
+        // above it to divide from. Guarded on the item's own visibility so a hidden update line does not
+        // grow a separator under ⌥.
+        if let updateAvailableItem, !updateAvailableItem.isHidden {
+            updateSeparatorItem?.isHidden = !optionHeld
+        }
         // "Development tools…" needs both gates: ⌥ Option AND the `devToolsEnabled` defaults key. The
         // item always exists now, so the flag gate is applied here (re-checked each open, so toggling
         // the defaults key takes effect on the next menu open).
@@ -2003,10 +2010,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if item == .hidden {
             updateSeparatorItem?.isHidden = true
             updateAvailableItem?.isHidden = true
+            popupVC.hasVisibleMenuNeighbour = false
             return
         }
-        updateSeparatorItem?.isHidden = false
+        // The separator divides the update line from the action items **above** it — so it belongs on
+        // screen only while those items are there (#475). With ⌥ up they are hidden, and a divider
+        // between the card and the update line is a rule under nothing.
+        updateSeparatorItem?.isHidden = !lastOptionHeld
         updateAvailableItem?.isHidden = false
+        // The card is no longer alone: it must keep its trimmed bottom margin, or the gap above this
+        // row reads as a layout fault.
+        popupVC.hasVisibleMenuNeighbour = true
         updateAvailableItem?.attributedTitle = Self.updateItemTitle(for: item)
         AppLogger.lifecycle.notice("update: menu item = \(String(describing: item), privacy: .public)")
     }

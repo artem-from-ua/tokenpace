@@ -89,12 +89,22 @@ opt-out, not an oversight: it is the state someone chooses precisely because the
 be told.
 
 **The bottom margin now depends on what follows the card.** `cardBottomInset` is trimmed to 4
-*because* a native item follows and `NSMenu` pads above it. With the caption off and ⌥ up, nothing
-follows — and the trim framed the plate against a neighbour that was not there. A separate constant
-applies in exactly that case. It is **8.5, not the 14 of `cardInset`**, because `NSMenu` pads below
-the hosted view too: measured on a 2× capture of the real menu, a literal 14 rendered as 18.5 pt
-against the sides' 13. The same trap as `cardTopInset`'s 10-instead-of-14 — the constant is not what
-lands on screen.
+*because* a native item follows and `NSMenu` pads above it. With nothing following, the trim framed
+the plate against a neighbour that was not there. A separate constant applies in that case, and it is
+**8.5, not the 14 of `cardInset`**, because `NSMenu` pads below the hosted view too: measured on a 2×
+capture of the real menu, a literal 14 rendered as 18.5 pt against the sides' 13. The same trap as
+`cardTopInset`'s 10-instead-of-14 — the constant is not what lands on screen.
+
+"Nothing follows" takes **three** conditions, not two, and the third was missed on the first pass:
+hosted in the menu, the caption off, ⌥ up — **and no update line showing**. That line stays visible in
+both ⌥ states by decision 2 above, so it is a neighbour like any other; without the check the card took
+its lone-plate margin while a row sat directly beneath it. The popup cannot see the menu it is hosted
+in, so `refreshUpdateMenuItem` pushes the fact in as `hasVisibleMenuNeighbour`.
+
+**The update line's separator is ⌥-gated even though the line is not.** The separator divides that line
+from the action items **above** it; with ⌥ up there are no items above, and it renders as a rule under
+nothing, between the card and the notice. So the line stays and its divider goes — they answer
+different questions ("is there something to tell you" versus "is there something to divide from").
 
 **The ⌥ transition changes two things at once** — the popup's fitting size and the menu's item count.
 `updateTroubleshootVisibility` already re-fit the hosted view for the service rows; the caption rides

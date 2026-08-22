@@ -1834,12 +1834,26 @@ final class PopupViewController: NSViewController {
         }
     }
 
+    /// Whether a native item is showing beneath the card **regardless of ⌥** — in practice the update
+    /// line, the one action item #475 leaves visible because it is a notice first.
+    ///
+    /// The popup cannot see the menu it is hosted in, so `AppDelegate` pushes this in from
+    /// `refreshUpdateMenuItem`. Without it the card takes its lone-plate margin while a row is sitting
+    /// right under it, and the gap reads as a layout fault.
+    var hasVisibleMenuNeighbour = false {
+        didSet {
+            guard isViewLoaded, hasVisibleMenuNeighbour != oldValue else { return }
+            applyOptionHintVisibility()
+        }
+    }
+
     /// The gap under the card when the card owns the popup's bottom edge.
     ///
     /// The trimmed ``Metrics/cardBottomInset`` is trimmed **because something follows** — a native menu
-    /// item, with `NSMenu`'s own padding above it. So the full margin applies in exactly one case: the
-    /// menu, with the caption off *and* ⌥ up, where the action items are hidden too (#475) and the plate
-    /// genuinely has no neighbour.
+    /// item, with `NSMenu`'s own padding above it. So the full margin applies only when the plate
+    /// genuinely has no neighbour, which takes all three conditions: hosted in the menu, the caption
+    /// off, ⌥ up (the action items hidden, #475) — **and** no update line showing, since that one stays
+    /// visible in both ⌥ states and is a neighbour like any other (``hasVisibleMenuNeighbour``).
     ///
     /// Getting this wrong is visible in both directions. Keeping the trim when nothing follows leaves the
     /// card almost flush with the popup's edge; taking the full margin while the items are showing adds
@@ -1848,7 +1862,7 @@ final class PopupViewController: NSViewController {
     /// The preview always keeps the trimmed value: its window tops that up to an even margin itself
     /// (`SettingsPreviewWindowController.Metrics.belowCard`), and doing it twice would double the gap.
     private var cardBottomConstant: CGFloat {
-        guard hostedInMenu, !optionHeld else { return Metrics.cardBottomInset }
+        guard hostedInMenu, !optionHeld, !hasVisibleMenuNeighbour else { return Metrics.cardBottomInset }
         return Metrics.cardBottomInsetAlone
     }
 
