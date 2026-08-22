@@ -156,8 +156,26 @@ public enum IncidentVisibility {
         now: Date,
         maxAge: TimeInterval? = nil
     ) -> [VisibleIncident] {
-        let monitored = StatusHealth.monitoredComponentNames(
-            for: config, usageApiEnabled: usageApiEnabled)
+        visible(
+            in: summary,
+            monitoredComponentNames: StatusHealth.monitoredComponentNames(
+                for: config, usageApiEnabled: usageApiEnabled),
+            now: now,
+            maxAge: maxAge)
+    }
+
+    /// The same filter, taking the monitored names directly (#454).
+    ///
+    /// The Claude overload above is this one with the names derived from its config. GitHub needs the
+    /// generic form because its names come from a different config type entirely — and because each
+    /// provider's incidents must be filtered against **its own** names: crossing them would let a
+    /// GitHub incident match on a component Claude happens to share a word with.
+    public static func visible(
+        in summary: StatusSummary,
+        monitoredComponentNames monitored: Set<String>,
+        now: Date,
+        maxAge: TimeInterval? = nil
+    ) -> [VisibleIncident] {
         return summary.incidents.compactMap { incident in
             let stage = IncidentStage(rawAPIValue: incident.status)
             guard !stage.isClosed else { return nil }

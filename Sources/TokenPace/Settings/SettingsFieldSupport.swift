@@ -356,6 +356,26 @@ struct SettingsRowBadge: Equatable {
     static var claude: SettingsRowBadge {
         brand(ColorRole.claudeBrand.defaultColor, symbol: "cloud.fill")
     }
+
+    /// GitHub's row (#454): the **same `cloud.fill`** Claude wears, on black.
+    ///
+    /// One glyph for every provider, deliberately. ADR-0094 §4 puts it as "colour belongs to the
+    /// brand, shape belongs to the system" — so the shape is the *category*, and every row in this
+    /// list is the same kind of thing: a service TokenPace watches over the network. Giving each
+    /// provider its own glyph would make the shape carry identity too, which is the job the colour
+    /// already does, and it would leave a reader deciding whether a branch and a cloud differ in kind
+    /// or only in vendor. A per-provider glyph is also the seam where a logo eventually gets proposed;
+    /// a shared category glyph closes that door by construction.
+    ///
+    /// The gradient derives from pure black, so ADR-0094 §7's 0.375 mix puts the far end at `#606060`
+    /// — a visibly grey top-left, the same shape the measured system capsules have. That is the ADR's
+    /// arithmetic, not a fallback: a flat chip was considered and rejected there for reading as a
+    /// different material beside the sidebar's gradients. `needsBorder` stays false — black is darker
+    /// than the form row behind it, unlike the one white chip.
+    @MainActor
+    static var github: SettingsRowBadge {
+        brand(ColorRole.githubBrand.defaultColor, symbol: "cloud.fill")
+    }
 }
 
 private extension NSColor {

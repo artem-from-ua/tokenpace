@@ -526,6 +526,56 @@ separate level of hierarchy, which this row does not have.
 The split runs along **lines**, not along a "name ↔ value" axis: the verdict stands in full ink together
 with the name, and that is deliberate — it is the most actionable element of the row.
 
+## Provider plates and the header dot (#454, ADR-0121)
+
+The popup can hold **two plates**, one per provider: Claude's `CardBackdropView` and, below it,
+GitHub's own — separate glass, separate stack, separate rows. Two providers on one plate read as one
+subject with a subheading, and the component names cannot correct that (`Actions` and `Issues` never
+say whose they are). When GitHub is off, its plate collapses to zero height and the popup ends at
+Claude's card exactly as it did before the provider existed.
+
+**A section header's dot is drawn only while that provider is `operational`.** This is the one dot in
+the app that appears on a calm state — and, symmetrically, the one that *disappears* when something is
+wrong. Both halves matter when you draw a state:
+
+| Provider state | Header dot | Rows below |
+|---|---|---|
+| `operational` (calm) | **green** `ColorRole.green`, a real `GlowDotView` | none — a healthy component draws no row |
+| `degraded` / `partialOutage` / `majorOutage` / `underMaintenance` | **none** — title flush left | one row per non-operational component, each with its own dot and its own name |
+| `unknown` (the poll failed) | **none** — `unknown` is not an exception | grey rows, one per component |
+| no poll has landed yet | **none** — "not yet" is not "we could not tell" | none |
+
+The dot answers the state where the rows are hidden. The moment the rows appear they carry their own
+dots and **name the service**, so a worst-of-N above them would restate less precisely what they
+already say ([ADR-0121](../adr/0121-github-as-a-status-only-provider.md) §D2).
+
+**No dot means no reserved column** — the provider's name sits flush left, not behind a hidden indent.
+The *service rows* do reserve that column (their names line up under one another whatever each row's
+dot is doing), but a header is not one of a set; it is the thing the set hangs from. When the dot is
+present it uses the rows' own gap and nudge, so every dot in the popup lands on one vertical line.
+
+**Under ⌥** each plate switches to **its own** incidents ([ADR-0071](../adr/0071-incident-subscriptions.md)
+§2 — the dimension, not the level of detail), and the GitHub header grows the same `· updated …` tail
+Claude's carries, reading **GitHub's own** poll age. The subscribe control sits on whichever plate has
+an incident — both when both do — and either one toggles the same app-wide subscription.
+
+### Impossible combinations these introduce
+
+| Combination | Why it is impossible |
+|---|---|
+| A **header dot and service rows on the same plate** | `headerDot(for:)` returns a dot for `.operational` and nothing else, and a component that is `operational` draws no row. The two are mutually exclusive by construction, in both directions ([ADR-0121](../adr/0121-github-as-a-status-only-provider.md) §D2) |
+| A **yellow, orange, red, blue or grey header dot** | Same gate: every non-`operational` aggregate yields `nil`. Those five tones belong to the *rows*, and to the menu-bar dot — never to a provider header |
+| A **grey header dot before the first poll** | A `nil` aggregate yields no dot at all. Grey would claim we looked and could not tell, which is a different statement from "we have not looked" — the same honesty `ServiceStatus.unknown` exists to protect |
+| A **green dot in the menu bar** | Unchanged by #454: silence there is still a complete answer to "can I work" ([ADR-0013](../adr/0013-claude-status-line.md) §8). Green enters the vocabulary in **one** position only — a popup provider header on a calm provider |
+| A **GitHub incident row under the `Claude` header** (or the reverse) | Each plate renders only its own list. An incident row deliberately does not name the services it affects ([ADR-0071](../adr/0071-incident-subscriptions.md) §3), so the header above it is the only attribution there is — which is the whole reason there are two plates |
+| **`No ongoing incidents` on a calm GitHub plate under ⌥** | Claude's plate says that because its section is on screen *because* something is wrong, so a blank dimension there would read as a glitch. GitHub's plate is on screen whenever the provider is monitored, so a calm provider under ⌥ shows **nothing** — the header's green dot has already answered it |
+| A **subscribe row on a plate with no incident of its own** | The control sits beside its cause. On a healthy provider's plate it would read as an offer to follow that provider's silence |
+| A **GitHub plate carrying bars, a percentage, or a `Token limits usage` section** | GitHub is status-only and publishes no subscription limit the bars model. There is no usage half in the app, in the config, or on the Settings page |
+| A **GitHub row badge with a branch, an Octocat, or any glyph other than `cloud.fill`** | Every provider badge wears the same glyph: shape is the category, colour is the identity ([ADR-0094](../adr/0094-provider-row-brand-badge.md) §4, [ADR-0121](../adr/0121-github-as-a-status-only-provider.md) §D6) |
+| **Pure black GitHub ink in the popup** | The badge is `ColorRole.githubBrand` (`#000000`); the popup header is `ColorRole.githubBrandInk`, which resolves per appearance (`#1F2328` / `#E6EDF3`) because black on the dropdown's dark material is unreadable |
+| A **GitHub plate on a default install** | The provider is **off by default** — the one opt-in monitoring flag in the app. Drawing it means drawing a configuration the user chose |
+| A **`Monitoring is off` dead end over a live GitHub plate** | `isMonitoringAnything` spans providers since #454; a GitHub-only configuration is a fully monitored state |
+
 ## Impossible combinations
 
 Check before you draw a state.

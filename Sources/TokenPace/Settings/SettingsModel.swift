@@ -27,6 +27,10 @@ final class SettingsModel {
     // MARK: Callbacks (the AppDelegate contract — set by the window controller's forwarders)
 
     var onProviderMonitoringChange: ((ProviderMonitoring) -> Void)?
+    /// The GitHub provider's config changed (#454). Its **own** callback rather than a second
+    /// meaning for `onProviderMonitoringChange`: that one carries Claude's config, and reusing it
+    /// would make a GitHub toggle re-resolve Claude's status for no reason.
+    var onGitHubMonitoringChange: ((GitHubMonitoring) -> Void)?
     var onCheckForUpdatesNow: (() -> Void)?
     var onInstallUpdateNow: (() -> Void)?
     var onColorAdviceChange: ((ColorAdvice) -> Void)?
@@ -286,6 +290,28 @@ final class SettingsModel {
         return usageApiEnabled ? "Usage API · \(servicesText)" : servicesText
     }
 
+    // MARK: GitHub provider (#454)
+
+    /// Whether GitHub's `Development services` group is monitored. Off by default — a provider added
+    /// on upgrade waits to be asked.
+    var githubDevelopmentServicesEnabled = false
+
+    /// What the GitHub page currently describes — the value its callback carries.
+    var githubMonitoring: GitHubMonitoring {
+        GitHubMonitoring(developmentServicesEnabled: githubDevelopmentServicesEnabled)
+    }
+
+    /// The state line under the `GitHub` row on the Providers page — the twin of
+    /// ``claudeProviderSummary``, and deliberately answering with the same shape.
+    ///
+    /// It names the group rather than counting components: `Development services` is one switch over
+    /// five constituents, so "5 services monitored" would promise a granularity the page does not
+    /// offer. `Off` is the state most users see first, and it has to read as a choice rather than as
+    /// a fault.
+    var githubProviderSummary: String {
+        githubDevelopmentServicesEnabled ? "Development services" : "Off"
+    }
+
     /// The state line under a surface's navigator row on the Appearance page — the bar style that
     /// surface currently draws, which is the one setting both pages open with and the only one whose
     /// answer differs between them by default.
@@ -303,7 +329,9 @@ final class SettingsModel {
         switch page {
         case .appearanceMenuBar: style = menuBarStyle
         case .appearanceDropdown: style = dropdownStyle
-        case .providersClaude: return nil
+        // The provider pages configure no surface. Their rows report their own state through
+        // `claudeProviderSummary` / `githubProviderSummary`, written where the row is built.
+        case .providersClaude, .providersGitHub: return nil
         // Legend configures nothing, so there is no setting to report. Its row carries a fixed
         // subtitle written where the row is built, rather than a summary of state it does not own.
         case .appearanceLegend: return nil
@@ -641,6 +669,9 @@ final class SettingsModel {
         claudeCodeEnabled = pm.services.claudeCodeEnabled
         webDesktopEnabled = pm.services.webDesktopEnabled
         webDesktopMode = pm.services.webDesktopMode
+        // Same rule for the GitHub provider (#454): a bare assignment, so re-opening Settings never
+        // re-fires `onGitHubMonitoringChange` and kicks the GitHub poll.
+        githubDevelopmentServicesEnabled = PersistedConfig.githubMonitoring.developmentServicesEnabled
 
         backToWorkEnabled = PersistedConfig.backToWorkEnabled
         extraUsageNotifyEnabled = PersistedConfig.extraUsageNotifyEnabled
@@ -896,6 +927,20 @@ final class SettingsModel {
             LaunchAtLoginController.openLoginItemsSettings()
         }
         launchAtLogin = LaunchAtLogin.toggleState(for: status)
+    }
+
+    /// Turn GitHub's `Development services` monitoring on or off (#454): assign, persist, log, notify
+    /// — the ordinary shape for an independent setting.
+    ///
+    /// Not routed through `commitProviderMonitoring()`. That one exists to write Claude's two halves
+    /// atomically because `claudeApiLocked` is derived from both together; GitHub has no such derived
+    /// state, and borrowing that path would re-fire Claude's callback on every GitHub toggle.
+    func setGitHubDevelopmentServices(_ on: Bool) {
+        githubDevelopmentServicesEnabled = on
+        let config = githubMonitoring
+        PersistedConfig.githubMonitoring = config
+        AppLogger.lifecycle.notice("github: development services set \(on, privacy: .public)")
+        onGitHubMonitoringChange?(config)
     }
 
     func setBackToWork(_ on: Bool) {

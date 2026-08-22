@@ -36,6 +36,9 @@ final class SignalHub: @unchecked Sendable {
         case usage
         /// The status loop's scheduler (ADR-0119) — built once, at launch.
         case status
+        /// The GitHub status loop's scheduler (#454) — its own subscription, so the two status
+        /// sources receive sleep/wake independently rather than racing for one continuation.
+        case github
     }
 
     private let lock = NSLock()
@@ -478,6 +481,13 @@ actor StubUsageTransport: UsageTransport {
         /// green". Every stub other than `.calmDegraded`, `.staleError` and `.authError` is likewise
         /// all-operational; this one exists to make the ⌥ reveal the *subject* of a named frame.
         case allGreen
+        // GitHub provider (#454). The usage side stays calm in all four so nothing competes with the
+        // subject; `githubClaudeDown` is the exception that also puts Claude's components down,
+        // because its subject *is* the two providers disagreeing.
+        case githubGreen
+        case githubDegraded
+        case githubOutage
+        case githubClaudeDown
         /// A money-credits ("extra usage") frame for the trailing ¤ icon (#144). Each `CreditsFrame`
         /// pins the 7-day window at 100 % (so `anyBaseLimitExhausted` holds and the icon shows) and
         /// carries a `spend` + `extra_usage` block covering one credits state (paced / limit-reached /
@@ -948,6 +958,71 @@ actor StubUsageTransport: UsageTransport {
     /// `components[]` carrying **live** status, and `incident_updates[]` with stable ids — the exact
     /// fields `IncidentVisibility` and the subscription logic read. The previous placeholder had none
     /// of them and could not exercise either.
+    /// GitHub's `summary.json` (#454) — the same Statuspage v2 shape Claude's page serves.
+    ///
+    /// The component list is the **real** one, captured from `githubstatus.com`: the five we monitor
+    /// plus the seven we ignore, including the non-service row literally named `Visit
+    /// www.githubstatus.com for more information`. Carrying the junk we do not want is the point —
+    /// it is what proves matching by exact name needs no filter.
+    ///
+    /// Every scenario that is not about GitHub returns all-operational, the same discipline the
+    /// Claude body follows: a dot nobody asked for leaks into every other verification frame.
+    private func githubStatusBody() -> Data {
+        let git = mode == .githubOutage ? "major_outage" : "operational"
+        let api = mode == .githubOutage ? "degraded_performance" : "operational"
+        let actions = (mode == .githubDegraded || mode == .githubClaudeDown)
+            ? "degraded_performance" : "operational"
+        // Long-settled, well outside `PopupViewController.recoveryWindow`, so a healthy component
+        // never renders as "just recovered" in a frame whose subject is something else.
+        // Stamped against the **stub's** clock, not the wall clock. Most scenarios freeze time at a
+        // fixed anchor, and a real-time stamp would sit in that anchor's future — every component
+        // would read as having changed "0m" ago, which puts the healthy ones inside the
+        // recently-recovered window and shows all five rows in a frame that should show one.
+        let changed = Self.isoString(now().addingTimeInterval(-6 * 3600))
+        func entry(_ name: String, _ status: String) -> String {
+            "{\"name\":\"\(name)\",\"status\":\"\(status)\",\"updated_at\":\"\(changed)\"}"
+        }
+        let components = [
+            entry("Git Operations", git),
+            entry("API Requests", api),
+            entry("Webhooks", "operational"),
+            entry("Visit www.githubstatus.com for more information", "operational"),
+            entry("Issues", "operational"),
+            entry("Pull Requests", "operational"),
+            entry("Actions", actions),
+            entry("Packages", "operational"),
+            entry("Pages", "operational"),
+            entry("Copilot", "operational"),
+            entry("Codespaces", "operational"),
+            entry("Copilot AI Model Providers", "operational"),
+        ].joined(separator: ",")
+        // An incident on the frames that have one, so ⌥ has something to switch to for this provider
+        // (#454). Shaped like the real feed: its own `components[]` naming the affected service, an
+        // update with a body, and a shortlink the row links to.
+        let incidents: String
+        if mode == .githubDegraded || mode == .githubOutage || mode == .githubClaudeDown {
+            let affected = mode == .githubOutage ? "Git Operations" : "Actions"
+            let affectedStatus = mode == .githubOutage ? "major_outage" : "degraded_performance"
+            let started = Self.isoString(now().addingTimeInterval(-40 * 60))
+            incidents = """
+            {"id":"gh1","name":"Incident with \(affected)","status":"investigating",\
+            "shortlink":"https://www.githubstatus.com/incidents/gh1","created_at":"\(started)",\
+            "updated_at":"\(started)",\
+            "components":[{"name":"\(affected)","status":"\(affectedStatus)"}],\
+            "incident_updates":[{"id":"u1","status":"investigating",\
+            "body":"We are investigating reports of degraded performance.",\
+            "created_at":"\(started)"}]}
+            """
+        } else {
+            incidents = ""
+        }
+        let body = """
+        {"page":{"name":"GitHub","url":"https://www.githubstatus.com"},\
+        "components":[\(components)],"incidents":[\(incidents)],"scheduled_maintenances":[]}
+        """
+        return Data(body.utf8)
+    }
+
     private func statusBody() -> Data {
         // Component statuses. `.authError` degrades everything (its subject is the failure frame);
         // `.calmDegraded` and `.staleError` each pin their own shape.
@@ -955,7 +1030,11 @@ actor StubUsageTransport: UsageTransport {
         let calmDegraded = mode == .calmDegraded
         let staleError = mode == .staleError
 
-        var codeStatus = staleError ? "major_outage"
+        // #454: the cross-provider frame puts Claude Code down while GitHub stays green, so the two
+        // sections are seen disagreeing — the state that proves their dots and rows are independent.
+        let claudeDownBesideGitHub = mode == .githubClaudeDown
+
+        var codeStatus = staleError || claudeDownBesideGitHub ? "major_outage"
             : (failing || calmDegraded) ? "degraded_performance" : "operational"
         var apiStatus = staleError ? "major_outage" : failing ? "degraded_performance" : "operational"
         var webStatus = failing ? "partial_outage" : "operational"
@@ -1114,6 +1193,21 @@ actor StubUsageTransport: UsageTransport {
             }
         }
 
+        // #454: the cross-provider frame needs an incident on **this** side too, so the popup shows
+        // one plate's incident beside the other's — and a subscribe control on each.
+        if mode == .githubClaudeDown {
+            incidents.append("""
+            {"id":"cl-x1","name":"Elevated errors on Claude Code","status":"identified",\
+            "shortlink":"https://status.claude.com/incidents/clx1",\
+            "created_at":"\(isoStamp(minutesAgo: 35))","updated_at":"\(isoStamp(minutesAgo: 35))",\
+            "started_at":"\(isoStamp(minutesAgo: 35))","monitoring_at":null,"resolved_at":null,\
+            "incident_updates":[{"id":"cl-u1","status":"identified",\
+            "body":"We have identified the cause and are working on a fix.",\
+            "created_at":"\(isoStamp(minutesAgo: 35))"}],\
+            "components":[{"name":"Claude Code","status":"major_outage"}]}
+            """)
+        }
+
         return """
         {"status":{"indicator":"major","description":"Degraded"},\
         "components":[\
@@ -1152,6 +1246,16 @@ actor StubUsageTransport: UsageTransport {
             let response = HTTPURLResponse(
                 url: StatusClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
             return (statusBody(), response)
+        }
+
+        // GitHub's status page (#454). Its own branch, ahead of the usage bodies below: routing is by
+        // exact URL, so without this a GitHub poll would fall through and hand a usage payload to the
+        // status decoder.
+        if request.url == StatusHealth.githubEndpoint {
+            let response = HTTPURLResponse(
+                url: StatusHealth.githubEndpoint, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: [:])!
+            return (githubStatusBody(), response)
         }
 
         // Idle frame (#100, ADR-0027): `five_hour` with `resets_at: null` and **no** `session` entry in

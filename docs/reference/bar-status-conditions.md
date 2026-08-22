@@ -342,6 +342,18 @@ questions:
   surfaces — menu bar, popup, Legend ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)).
   What changed was the **tone** of `degraded`, not who decides it: the setting never read the dot,
   and still doesn't.
+
+  **Since [#454](https://github.com/artem-from-ua/tokenpace/issues/454) the scale reaches green in
+  exactly one position** ([ADR-0121](../adr/0121-github-as-a-status-only-provider.md) §D4): a popup
+  **provider-header dot on a calm provider**. The colour is `ColorRole.green` — the same green
+  `dotColor(_:)` has mapped `.operational` to since #341, and the same one the Legend has listed among
+  its six service states all along, so nothing new entered the vocabulary; what is new is a surface
+  that draws it. The dot appears **only** while the provider is `operational` and vanishes the moment
+  anything is wrong, because the rows that then appear each carry their own dot and name their service.
+  So there is still **no green anywhere in the menu bar's dot** — silence there remains the complete
+  answer to "can I work" ([ADR-0013](../adr/0013-claude-status-line.md) §8) — and no green on a service
+  *row*, which is drawn only for a problem or a fresh recovery. The `gray → yellow → orange → red`
+  escalation is untouched: green sits outside it, as the state where nothing escalates.
 - **The currency symbol (¤)**: its own white→orange→red scale is self-contained
   ([ADR-0068](../adr/0068-credits-in-use-marker-anatomy.md)).
 - **The idle pill** (§6): muted through the shared `idleMuted`, the same flag that governs the rest
@@ -368,6 +380,9 @@ States the code **cannot** produce. Rendering one makes everything around it in 
 | Blue in the first 20 minutes of a window | start override, branch 1 |
 | Orange when `u <= t` | the end-of-window override is unreachable on the calm side |
 | A blue bar with the words "far behind" on Opus | `isFarBehind` returns `false` when `blueAllowed == false` |
+| A **green service dot in the menu bar** | Silence is the calm answer there — the dot is drawn only for a problem ([ADR-0013](../adr/0013-claude-status-line.md) §8). Green appears in **one** place only: a popup provider-header dot on a calm provider ([ADR-0121](../adr/0121-github-as-a-status-only-provider.md)) |
+| A **green service dot on a popup *row*** | Rows are drawn only for a problem or a recovery inside the 15-minute window, and a recovered row is drawn in the colour of the state it recovered *to*, on a plate whose header dot is by then absent. The green dot belongs to the **header**, never to a row |
+| A **non-green provider-header dot** (yellow / orange / red / blue / grey) | `headerDot(for:)` returns a dot for `.operational` and `nil` for everything else, `unknown` included — the moment anything is wrong the rows below carry the colour and name the service ([ADR-0121](../adr/0121-github-as-a-status-only-provider.md) §D2) |
 | A credits bar when `limit == nil` | `barLayout` returns `nil` — there's no bar |
 | A credits bar under Pressure or Balance | Always the month-window scale, regardless of `dropdownStyle` ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
 | A credits bar with ticks | Its ruler is two month-edge labels, no ticks at all (0092); and even those labels only show **under ⌥** ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) — without it, the bar has no ruler at all |

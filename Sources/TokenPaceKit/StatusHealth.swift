@@ -77,41 +77,43 @@ public enum ServiceID: Sendable, Equatable {
     case claudeCode
     /// "Claude WEB/Desktop" — `claude.ai`, plus `Claude Cowork` in the cowork mode.
     case webDesktop
+    /// "Development services" — GitHub's `Git Operations`, `API Requests`, `Issues`, `Pull Requests`
+    /// and `Actions` under one switch (#454). The first service of a **second provider**, which is
+    /// why ``StatusHealth/pageURL(for:)`` exists: its rows link to `githubstatus.com`.
+    case githubDevelopment
+
+    /// Which provider this service belongs to — the popup groups its sections by this, and the
+    /// journal tags its records with it.
+    public var provider: ProviderID {
+        switch self {
+        case .claudeAPI, .claudeCode, .webDesktop: return .claude
+        case .githubDevelopment:                   return .github
+        }
+    }
 }
 
 // MARK: - ProviderID
 
-/// Which status page a ``ServiceCheck`` — and the journal line that records it — came from (#456).
+/// Which upstream a logical service belongs to (#454).
 ///
-/// Claude is the only value today, and the type exists precisely because it is: with one provider,
-/// "which page is this" has a single answer that nothing needs to write down, and the moment a second
-/// one arrives (#454) every unlabelled record becomes ambiguous *retroactively*. Naming the axis while
-/// there is still only one point on it is what keeps the archive readable across that boundary.
+/// A provider is "one status page plus, optionally, a usage API": Claude has both, GitHub has only
+/// the status page. The distinction matters wherever a value that used to be global becomes
+/// per-provider — the popup's section headers, the poll cadence, the journal's records.
 ///
-/// The raw values are **journal-stable snake_case strings**, matching how ``ServiceStatus`` is already
-/// serialised into a `status` line. Deliberately not enum ordinals: a reordered case list would
-/// silently re-attribute every archived record, which is the one failure mode a written-down series
-/// cannot recover from.
-/// The name is `ProviderID` rather than something status-specific because the axis is the provider
-/// itself, not the status subsystem that first needed to name it: #454 adds `github` here and reads
-/// the same value for its Settings page and popup section. Its raw value is the journal contract, so
-/// a case added later must keep the snake_case spelling — the string is what the archive stores.
-public enum ProviderID: String, Sendable, Equatable, CaseIterable, Codable {
-    /// `status.claude.com` — the Claude API / Code / WEB-Desktop components.
+/// The raw values are **journal-stable snake_case strings**, matching how ``ServiceStatus`` is
+/// already serialised into a `status` line (#456). Deliberately not enum ordinals: a reordered case
+/// list would silently re-attribute every archived record, which is the one failure mode a
+/// written-down series cannot recover from. A case added later must keep that spelling — the string
+/// is what the archive stores.
+public enum ProviderID: String, Sendable, Equatable, Codable, CaseIterable {
     case claude
-}
+    case github
 
-// MARK: - ServiceID → provider
-
-extension ServiceID {
-    /// Which provider's status page this service is resolved against.
-    ///
-    /// Exhaustive with no `default`, so a service added for a second provider must state its
-    /// allegiance rather than inheriting Claude's by omission — the compiler asks the question that
-    /// "absent means Claude" would otherwise answer wrongly and silently.
-    public var provider: ProviderID {
+    /// The provider's name as the popup's section header shows it.
+    public var displayName: String {
         switch self {
-        case .claudeAPI, .claudeCode, .webDesktop: return .claude
+        case .claude: return "Claude"
+        case .github: return "GitHub"
         }
     }
 }
@@ -215,22 +217,50 @@ public struct StatusHealth: Sendable, Equatable {
         return worst.flatMap { $0.isProblem ? $0 : nil }
     }
 
-    /// The same worst-of, restricted to **one** provider's checks (#456).
+    // MARK: per-provider
+
+    /// The checks belonging to one provider, in display order.
+    public func checks(of provider: ProviderID) -> [ServiceCheck] {
+        checks.filter { $0.id.provider == provider }
+    }
+
+    /// Whether this provider is monitored at all in this health — i.e. it contributed any check.
+    /// The popup uses it to decide whether to draw the provider's section header.
+    public func monitors(_ provider: ProviderID) -> Bool {
+        checks.contains { $0.id.provider == provider }
+    }
+
+    /// The worst state across one provider's components, **including `operational`** — the value the
+    /// popup's section-header dot draws (#454).
     ///
-    /// Today this returns exactly what ``worstProblem`` does, because every check is Claude's — and
-    /// that equivalence is the reason to introduce it now rather than later. The journal's `worst`
-    /// describes one status page, so it must be derived from that page's own checks *explicitly*; a
-    /// second provider (#454) merged into `checks` would otherwise turn the flattened value into a
-    /// worst-of-both without a single call site changing, which is precisely the silent mixing the
-    /// provider tag exists to prevent.
-    ///
-    /// ``worstProblem`` deliberately stays worst-of-all: the menu-bar dot wants exactly that.
-    public func worstProblem(for provider: ProviderID) -> ServiceStatus? {
-        let worst = checks
-            .filter { $0.id.provider == provider }
-            .flatMap(\.components).map(\.status)
+    /// Deliberately **not** `worstProblem`'s shape. That one returns `nil` when everything is fine,
+    /// because the menu-bar dot disappears on a calm state (ADR-0013 §8) — silence is the answer
+    /// there. A section header answers a different question: it labels a section that is *present*,
+    /// so it must say "healthy" out loud rather than by omission. Returns `nil` only when the
+    /// provider contributes no components at all, which is "not monitored", not "fine".
+    public func aggregate(of provider: ProviderID) -> ServiceStatus? {
+        checks(of: provider).flatMap(\.components).map(\.status)
             .max(by: { $0.severity < $1.severity })
-        return worst.flatMap { $0.isProblem ? $0 : nil }
+    }
+
+    /// The worst **problem** for one provider, or `nil` when that provider is calm — the per-provider
+    /// twin of ``worstProblem``.
+    ///
+    /// This is what a per-provider poll cadence must read: `StatusCadence`'s problem floor drops the
+    /// interval to 60 s, and feeding it the app-wide ``worstProblem`` would let a Claude incident
+    /// accelerate polling against GitHub's third-party page — the exact impoliteness the floor exists
+    /// to prevent (#454, #455).
+    public func worstProblem(of provider: ProviderID) -> ServiceStatus? {
+        aggregate(of: provider).flatMap { $0.isProblem ? $0 : nil }
+    }
+
+    /// The per-provider worst-of under the name the journal layer uses (#456).
+    ///
+    /// A thin alias for ``worstProblem(of:)``, kept because `JournalRecordDomain` already calls it
+    /// and the two arrived from different tickets on the same day. Same semantics, same result — the
+    /// spelling difference is historical, not meaningful.
+    public func worstProblem(for provider: ProviderID) -> ServiceStatus? {
+        worstProblem(of: provider)
     }
 
     // MARK: matching names
@@ -243,9 +273,57 @@ public struct StatusHealth: Sendable, Equatable {
     public static let claudeWebComponentName = "claude.ai"
     public static let claudeCoworkComponentName = "Claude Cowork"
 
+    /// The five GitHub components behind the single `Development services` logical service (#454),
+    /// verbatim against `components[].name` on `githubstatus.com`.
+    ///
+    /// They are **one** service rather than five switches because they answer one question — "is my
+    /// development workflow working" — and splitting them would ask the user to classify an outage
+    /// before knowing what broke. The worst-of-5 is the answer; the rows behind it say which part.
+    ///
+    /// The feed carries seven more components (`Copilot`, `Copilot AI Model Providers`, `Packages`,
+    /// `Pages`, `Codespaces`, `Webhooks`, and a non-service row literally named `Visit
+    /// www.githubstatus.com for more information`). None is monitored and none needs filtering:
+    /// matching is by exact name, so a component we never ask for is never selected.
+    public static let githubGitOperationsComponentName = "Git Operations"
+    public static let githubAPIRequestsComponentName = "API Requests"
+    public static let githubIssuesComponentName = "Issues"
+    public static let githubPullRequestsComponentName = "Pull Requests"
+    public static let githubActionsComponentName = "Actions"
+
+    /// The constituents of `Development services`, in display order.
+    static let githubDevelopmentComponentNames = [
+        githubGitOperationsComponentName,
+        githubAPIRequestsComponentName,
+        githubIssuesComponentName,
+        githubPullRequestsComponentName,
+        githubActionsComponentName,
+    ]
+
     /// The status page the popup's status word links to (ADR-0013). Force-unwrapped: a literal
     /// constant whose failure would be a programmer error, not a runtime condition.
+    ///
+    /// Kept under its original name and value so every existing call site reads unchanged;
+    /// ``pageURL(for:)`` is the one that knows there is more than one page (#454).
     public static let pageURL = URL(string: "https://status.claude.com")!
+
+    /// GitHub's status page — the link target for `Development services` rows.
+    public static let githubPageURL = URL(string: "https://www.githubstatus.com")!
+
+    /// GitHub's summary endpoint — the same Statuspage v2 shape Claude's page serves, which is what
+    /// lets `StatusSummary` decode both without a second decoder.
+    ///
+    /// Declared here beside the page it belongs to rather than in `StatusClient`: the client is being
+    /// made endpoint-agnostic in #455, so the URL is a property of the *provider*, not of the client.
+    public static let githubEndpoint = URL(string: "https://www.githubstatus.com/api/v2/summary.json")!
+
+    /// The status page a logical service belongs to. Per **provider**, not per app: the popup turns
+    /// the status word into a link, and a GitHub row pointing at Anthropic's page would be a dead end.
+    public static func pageURL(for id: ServiceID) -> URL {
+        switch id {
+        case .claudeAPI, .claudeCode, .webDesktop: return pageURL
+        case .githubDevelopment:                   return githubPageURL
+        }
+    }
 
     // MARK: from
 
@@ -291,6 +369,69 @@ public struct StatusHealth: Sendable, Equatable {
         Set(
             checks(for: config, usageApiEnabled: usageApiEnabled) { _ in (.unknown, nil) }
                 .flatMap(\.components).map(\.name))
+    }
+
+    // MARK: - GitHub (#454)
+
+    /// Map GitHub's status summary to its logical services. The GitHub twin of ``from(_:config:)``,
+    /// and a **separate** function on purpose: the two providers publish two different pages, so a
+    /// single summary can never resolve both. Each poll produces its provider's checks; the shell
+    /// merges them into one ``StatusHealth`` (see ``merging(_:)``).
+    public static func fromGitHub(_ summary: StatusSummary, config: GitHubMonitoring) -> StatusHealth {
+        StatusHealth(checks: githubChecks(for: config) { name in
+            guard let component = summary.components.first(where: { $0.name == name }) else {
+                return (.unknown, nil)
+            }
+            return (ServiceStatus(rawAPIValue: component.status), ResetClock.parse(component.updatedAt))
+        })
+    }
+
+    /// What the shell substitutes when a **GitHub** status poll fails: its components grey, and
+    /// nothing said about Claude. The isolation is the point — an unreachable `githubstatus.com` is
+    /// no evidence about `status.claude.com`.
+    public static func unknownGitHub(for config: GitHubMonitoring) -> StatusHealth {
+        StatusHealth(checks: githubChecks(for: config) { _ in (.unknown, nil) })
+    }
+
+    /// GitHub's component names — the same join key ``IncidentVisibility`` needs to decide whether a
+    /// GitHub incident is one of ours. Derived from ``githubChecks(for:statusOf:)``, so a change to
+    /// the group cannot silently fail to filter incidents.
+    public static func monitoredGitHubComponentNames(for config: GitHubMonitoring) -> Set<String> {
+        Set(githubChecks(for: config) { _ in (.unknown, nil) }.flatMap(\.components).map(\.name))
+    }
+
+    /// The single source of truth for GitHub's services — the twin of ``checks(for:statusOf:)``.
+    private static func githubChecks(
+        for config: GitHubMonitoring,
+        statusOf: (String) -> (status: ServiceStatus, changedAt: Date?)
+    ) -> [ServiceCheck] {
+        guard config.developmentServicesEnabled else { return [] }
+        let components = githubDevelopmentComponentNames.map { name -> ResolvedComponent in
+            let resolved = statusOf(name)
+            return ResolvedComponent(name: name, status: resolved.status, changedAt: resolved.changedAt)
+        }
+        return [ServiceCheck(id: .githubDevelopment, components: components)]
+    }
+
+    // MARK: - merging
+
+    /// This health with `other`'s checks appended — how two providers, polled independently on two
+    /// cadences, become the one value the menu bar and popup read (#454).
+    ///
+    /// Checks of the providers present in `other` are **replaced**, not accumulated: a fresh GitHub
+    /// poll supersedes the previous GitHub checks and leaves Claude's alone. That is what lets one
+    /// provider's poll fail, retry and recover without ever touching the other's rows — and it keeps
+    /// the merge idempotent, so re-applying the same poll changes nothing.
+    public func merging(_ other: StatusHealth) -> StatusHealth {
+        let replaced = Set(other.checks.map(\.id.provider))
+        let kept = checks.filter { !replaced.contains($0.id.provider) }
+        // Provider order is display order: Claude first, then GitHub — the popup renders sections in
+        // the order the checks arrive, and a merge must not shuffle them by who polled last.
+        let merged = (kept + other.checks).sorted {
+            ProviderID.allCases.firstIndex(of: $0.id.provider)!
+                < ProviderID.allCases.firstIndex(of: $1.id.provider)!
+        }
+        return StatusHealth(checks: merged)
     }
 
     /// The single source of truth for **which** services and constituents exist under a config —

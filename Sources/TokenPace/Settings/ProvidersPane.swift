@@ -32,6 +32,14 @@ struct ProvidersPane: View {
                     subtitle: model.claudeProviderSummary,
                     badge: .claude,
                     action: { model.drill(into: .providersClaude) })
+
+                // The second provider (#454) — the growth this page was shaped for. Status only: it
+                // has no usage half, so its page carries one section where Claude's carries two.
+                SettingsNavigationRow(
+                    title: "GitHub",
+                    subtitle: model.githubProviderSummary,
+                    badge: .github,
+                    action: { model.drill(into: .providersGitHub) })
             }
 
             // MARK: Polling — unlabelled on purpose

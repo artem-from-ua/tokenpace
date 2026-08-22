@@ -31,6 +31,12 @@ enum PersistedConfig {
         /// older build that rewrites that blob knows nothing of this flag and would silently erase the
         /// user's choice. Two keys survive a downgrade; one blob does not.
         static let usageApiEnabled = "usageApiEnabled"
+        /// The GitHub provider's config (#454), a JSON blob under its own key.
+        ///
+        /// Its own key for the same reason ``usageApiEnabled`` has one, and more so: GitHub is a
+        /// different provider entirely, so folding it into the Claude blob would hand it Claude's
+        /// invalidation as well as Claude's downgrade hazard.
+        static let githubMonitoring = "githubMonitoring"
         /// **Retired.** Held a JSON snapshot of the user's own Appearance setup, so the old "Custom"
         /// radio could return to it after a detour through the presets (#333). The preset rows preview
         /// instead of applying now, so nothing overwrites the stored configuration and there is no
@@ -237,6 +243,26 @@ enum PersistedConfig {
         set {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             defaults.set(data, forKey: Key.monitoredServices)
+        }
+    }
+
+    /// The GitHub provider's config (#454) — today the single `Development services` group.
+    ///
+    /// Persisted as JSON like ``monitoredServices``, and falling back to ``GitHubMonitoring/default``
+    /// (everything off) when the key is absent or the blob will not decode. Note the default differs
+    /// in kind from every other monitoring flag here: this one is **opt-in**. A provider that appears
+    /// on upgrade must not start polling a third party, or put a new dot in the menu bar, until the
+    /// user asks for it.
+    static var githubMonitoring: GitHubMonitoring {
+        get {
+            guard let data = defaults.data(forKey: Key.githubMonitoring),
+                  let decoded = try? JSONDecoder().decode(GitHubMonitoring.self, from: data)
+            else { return .default }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Key.githubMonitoring)
         }
     }
 

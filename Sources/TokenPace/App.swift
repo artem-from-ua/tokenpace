@@ -226,6 +226,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// per-source, so that lands as another stored value, not as an unpicking of a shared one.
     private var statusBackoff = PollingBackoff()
 
+    // MARK: GitHub status source (#454)
+
+    /// The second status source, in the per-source shape ADR-0119 left room for: its own heartbeat,
+    /// its own 429 hold, its own last-success marker and its own in-flight task.
+    ///
+    /// Nothing here is shared with Claude's, and that is the whole point — a 429 from
+    /// `githubstatus.com` must hold only this source, an unreachable GitHub must not grey Claude's
+    /// rows, and a Claude incident must not drag this poll down to the 60-second problem floor
+    /// against a third party's page.
+    private var githubLoopTask: Task<Void, Never>?
+    private var githubTask: Task<Void, Never>?
+    private var githubBackoff = PollingBackoff()
+    private var lastGitHubSuccess: Date?
+    /// The GitHub half of the rendered health. Kept apart from `lastStatusHealth` and merged only at
+    /// render time, so neither provider's poll can overwrite the other's checks.
+    private var lastGitHubHealth: StatusHealth?
+
     // MARK: update check (#37)
 
     /// The single update menu item (#130), sitting just above Quit behind its own separator. Hidden
@@ -266,7 +283,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The incidents the last successful status poll deemed visible (#279). Retained like
     /// `lastStatusHealth` so a re-render between polls (⌥ pressed, a usage tick) keeps showing them
     /// instead of blanking the section.
-    private var lastVisibleIncidents: [VisibleIncident] = []
+    private var lastClaudeIncidents: [VisibleIncident] = []
+    /// GitHub's visible incidents (#454), kept apart from Claude's for the same reason the healths
+    /// are: the two arrive on independent polls, so a single list would be rewritten by whichever
+    /// landed last and the other provider's incidents would vanish until its own next poll.
+    private var lastGitHubIncidents: [VisibleIncident] = []
+    /// Both providers' incidents as one list — what the popup renders under Option, and what the
+    /// episode subscription and its notifications read. That is what makes GitHub incidents flow
+    /// through the existing notification mechanism with no toggle of their own (#454).
+    private var lastVisibleIncidents: [VisibleIncident] { lastClaudeIncidents + lastGitHubIncidents }
     /// Routes taps on incident banners (#279). Held for the process's lifetime — `UNUserNotificationCenter`
     /// keeps only a weak reference to its delegate, so letting this go would silently stop routing.
     private lazy var incidentNotificationDelegate = IncidentNotificationDelegate(
@@ -1051,6 +1076,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pollTask?.cancel()
         statusTask?.cancel()
         statusLoopTask?.cancel()
+        githubLoopTask?.cancel()
+        githubTask?.cancel()
         updateTask?.cancel()
         installTask?.cancel()
         archiveTask?.cancel()
@@ -1112,6 +1139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // must survive that (it re-reads `statusTransport` on each poll, so it picks up the new
         // transport without being torn down).
         startStatusLoop()
+        startGitHubLoop()
         updateColorCycle(for: currentScenario)   // arm the colour walk when launched under that stub
         startAwaitingCycleIfRequested()          // and the awaiting-input walk (ADR-0073)
 
@@ -1429,6 +1457,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// What the popup's single subscribe row should show right now, or `nil` to omit it.
     private func currentSubscriptionState() -> EpisodeSubscriptionState? {
+        // Both providers (#454). The subscription is one thing for the whole app — following an
+        // episode means "tell me when this is over", and that question does not change with whose
+        // page the incident is on. Narrowing this to Claude would leave a GitHub incident delivering
+        // banners with no way to opt into or out of them.
         EpisodeEvaluator.rowState(
             incidents: lastVisibleIncidents,
             subscription: PersistedConfig.episodeSubscription)
@@ -1443,7 +1475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func advanceEpisodeSubscription() {
         let (events, next) = EpisodeEvaluator.evaluate(
             subscription: PersistedConfig.episodeSubscription,
-            incidents: lastVisibleIncidents,
+            incidents: lastClaudeIncidents,
             now: currentDate())
         PersistedConfig.episodeSubscription = next
 
@@ -1586,6 +1618,149 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Whether **anything at all** is monitored, across every provider (#454).
+    ///
+    /// `ProviderMonitoring.isMonitoringAnything` answers only for Claude — it is `claudeApiLocked`
+    /// under another name. Reading it as the app-wide answer was correct while Claude was the only
+    /// provider and becomes a lie the moment a second one can be enabled on its own: the popup would
+    /// draw its "Monitoring is off" dead end over a live GitHub section, and the menu bar would show
+    /// the nothing-monitored glyph while a GitHub outage was on screen.
+    private var isMonitoringAnything: Bool {
+        providerMonitoring.isMonitoringAnything || PersistedConfig.githubMonitoring.isMonitoringAnything
+    }
+
+    /// The two providers' health as one value, for the surfaces that read a single ``StatusHealth``
+    /// (#454): the menu-bar dot takes its worst-of-all, the popup groups it back into sections.
+    ///
+    /// Merged at **render** time rather than kept as one stored value, because the two arrive on
+    /// independent cadences. A stored merge would have to be rewritten by whichever poll landed last,
+    /// and the loser's checks would flicker out until its own next poll. `nil` only when neither
+    /// provider has ever polled — "no data yet", which the surfaces already know how to show.
+    private var renderedStatusHealth: StatusHealth? {
+        switch (lastStatusHealth, lastGitHubHealth) {
+        case let (.some(claude), .some(github)): return claude.merging(github)
+        case let (.some(claude), .none):         return claude
+        case let (.none, .some(github)):         return github
+        case (.none, .none):                     return nil
+        }
+    }
+
+    /// The GitHub status source's heartbeat (#454) — the same shape as Claude's, on its own
+    /// `SignalHub` subscription so the two never contend for a signal.
+    ///
+    /// Started unconditionally; the poll itself is what checks whether the provider is enabled. That
+    /// keeps enabling GitHub in Settings a matter of the next tick finding work to do, rather than
+    /// needing the loop to be spun up and torn down as the switch flips.
+    private func startGitHubLoop() {
+        let scheduler = LivePollScheduler(signals: signals.newStream(for: .github))
+        githubLoopTask = Task { [weak self] in
+            // Poll **before** the first wait. `waitForNextPoll` sleeps the whole interval up front, so
+            // starting with it would leave the section empty for the five-minute politeness floor
+            // after every launch — a monitored provider showing nothing, which is exactly the state
+            // the header dot exists to rule out. Claude never had this problem because its status
+            // also rides the usage tick; this source has no second heartbeat to cover for it.
+            self?.pollGitHubIfDue()
+            while !Task.isCancelled {
+                guard let self else { return }
+                let wait = self.githubPollInterval()
+                switch await scheduler.waitForNextPoll(interval: wait) {
+                case .interrupted(.sleep):
+                    await scheduler.waitWhileAsleep()
+                case .elapsed, .interrupted:
+                    break
+                }
+                guard !Task.isCancelled else { return }
+                self.pollGitHubIfDue()
+            }
+        }
+    }
+
+    /// GitHub's own cadence: its own hold, its own problem signal. `usageInterval` is always `nil` —
+    /// this provider has no usage poll to settle with, which is the case ADR-0119 made the parameter
+    /// optional for.
+    private func githubPollInterval() -> TimeInterval {
+        StatusCadence.nextInterval(
+            backoff: githubBackoff,
+            usageInterval: nil,
+            hasProblem: lastGitHubHealth?.worstProblem(of: .github) != nil)
+    }
+
+    /// Fetch GitHub's status page when its own cadence says it is due.
+    ///
+    /// A near-twin of `pollStatusIfDue`, deliberately not folded into it. The two differ in every
+    /// input that matters — endpoint, User-Agent, config type, backoff, success marker, health slot —
+    /// so a shared implementation would be a parameter list as long as the body, threading a
+    /// provider through every line. Two short loops that each read straight through are the cheaper
+    /// shape until a third provider proves otherwise.
+    private func pollGitHubIfDue() {
+        let config = PersistedConfig.githubMonitoring
+        guard config.isMonitoringAnything else {
+            // Nothing to watch. Drop any stale health so the popup's GitHub section disappears with
+            // the switch rather than lingering until the next launch.
+            if lastGitHubHealth != nil || !lastGitHubIncidents.isEmpty {
+                lastGitHubHealth = nil
+                lastGitHubSuccess = nil
+                lastGitHubIncidents = []
+                reRenderForCurrentTime()
+            }
+            return
+        }
+        guard StatusCadence.isDue(
+            lastSuccess: lastGitHubSuccess, backoff: githubBackoff, usageInterval: nil,
+            hasProblem: lastGitHubHealth?.worstProblem(of: .github) != nil, now: Date()) else { return }
+
+        githubTask?.cancel()
+        let transport = statusTransport
+        githubTask = Task { [weak self] in
+            let health: StatusHealth
+            var succeeded = false
+            var rateLimited: TimeInterval??
+            var fetchedSummary: StatusSummary?
+            do {
+                let summary = try await StatusClient.fetch(
+                    transport: transport,
+                    endpoint: StatusHealth.githubEndpoint,
+                    // Not `claude-code/<version>`: that string is correct for Anthropic's page and
+                    // misleading anywhere else (ADR-0119 §4).
+                    userAgent: "TokenPace/\(TokenPaceKit.version)")
+                health = .fromGitHub(summary, config: config)
+                fetchedSummary = summary
+                succeeded = true
+            } catch StatusFetchError.rateLimited(let retryAfter) {
+                health = .unknownGitHub(for: config)
+                rateLimited = .some(retryAfter)
+            } catch {
+                health = .unknownGitHub(for: config)
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.lastGitHubHealth = health
+            if succeeded, let summary = fetchedSummary {
+                // GitHub's incidents, filtered against GitHub's own monitored names — never Claude's,
+                // or a generic name like `Issues` could match across providers. A failed poll leaves
+                // the previous list alone: an unreachable status page is not evidence an incident
+                // ended.
+                self.lastGitHubIncidents = IncidentVisibility.visible(
+                    in: summary,
+                    monitoredComponentNames: StatusHealth.monitoredGitHubComponentNames(for: config),
+                    now: self.currentDate(),
+                    maxAge: PersistedConfig.incidentMaxAge)
+                self.advanceEpisodeSubscription()
+            }
+            if succeeded {
+                self.lastGitHubSuccess = self.currentDate()
+                if self.githubBackoff.isHolding {
+                    AppLogger.network.notice("github status: 200 cleared the backoff hold")
+                    self.githubBackoff = self.githubBackoff.reset()
+                }
+            } else if case let .some(retryAfter) = rateLimited {
+                self.githubBackoff = self.githubBackoff.honoring(retryAfter: retryAfter)
+                AppLogger.network.notice(
+                    "github status backoff holding for \(self.githubBackoff.interval, privacy: .public)s")
+            }
+            self.reRenderForCurrentTime()
+        }
+    }
+
     /// How long the status loop should wait before its next poll: this source's 429 hold if one is
     /// active, else the applicable politeness floor, stretched to the usage cadence when *that* is
     /// slower and actually running.
@@ -1667,7 +1842,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // subscription. A failed poll leaves the previous list in place — an unreachable status
             // page is not evidence that an incident ended.
             if succeeded, let summary = fetchedSummary {
-                self.lastVisibleIncidents = IncidentVisibility.visible(
+                self.lastClaudeIncidents = IncidentVisibility.visible(
                     in: summary, config: config, usageApiEnabled: usageApiEnabled,
                     now: self.currentDate(),
                     maxAge: PersistedConfig.incidentMaxAge)
@@ -2393,7 +2568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The colour-cycle stub forces the dot through its own palette (ADR-0070); otherwise the
             // real worst problem, subject to the "Show service status dot" toggle (#31).
             serviceProblem: PersistedConfig.showServiceStatusDot
-                ? (colorCycleStatus ?? lastStatusHealth?.worstProblem) : nil,
+                ? (colorCycleStatus ?? renderedStatusHealth?.worstProblem) : nil,
             // ADR-0086: honour the "Hide the calm bar" choice — drops whichever bar the user picked while
             // it is calm, centring the one that remains. `.never` keeps both.
             hideTopBar: PersistedConfig.hideTop5hBar,
@@ -2401,13 +2576,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // gate since ADR-0090 — the data decides, and it is already silent until money is in play.
             showCredits: true,
             // #341: with nothing monitored the widget reports that, rather than the last thing it saw.
-            monitoringAnything: providerMonitoring.isMonitoringAnything)
+            monitoringAnything: isMonitoringAnything)
             .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (trailing)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: snapshot, health: output.health, now: now, interval: output.interval,
-            serviceStatus: lastStatusHealth,
-            monitoringAnything: providerMonitoring.isMonitoringAnything
+            serviceStatus: renderedStatusHealth,
+            monitoringAnything: isMonitoringAnything
             // #211: the per-model rows are always built here; whether they're drawn is the popup VC's
             // call (it owns the live ⌥ Option state — see `PopupSectionVisibility`).
             )
@@ -2415,10 +2590,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // #341: in the services-only mode the age shown is the **status** poll's, since that is the
             // only thing being fetched. A no-op in every other mode.
             .withStatusAge(lastStatusSuccess.map { max(0, now.timeIntervalSince($0)) })
+            // GitHub's own poll age (#454) — a separate number because it is a separate cadence.
+            .withGitHubStatusAge(lastGitHubSuccess.map { max(0, now.timeIntervalSince($0)) })
+            .withGitHubIncidents(lastGitHubIncidents)
             // #279: graft the incidents (⌥ swaps the service rows for them) and the state of the one
             // subscribe row. Both ride the status poll, not this usage poll, so they are grafted for
             // the same reason the awaiting-input breakdown is.
-            .withIncidents(lastVisibleIncidents)
+            // Claude's plate gets Claude's incidents only; GitHub's ride `withGitHubIncidents`
+            // below (#454). The concatenated `lastVisibleIncidents` is for the episode subscription
+            // and its notifications, where the provider does not change what the banner says.
+            .withIncidents(lastClaudeIncidents)
             .withSubscription(currentSubscriptionState())
             // Graft the brand-coloured plan label ("Max (5x)") from the Keychain rate-limit tier — a
             // plan mark, not a secret. `nil` (no tier / unreadable creds) draws just "Claude".
