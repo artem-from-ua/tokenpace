@@ -457,7 +457,9 @@ struct DropdownPane: View {
             //
             // No `SettingsHint`: the label names the caption verbatim and the caption says what it does.
             Section {
-                Toggle("Show «hold ⌥ Option» hint in dropdown", isOn: Binding(
+                // "…hint", not "…hint in dropdown": the pane is Dropdown, so naming the surface again
+                // restates the breadcrumb the reader followed to get here.
+                Toggle("Show «hold ⌥ Option» hint", isOn: Binding(
                     get: { model.showOptionHint },
                     set: { model.setShowOptionHint($0) }))
             }

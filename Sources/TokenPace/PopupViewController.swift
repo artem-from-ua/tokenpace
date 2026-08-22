@@ -1687,14 +1687,19 @@ final class PopupViewController: NSViewController {
         /// "Settings…" item beneath it is tighter (NSMenu adds its own pad there too).
         static let cardBottomInset: CGFloat = 4
         /// Bottom outer margin when **nothing follows the card** — no ⌥ caption, and (with ⌥ up, #475)
-        /// no native items either. Equal to ``cardInset``, so the plate is framed by the same margin on
-        /// the three sides that have no neighbour, which is what the Settings live preview already
-        /// achieves by topping ``cardBottomInset`` up to the same number.
+        /// no native items either.
         ///
         /// ``cardBottomInset``'s 4 is not a smaller margin for its own sake — it is trimmed *because*
-        /// something follows and `NSMenu` pads above it. Take the neighbour away and the reason goes
-        /// with it, leaving the card sitting almost flush against the bottom edge.
-        static let cardBottomInsetAlone: CGFloat = cardInset
+        /// something follows and `NSMenu` pads above it. Take the neighbour away and the reason goes with
+        /// it, leaving the card almost flush with the popup's edge.
+        ///
+        /// **Not** ``cardInset``, though the goal is to match it optically. `NSMenu` adds padding of its
+        /// own *below* the hosted view too, so a literal 14 here rendered as 18.5 against the sides' 13 —
+        /// measured off a 2× capture of the real menu (bottom gap 37 px vs 26 at the sides). Subtracting
+        /// that 5.5 pt of menu padding leaves 8.5, which is what puts the rendered margin on the sides'
+        /// number. Same reasoning as ``cardTopInset``'s 10-instead-of-14, and the same trap: the constant
+        /// here is not what ends up on screen.
+        static let cardBottomInsetAlone: CGFloat = 8.5
         /// Gap between the card's bottom edge and the ⌥ hint caption below it (#475).
         ///
         /// Deliberately larger than ``cardBottomInset``: that number is tight because a native menu item
