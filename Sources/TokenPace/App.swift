@@ -2592,7 +2592,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // #279: graft the incidents (⌥ swaps the service rows for them) and the state of the one
             // subscribe row. Both ride the status poll, not this usage poll, so they are grafted for
             // the same reason the awaiting-input breakdown is.
-            .withIncidents(lastVisibleIncidents)
+            // Claude's plate gets Claude's incidents only; GitHub's ride `withGitHubIncidents`
+            // below (#454). The concatenated `lastVisibleIncidents` is for the episode subscription
+            // and its notifications, where the provider does not change what the banner says.
+            .withIncidents(lastClaudeIncidents)
             .withSubscription(currentSubscriptionState())
             // Graft the brand-coloured plan label ("Max (5x)") from the Keychain rate-limit tier — a
             // plan mark, not a secret. `nil` (no tier / unreadable creds) draws just "Claude".
