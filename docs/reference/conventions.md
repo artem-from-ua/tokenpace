@@ -341,6 +341,22 @@ run** — they are all for diagnostics, screenshots or walking a UI flow.
   frontmatter, the postscript, and the one-row index entry it must produce.
 - A new convention or tool → update this file.
 
+### Comments are priced per read
+
+**Length is a cost, not a virtue** ([ADR-0122](../adr/0122-comments-are-read-every-session.md)).
+Comments are 47% of the lines under `Sources/` and **64% of the bytes** — ~312 000 tokens against
+~172 000 of code. Every session that opens a file pays for all of it, usually while looking for
+something else: `PacingModel.swift` is 82% comment, `MenuBarLayout.swift` 78%. Write the shortest
+comment that answers what the next editor must know.
+
+**Deleting beats rewording.** A pass over 37 sites that rewrote history into the present tense
+while preserving length changed total volume by ~0.05%. The win is in paragraphs removed.
+
+**Origin stories go outright.** Where the code came from — a bash prototype, an earlier module —
+cannot be acted on: `PacingModel.elapsedFraction` cited `statusline.sh` lines 266–287, and that
+file exists neither in the repo nor in its git history. Keep the boundary rules such a comment
+states; drop the provenance around them.
+
 ### Comments and docs are written in the present tense
 
 **A comment states what holds now and what the next editor must not break — not what the code used

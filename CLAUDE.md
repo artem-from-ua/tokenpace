@@ -187,12 +187,18 @@ text in force is this one**.
   — **stop and tell the maintainer**, instead of merging with "docs later" in mind. A separate docs
   PR after the merge breaks atomicity: `main` keeps a commit where code and docs disagree, and
   nothing signals it. Proceeding without docs takes the maintainer's explicit word in this session.
+- **A comment is paid for on every read — length is a cost, not a virtue** ([ADR-0122](docs/adr/0122-comments-are-read-every-session.md)).
+  Comments are 47% of the lines in `Sources/` and **64% of the bytes**: opening
+  `PopupViewController.swift` spends ~45 000 tokens on prose against ~22 000 on code. Write the
+  shortest comment that answers what the next editor must know; where a paragraph and a sentence
+  carry the same information, the sentence is right.
 - **A comment describes the current behavior — only that.** Not what the code used to do, not what
-  a constant was before, not which issue changed it. When you catch yourself writing "used to" /
+  a constant was before, not which issue changed it, and **never where the code came from** — a
+  bash prototype's line numbers cannot be followed. When you catch yourself writing "used to" /
   "previously" / "was removed", **rewrite the sentence in the present tense**: if a fact survives,
-  keep the fact and drop the history ("both used to start at x=0, so their centres sat 3 pt apart"
-  → "starting both at x=0 would leave their centres 3 pt apart" — same length, and it warns instead
-  of reminiscing); if nothing survives, drop the sentence.
+  keep the fact and drop the history; if nothing survives, delete the sentence. **Prefer deleting
+  to rewording** — a pass that rephrased 37 sites while preserving their length moved total volume
+  by 0.05%.
 - **State the reason so it stands without a citation.** An ADR reference is a footnote, never the
   explanation itself — a comment that says only "see ADR-0081" is unreadable the day 0081 is
   partially superseded, and nothing signals that day: 45 references in this codebase already point
