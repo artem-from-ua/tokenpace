@@ -5,6 +5,14 @@ date: 2026-07-06
 
 # ADR-0017: Delegated token refresh via the claude CLI
 
+> **Postscript (2026-08-22).** The Consequences bullet about the spawned `claude` being visible to
+> `ProcessClaudeActivityProbe` "for a few seconds (an exact name match)" no longer holds: that probe
+> is gone, replaced by journal-based detection
+> ([ADR-0117](0117-activity-from-session-journals.md)). The spawn no longer perturbs the activity
+> signal at all. Separately, `binaryCandidates` does not list the native installer's
+> `~/.local/share/claude/versions/<semver>` layout — it still resolves today via the
+> `~/.local/bin/claude` symlink, and is tracked as follow-up work.
+
 > **Clarified in #183 (2026-07-29):** isolating the spawned `claude` from the user's own hooks is
 > provided by the `--safe-mode` flag, not by an empty working directory. An empty cwd only cuts off
 > *project-local* context; global hooks/plugins/MCP from `~/.claude` still fired despite it — and

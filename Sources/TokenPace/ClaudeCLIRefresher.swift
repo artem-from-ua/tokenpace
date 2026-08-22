@@ -21,7 +21,7 @@ import TokenPaceKit
 /// OAuth/Keychain entirely, so no refresh would happen.
 ///
 /// This is the codebase's only `claude` spawn — a shell-side platform seam like
-/// `ProcessClaudeActivityProbe`, injected into `PollingEngine` behind the kit protocol. (The
+/// `FileSystemActivityIndex`, injected into `PollingEngine` behind the kit protocol. (The
 /// kit's `TokenProvider` also spawns a subprocess — `/usr/bin/security` for the Keychain read,
 /// ADR-0019.)
 struct ClaudeCLIRefresher: DelegatedRefresher {

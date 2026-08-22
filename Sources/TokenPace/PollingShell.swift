@@ -247,48 +247,63 @@ final class NetworkMonitor: @unchecked Sendable {
     }
 }
 
-// MARK: - ProcessClaudeActivityProbe
+// MARK: - FileSystemActivityIndex
 
-/// Production `ClaudeActivityProbe`: reports whether a **Claude Code** CLI session is running by
-/// scanning the process table for an executable named exactly `claude`.
+/// Production `ActivityFileIndex` (ADR-0117): walks a path with `FileManager` and answers whether
+/// anything under it is newer than the cutoff.
 ///
-/// The match is on the **exact process name** (not a substring), so it tracks the CLI that consumes
-/// the subscription limits and does **not** false-positive on the Claude Desktop app, whose helper
-/// processes are named "Claude Helper" and only show up under a full `-f` command-line match.
-struct ProcessClaudeActivityProbe: ClaudeActivityProbe {
-    /// The exact executable name that marks a Claude Code session.
-    static let processName = "claude"
+/// Two properties do the work:
+///
+/// - **Early exit.** The walk returns on the first file newer than the cutoff — any file, not only
+///   transcripts (see `ActivityFileIndex`). Enumeration order is not mtime-ordered, so the exit
+///   condition is the freshness test itself, not a position in the sequence — but on an active
+///   machine the answer usually arrives long before the tree is exhausted (and the probe checks the
+///   cheap single-file root first).
+/// - **Metadata only.** `.contentModificationDateKey` is prefetched via `resourceValues`, so the
+///   walk never opens a file. That is what keeps a ~500-file tree cheap enough to check every three
+///   minutes, and it means the answer does not depend on the format of the records inside.
+///
+/// Anything unreadable — a missing directory, a permission failure, an entry that vanished
+/// mid-walk — is skipped rather than propagated: a probe that throws would be worse than one that
+/// under-reports, and under-reporting already lands on the conservative 15-minute cadence.
+struct FileSystemActivityIndex: ActivityFileIndex {
+    init() {}
 
-    func isClaudeRunning() -> Bool {
-        Self.runningProcessNames().contains(Self.processName)
+    func hasFileModified(after cutoff: Date, under root: URL) -> Bool {
+        // `FileManager` is not `Sendable`, and this type must be (the engine polls it from its own
+        // task). Reading `.default` per call rather than storing it keeps the struct sendable; the
+        // shared instance is documented as safe for concurrent *reads*, which is all we do.
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
+            return false   // the root need not exist (no jobs yet, a fresh install)
+        }
+        guard isDirectory.boolValue else {
+            return isFresh(root, after: cutoff)   // a single file, e.g. history.jsonl
+        }
+        guard let walker = fileManager.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+        for case let url as URL in walker {
+            if isFresh(url, after: cutoff) { return true }
+        }
+        return false
     }
 
-    /// All running process names via `sysctl(KERN_PROC_ALL)` — no subprocess spawn, no `pgrep` path
-    /// dependency. Returns an empty set on any sysctl failure (fail-safe: treated as "inactive" →
-    /// the 15-min override, which is the conservative cadence).
-    private static func runningProcessNames() -> Set<String> {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        var size = 0
-        guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return [] }
-
-        let count = size / MemoryLayout<kinfo_proc>.stride
-        var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
-        guard sysctl(&mib, UInt32(mib.count), &procs, &size, nil, 0) == 0 else { return [] }
-
-        // sysctl may report fewer entries than the sized buffer; trust the returned `size`.
-        let actual = size / MemoryLayout<kinfo_proc>.stride
-        var names = Set<String>()
-        for i in 0..<min(actual, procs.count) {
-            var comm = procs[i].kp_proc.p_comm   // fixed-size CChar tuple (MAXCOMLEN+1)
-            let commSize = MemoryLayout.size(ofValue: comm)
-            let name = withUnsafePointer(to: &comm) { ptr in
-                ptr.withMemoryRebound(to: CChar.self, capacity: commSize) {
-                    String(cString: $0)
-                }
-            }
-            if !name.isEmpty { names.insert(name) }
-        }
-        return names
+    /// Whether `url` is a regular file whose mtime is strictly after `cutoff`. Unreadable entries
+    /// answer `false` — see the type doc on why this fails quiet rather than loud.
+    private func isFresh(_ url: URL, after cutoff: Date) -> Bool {
+        guard let values = try? url.resourceValues(
+            forKeys: [.contentModificationDateKey, .isRegularFileKey]
+        ),
+              values.isRegularFile == true,
+              let modified = values.contentModificationDate
+        else { return false }
+        return modified > cutoff
     }
 }
 

@@ -182,11 +182,13 @@ not the system one: the archive is usually on an external disk. An unreadable vo
 A manual "Archive Now" bypasses **battery** (the user asked explicitly), but **not** space — the same
 limit as in updates.
 
-### claude CLI running
+### Claude Code active
 
-`ProcessClaudeActivityProbe` ([`PollingShell.swift:237-271`](../../Sources/TokenPace/PollingShell.swift))
-uses `sysctl(KERN_PROC_ALL)` to look for a process named exactly `claude` (the CLI, not Desktop). No
-process → the usage cadence becomes 15 min instead of 180 s. This is **not a stop**: limits keep
+`TranscriptActivityProbe` ([`TranscriptActivity.swift`](../../Sources/TokenPaceKit/TranscriptActivity.swift),
+ADR-0117) checks whether anything under `history.jsonl`, `jobs/` or `projects/` in the Claude Code
+home was written in the last 5 minutes. Nothing recent → the usage cadence becomes 15 min instead of
+180 s. Metadata only — the walk never opens a file — and it stops at the first fresh root, so the
+active case costs ~0.01 ms; an idle machine pays a full walk (~74 ms) once per 15-minute interval. This is **not a stop**: limits keep
 ticking regardless of whether you're actively working, so data still updates, just less often.
 
 ### 429 / `Retry-After`

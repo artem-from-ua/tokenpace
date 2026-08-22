@@ -10,6 +10,12 @@ date: 2026-07-28
 > ADR fixes two of its defects. Builds on
 > [ADR-0030](0030-optimistic-reset-and-exact-timer.md) (a rolled-forward `resets_at`) and
 > [ADR-0027](0027-session-idle-no-phantom-reset.md) (honest idle).
+>
+> **Postscript (2026-08-22).** §D5′'s decision stands — the grace still arms only on
+> `prevActive && claudeActive && utilFresh`. Only how `claudeActive` is obtained is superseded by
+> [ADR-0117](0117-activity-from-session-journals.md); it is no longer "the `claude` CLI process is
+> alive" but "a Claude Code session journal was written within the last 5 minutes". Note that while
+> the old probe was broken, this gate could never arm at all — the grace was silently dead.
 
 ## Context
 
