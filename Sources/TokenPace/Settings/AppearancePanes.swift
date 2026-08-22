@@ -429,8 +429,8 @@ struct DropdownPane: View {
 ///
 /// The two consumers are not the same control: Menu bar renders these through ``BarStylePicker``
 /// (preview pictures), Dropdown through ``SegmentedControl`` (text). Both read `value` and `title`
-/// from here, including for the release-notes recipe in `docs/guides/releasing.md`, which greps the
-/// titles out of this file.
+/// from here; the titles themselves come from ``BarStyle/displayName``, which is what the
+/// release-notes recipe in `docs/guides/releasing.md` greps when checking a rename.
 ///
 /// Ordered **Pressure · Balance · Progress**, not by `allCases`: it reads as a gradient of how much
 /// positional information the bar carries — length alone, then length plus direction, then two

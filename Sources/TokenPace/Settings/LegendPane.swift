@@ -249,7 +249,8 @@ struct LegendPane: View {
          ("unknown", ColorRole.gray.defaultColor)]
     }
 
-    /// At the widget's own size, with the dropdown's own halo (`GlowDotView`: radius 5, 0.75 alpha,
+    /// At the widget's own size — mirrors `StatusItemView.Metrics.statusDotDiameter` (6, not the
+    /// popup's same-named 9) — with the dropdown's own halo (`GlowDotView`: radius 5, 0.75 alpha,
     /// #188) — six pixels of color needs the glow to read at this size.
     private func dot(_ colour: NSColor) -> some View {
         Circle()

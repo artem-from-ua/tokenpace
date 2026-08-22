@@ -182,10 +182,12 @@ Layout edits alone cannot fix this: the source is elsewhere.
   different start. The text renderer does this, and layout can't reach it.
 - **Proof that it isn't our anatomy.** Build a canonical AppKit badge — a label in a container, padding
   via **constraints**, an integral capsule, no custom `NSTextFieldCell`, nothing overridden — and
-  measure the phase. You get **the same** `Δphase`. Meaning: before rewriting a view, check with the
-  canonical version whether the view is to blame at all.
-- **What does NOT work, and why:** roundings/ceilings on capsule or content width (they shift the
-  fraction, don't remove it); `firstLineHeadIndent`, `titleRect(forBounds:)`/`drawingRect(forBounds:)`
+  measure the phase. You get **the same** `Δphase` — measured: 3 quarter-points in both anatomies
+  (a quarter-point is 0.25 pt, so "phase 3" is a 0.75 pt subpixel offset). Meaning: before rewriting
+  a view, check with the canonical version whether the view is to blame at all.
+- **What does NOT work, and why:** roundings/ceilings on capsule or content width — they shift the
+  fraction, don't remove it, and `ceil` on the capsule made it **worse**, 0.074 → 0.426 pt;
+  `firstLineHeadIndent`, `titleRect(forBounds:)`/`drawingRect(forBounds:)`
   overrides, drawing the string yourself — dead code, since `NSTextFieldCell` doesn't place text
   through those APIs.
 - **Status: NOT fixed, twelve approaches rejected.** That session closed only the drift of the right
