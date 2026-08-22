@@ -985,6 +985,17 @@ Four states, and each is a separate check:
    show **no caption in any ⌥ state** — it has no menu items to offer — while ⌥ still reveals the
    on-demand content it mirrors. Its own card margins must be unchanged by all of the above.
 
+**Then run states 1–3 again with the update line showing** — add
+`TOKENPACE_UPDATE_STATE=available` (or `failed`). That line is visible in *both* ⌥ states, which makes
+it a neighbour under the card, and it is the case the first pass missed:
+
+- with ⌥ up, the card must keep its **trimmed** margin (the even one belongs to a plate with nothing
+  under it), and there must be **no separator** between the card and the update line — that divider
+  belongs to the action items above it, which are hidden;
+- with ⌥ held, the separator comes back with the items, above the update line where it belongs;
+- with the caption on, it sits between the card and the update line, and the three must read as one
+  column rather than as three stacked blocks.
+
 Measuring rather than eyeballing is worth it for the margins: capture the menu, then compare the
 plate's gap to the popup edge on all four sides in pixels (remember a 2× capture halves to points).
 Three separate "looks off to me" rounds on this feature were each settled in one measurement.
