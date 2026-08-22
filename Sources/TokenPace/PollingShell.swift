@@ -970,7 +970,8 @@ actor StubUsageTransport: UsageTransport {
     private func githubStatusBody() -> Data {
         let git = mode == .githubOutage ? "major_outage" : "operational"
         let api = mode == .githubOutage ? "degraded_performance" : "operational"
-        let actions = mode == .githubDegraded ? "degraded_performance" : "operational"
+        let actions = (mode == .githubDegraded || mode == .githubClaudeDown)
+            ? "degraded_performance" : "operational"
         // Long-settled, well outside `PopupViewController.recoveryWindow`, so a healthy component
         // never renders as "just recovered" in a frame whose subject is something else.
         // Stamped against the **stub's** clock, not the wall clock. Most scenarios freeze time at a
@@ -999,7 +1000,7 @@ actor StubUsageTransport: UsageTransport {
         // (#454). Shaped like the real feed: its own `components[]` naming the affected service, an
         // update with a body, and a shortlink the row links to.
         let incidents: String
-        if mode == .githubDegraded || mode == .githubOutage {
+        if mode == .githubDegraded || mode == .githubOutage || mode == .githubClaudeDown {
             let affected = mode == .githubOutage ? "Git Operations" : "Actions"
             let affectedStatus = mode == .githubOutage ? "major_outage" : "degraded_performance"
             let started = Self.isoString(now().addingTimeInterval(-40 * 60))
@@ -1190,6 +1191,21 @@ actor StubUsageTransport: UsageTransport {
                 "components":\(mirrored)}
                 """)
             }
+        }
+
+        // #454: the cross-provider frame needs an incident on **this** side too, so the popup shows
+        // one plate's incident beside the other's — and a subscribe control on each.
+        if mode == .githubClaudeDown {
+            incidents.append("""
+            {"id":"cl-x1","name":"Elevated errors on Claude Code","status":"identified",\
+            "shortlink":"https://status.claude.com/incidents/clx1",\
+            "created_at":"\(isoStamp(minutesAgo: 35))","updated_at":"\(isoStamp(minutesAgo: 35))",\
+            "started_at":"\(isoStamp(minutesAgo: 35))","monitoring_at":null,"resolved_at":null,\
+            "incident_updates":[{"id":"cl-u1","status":"identified",\
+            "body":"We have identified the cause and are working on a fix.",\
+            "created_at":"\(isoStamp(minutesAgo: 35))"}],\
+            "components":[{"name":"Claude Code","status":"major_outage"}]}
+            """)
         }
 
         return """
