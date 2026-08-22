@@ -97,7 +97,11 @@ the method, the target values, the swatch mode.
   (`sizingOptions`/`safeAreaRegions`), not the SwiftUI modifiers —
   [ADR-0088](docs/adr/0088-settings-hosting-safe-area-and-manual-separator.md).
 
-## Writing a comment — four rules, and they apply to every one
+## Writing or changing Swift code — four rules for the `//` and `///` you leave in it
+
+These fire whenever you touch a source file: a new comment, an edited one, or a doc comment on a
+symbol you are adding. Not PR or issue text — those are prose for people, and are governed by the
+sections below.
 
 - **A comment is paid for on every read — length is a cost, not a virtue** ([ADR-0122](docs/adr/0122-comments-are-read-every-session.md)).
   Comments are 47% of the lines in `Sources/` and **64% of the bytes**: opening
