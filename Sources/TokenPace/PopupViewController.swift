@@ -2322,6 +2322,8 @@ final class PopupViewController: NSViewController {
             for incident in incidents {
                 addIncidentRow(incident, now: now, to: githubStack)
             }
+            // Same rule as Claude's plate: the control appears beside the incident it follows.
+            addSubscribeRowIfNeeded(layout, to: githubStack)
         } else if optionHeld {
             addServiceStatusRow(
                 label: "No ongoing incidents",
@@ -2546,11 +2548,15 @@ final class PopupViewController: NSViewController {
                     }
                 }
             }
-            // One subscribe row for the app, not one per provider (#454). Following an episode
-            // means "tell me when the current trouble is over", and that question does not split by
-            // whose status page the incident came from — `currentSubscriptionState` accordingly reads
-            // both providers' incidents.
-            if let subscribeRow = addSubscribeRowIfNeeded(layout) { lastRow = subscribeRow }
+            // The control sits **next to its cause** (#454): a plate shows it when that plate has an
+            // incident of its own. With trouble on both providers both plates carry one, and either
+            // toggles the same subscription — it is one state for the app, because following means
+            // "tell me when the current trouble is over" and that question does not split by whose
+            // status page it came from. Two controls for one state is the accepted cost of putting
+            // the control where the reason is; a single row on the other provider's plate would read
+            // as an offer to follow that provider's silence.
+            if !layout.incidents.isEmpty,
+               let subscribeRow = addSubscribeRowIfNeeded(layout) { lastRow = subscribeRow }
             if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
         }
 
