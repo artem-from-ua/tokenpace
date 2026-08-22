@@ -697,15 +697,6 @@ final class SettingsWindowController: NSWindowController {
 
     // MARK: Geometry (ADR-0069)
 
-    /// One-shot geometry for the first show of the session: restore the persisted frame when it still
-    /// makes sense on the screens attached *right now*, otherwise open at the default size, centred.
-    ///
-    /// The ordering here is the whole point. `NSHostingController` content has no intrinsic size, so
-    /// until something sizes it the window is a zero-width title-bar sliver — and `center()` computed
-    /// at zero width puts the left edge at the screen's centre, after which growing to 857 pushes the
-    /// right half off-screen. That was ADR-0035's off-screen bug. So: size first, position second, and
-    /// in the restore path set both at once with `setFrame`, where no intermediate size exists at all.
-
     /// Re-assert the size bounds. They express the intent (fixed width, floored height) and stop most
     /// programmatic resizes, but they are **not** what enforces it — see `windowWillResize`.
     ///
@@ -718,6 +709,14 @@ final class SettingsWindowController: NSWindowController {
         window.contentMaxSize = NSSize(width: Metrics.contentWidth, height: .greatestFiniteMagnitude)
     }
 
+    /// One-shot geometry for the first show of the session: restore the persisted frame when it still
+    /// makes sense on the screens attached *right now*, otherwise open at the default size, centred.
+    ///
+    /// The ordering is the whole point. `NSHostingController` content has no intrinsic size, so until
+    /// something sizes it the window is a zero-width title-bar sliver — and `center()` computed at zero
+    /// width puts the left edge at the screen's centre, after which growing to 857 pushes the right half
+    /// off-screen (ADR-0035). Size first, position second; in the restore path set both at once with
+    /// `setFrame`, where no intermediate size exists at all.
     private func applyRestoredOrDefaultFrame() {
         guard let window else { return }
         // What we persist is a *frame* (content plus title bar), while `Metrics` is stated in content

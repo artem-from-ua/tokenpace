@@ -98,7 +98,8 @@ struct ClaudeCLIRefresher: DelegatedRefresher {
     }
 
     /// stdin/stdout/stderr all go to `/dev/null`: stdin so the CLI skips its "waiting for piped
-    /// input" grace period, the outputs because only the Keychain side-effect matters. The working
+    /// input" grace period, the outputs because only the Keychain side-effect matters and the report can
+    /// name account details — never reattach a pipe to log them. The working
     /// directory is a fresh empty scratch dir so the CLI picks up no *project-local* context (a
     /// stray CLAUDE.md) — cwd does NOT suppress *global* hooks/plugins, those are disabled by
     /// `--safe-mode` (#183). The token itself never appears in arguments, environment, or logs.

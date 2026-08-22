@@ -386,13 +386,13 @@ maintainer needs to get to the PR quickly and understand what an item is about.
 
 **Check UI element names against the code, not against memory.** Writing "X was renamed to Y" — open
 the file where the caption is defined and quote both names from there. For bar styles that is
-`Sources/TokenPace/Settings/UIPanes.swift` (the `.init(value: BarStyle.…, title: "…")` lines); for the
-old name, the same file at the previous release's tag:
+`BarStyle.displayName` in `Sources/TokenPaceKit/BarStyle.swift`; for the old name, the same file at
+the previous release's tag:
 
 ```sh
 LAST="$(gh release view --json tagName -q .tagName)"
-git show "${LAST}:Sources/TokenPace/Settings/UIPanes.swift" | grep -n 'title:'
-grep -n 'title:' Sources/TokenPace/Settings/UIPanes.swift
+git show "${LAST}:Sources/TokenPaceKit/BarStyle.swift" | grep -n 'case .*return "'
+grep -n 'case .*return "' Sources/TokenPaceKit/BarStyle.swift
 ```
 
 Getting this wrong is easy and hard to notice: in `v0.76.0` a draft of the notes twice asserted
