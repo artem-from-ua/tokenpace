@@ -1586,12 +1586,19 @@ final class PopupViewController: NSViewController {
     var now: () -> Date = { Date() }
 
     /// Whether ⌥ Option is currently held (ADR-0020's modifier-poll timer feeds this live while the
-    /// dropdown is open). It reveals the on-demand data age ("2m ago") in the "Claude Code" header,
-    /// and — once the first status poll has succeeded — the service-status rows: while ⌥ is up they
-    /// show only when a component is non-operational, and holding ⌥ reveals **all** components even
-    /// when every one is green (`rebuild()`'s `showStatusRows`). It is also the escape hatch for the
-    /// two ``PopupSectionVisibility`` groups: in `.nonCalm` it reveals a calm group, and in
-    /// `.optionOnly` it is the *only* thing that reveals one.
+    /// dropdown is open). It reveals the on-demand data age ("2m ago") in the provider headers, the
+    /// plan label beside "Claude", and the dropdown's action items (#475).
+    ///
+    /// **It does not reveal green service rows.** Since #279 ⌥ switches the *dimension* — the service
+    /// rows are replaced by the incident list (ADR-0071 §2), which is a different question about the
+    /// same moment, not more detail about the same answer. A component that is `operational` draws no
+    /// row in either ⌥ state; the only thing that puts one on screen is a problem or a recovery inside
+    /// `recoveryWindow`. (This comment used to claim ⌥ expanded the list to every component, which was
+    /// the pre-#279 behaviour and would make ⌥ a level-of-detail control — exactly what ADR-0071 §2
+    /// says it is not.)
+    ///
+    /// It is also the escape hatch for the two ``PopupSectionVisibility`` groups: in `.nonCalm` it
+    /// reveals a calm group, and in `.optionOnly` it is the *only* thing that reveals one.
     var optionHeld = false {
         didSet {
             guard isViewLoaded, optionHeld != oldValue else { return }
