@@ -36,6 +36,9 @@ final class SignalHub: @unchecked Sendable {
         case usage
         /// The status loop's scheduler (ADR-0119) — built once, at launch.
         case status
+        /// The GitHub status loop's scheduler (#454) — its own subscription, so the two status
+        /// sources receive sleep/wake independently rather than racing for one continuation.
+        case github
     }
 
     private let lock = NSLock()
