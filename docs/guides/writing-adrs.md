@@ -125,18 +125,25 @@ Every operation above ends in the same place — one row of
 | Frontmatter | Status column | Struck through |
 |---|---|---|
 | `status: accepted`, no `superseded_by` | `accepted` | no |
-| `status: accepted` + `superseded_by: [NNNN]` | `partially superseded → NNNN` | no |
-| `status: superseded` + `superseded_by: [NNNN]` | `superseded → NNNN` | **yes** — number and title |
+| `status: accepted` + `superseded_by: [NNNN]` | `partially superseded → [NNNN](NNNN-….md)` | no |
+| `status: superseded` + `superseded_by: [NNNN]` | `superseded → [NNNN](NNNN-….md)` | **yes** — number and title |
 | `status: draft` | `draft` | no |
 | `status: rejected` | `rejected` | no |
 
-Several superseding ADRs join with commas: `partially superseded → 0117, 0119`.
+**Every ADR number in the Status column is a link**, like every other mention of an ADR anywhere in
+the repo ([CLAUDE.md](../../CLAUDE.md)). The lineage arrow is the one thing a reader follows out of
+this table; a bare number makes them scroll back to find the row it names. Several superseding ADRs
+join with commas, each linked separately:
+
+```markdown
+| [0020](0020-troubleshoot-window-and-diagnostics-pipeline.md) | The Troubleshoot window and a diagnostics channel through a pure pipeline | partially superseded → [0117](0117-dropdown-actions-behind-option.md), [0119](0119-status-polling-own-cadence-and-backoff.md) |
+```
 
 Strikethrough wraps the number and the title, never the status cell — struck text in the status
 would make the one column you scan for lineage the hardest to read:
 
 ```markdown
-| ~~[0002](0002-ukrainian-documentation.md)~~ | ~~Українська як мова документації~~ | superseded → 0116 |
+| ~~[0002](0002-ukrainian-documentation.md)~~ | ~~Українська як мова документації~~ | superseded → [0116](0116-english-as-documentation-language.md) |
 ```
 
 **Nothing else goes in a row.** Not a summary of the decision, not the reason for the supersession,
