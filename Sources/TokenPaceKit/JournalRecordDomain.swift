@@ -74,11 +74,35 @@ extension JournalRecord {
     }
 
     /// Build a `status` record from a successful status poll — the raw components plus the derived
-    /// worst-of that drives the menu-bar dot.
-    public static func status(from summary: StatusSummary, health: StatusHealth, now: Date) -> JournalRecord {
+    /// worst-of for that provider.
+    ///
+    /// One record per provider poll: a `status` line describes **one** page and must never become a
+    /// union of two (#456). Both halves are scoped to `provider` accordingly, but by different means,
+    /// because they answer different questions:
+    ///
+    /// - `svc` is `summary.components` verbatim — the whole feed of the page that was polled, which is
+    ///   already single-provider by construction (a summary *is* one page's response). It is not
+    ///   narrowed to the monitored set: what was monitored is a setting the line does not carry, so a
+    ///   narrowed feed would change meaning whenever the user flipped a toggle (ADR-0119).
+    /// - `worst` is ``StatusHealth/worstProblem(for:)``, **not** the flattening ``StatusHealth/worstProblem``.
+    ///   `health.checks` is a single collection across every provider, so the unscoped property would
+    ///   turn into a worst-of-both the moment a second page joins it (#454 §2b) — and it would do so
+    ///   without this line changing, which is exactly the silent failure the provider tag exists to
+    ///   prevent. Deriving it from this provider's own checks makes that impossible rather than
+    ///   merely currently-correct.
+    public static func status(
+        from summary: StatusSummary,
+        health: StatusHealth,
+        now: Date,
+        provider: ProviderID = .claude
+    ) -> JournalRecord {
         let svc = summary.components.map { StatusSample.ServiceEntry(n: $0.name, s: $0.status) }
-        let worst = health.worstProblem ?? .operational
-        return .status(StatusSample(t: ResetClock.isoString(from: now), svc: svc, worst: journalString(worst)))
+        let worst = health.worstProblem(for: provider) ?? .operational
+        return .status(StatusSample(
+            t: ResetClock.isoString(from: now),
+            provider: provider.rawValue,
+            svc: svc,
+            worst: journalString(worst)))
     }
 
     /// Build an `error` record from a failed poll's diagnostics. `code`/`reason` follow the **journal**

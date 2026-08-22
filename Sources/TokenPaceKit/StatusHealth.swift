@@ -79,6 +79,43 @@ public enum ServiceID: Sendable, Equatable {
     case webDesktop
 }
 
+// MARK: - ProviderID
+
+/// Which status page a ``ServiceCheck`` — and the journal line that records it — came from (#456).
+///
+/// Claude is the only value today, and the type exists precisely because it is: with one provider,
+/// "which page is this" has a single answer that nothing needs to write down, and the moment a second
+/// one arrives (#454) every unlabelled record becomes ambiguous *retroactively*. Naming the axis while
+/// there is still only one point on it is what keeps the archive readable across that boundary.
+///
+/// The raw values are **journal-stable snake_case strings**, matching how ``ServiceStatus`` is already
+/// serialised into a `status` line. Deliberately not enum ordinals: a reordered case list would
+/// silently re-attribute every archived record, which is the one failure mode a written-down series
+/// cannot recover from.
+/// The name is `ProviderID` rather than something status-specific because the axis is the provider
+/// itself, not the status subsystem that first needed to name it: #454 adds `github` here and reads
+/// the same value for its Settings page and popup section. Its raw value is the journal contract, so
+/// a case added later must keep the snake_case spelling — the string is what the archive stores.
+public enum ProviderID: String, Sendable, Equatable, CaseIterable, Codable {
+    /// `status.claude.com` — the Claude API / Code / WEB-Desktop components.
+    case claude
+}
+
+// MARK: - ServiceID → provider
+
+extension ServiceID {
+    /// Which provider's status page this service is resolved against.
+    ///
+    /// Exhaustive with no `default`, so a service added for a second provider must state its
+    /// allegiance rather than inheriting Claude's by omission — the compiler asks the question that
+    /// "absent means Claude" would otherwise answer wrongly and silently.
+    public var provider: ProviderID {
+        switch self {
+        case .claudeAPI, .claudeCode, .webDesktop: return .claude
+        }
+    }
+}
+
 // MARK: - ResolvedComponent
 
 /// One status-page component within a logical service: its matching name (kit-side semantics,
@@ -175,6 +212,24 @@ public struct StatusHealth: Sendable, Equatable {
     /// and cadence consumers (`MenuBarLayout`, `StatusCadence`, `App`) need no change.
     public var worstProblem: ServiceStatus? {
         let worst = checks.flatMap(\.components).map(\.status).max(by: { $0.severity < $1.severity })
+        return worst.flatMap { $0.isProblem ? $0 : nil }
+    }
+
+    /// The same worst-of, restricted to **one** provider's checks (#456).
+    ///
+    /// Today this returns exactly what ``worstProblem`` does, because every check is Claude's — and
+    /// that equivalence is the reason to introduce it now rather than later. The journal's `worst`
+    /// describes one status page, so it must be derived from that page's own checks *explicitly*; a
+    /// second provider (#454) merged into `checks` would otherwise turn the flattened value into a
+    /// worst-of-both without a single call site changing, which is precisely the silent mixing the
+    /// provider tag exists to prevent.
+    ///
+    /// ``worstProblem`` deliberately stays worst-of-all: the menu-bar dot wants exactly that.
+    public func worstProblem(for provider: ProviderID) -> ServiceStatus? {
+        let worst = checks
+            .filter { $0.id.provider == provider }
+            .flatMap(\.components).map(\.status)
+            .max(by: { $0.severity < $1.severity })
         return worst.flatMap { $0.isProblem ? $0 : nil }
     }
 

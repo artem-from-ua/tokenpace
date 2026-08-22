@@ -156,12 +156,51 @@ public struct UsageSample: Sendable, Equatable, Codable {
 /// A successful service-status poll as journalled — the raw per-component statuses plus the derived
 /// worst-of, tagged as its own `kind` because status rides a separate poll loop from usage.
 public struct StatusSample: Sendable, Equatable, Codable {
+    /// The `status`-line **format** version — its own counter, independent of ``UsageSample/v``.
+    ///
+    /// Two kinds, two generations: a `status` line and a `usage` line share a file but not a shape, and
+    /// a single counter would force one to bump whenever the other changed. So `v: 2` on a `status`
+    /// line and `v: 4` on a `usage` line describe unrelated things, and a reader must dispatch on
+    /// `kind` before reading `v` at all.
+    ///
+    /// Per **line**, not per file, for the same reason ``UsageSample/v`` is: the journal is append-only
+    /// and spans app upgrades, so one file legitimately holds several generations and a header could
+    /// only ever describe its first line.
+    ///
+    /// - **1** — the original shape (implicit: absent `v` decodes as 1). No provider key; every such
+    ///   line came from `status.claude.com`, but nothing in it says so.
+    /// - **2** — #456: ``provider`` names the status page the line describes, and `worst` is that
+    ///   provider's own worst-of rather than a flatten across whatever else was being monitored.
+    public let v: Int
     public let t: String
+    /// Which status page this line came from (``ProviderID``, a journal-stable snake_case string).
+    ///
+    /// Written explicitly on every line since v2, and backfilled onto every archived one, so no
+    /// consumer ever needs an "absent means Claude" branch — the branch that, per the ``JournalMigration``
+    /// rationale, the first forgetful reader turns into two series silently merged into one.
+    public let provider: String
     /// Raw components: `[{n: name, s: rawStatus}]`.
+    ///
+    /// The **whole feed** of ``provider``'s status page, not the subset the user was monitoring
+    /// (ADR-0119). Six components for Claude today. Recording the page verbatim keeps the line
+    /// self-describing: which services were monitored is a *setting*, it is not in the line, and it
+    /// changes under the user's hand — so a narrowed `svc` would silently change meaning between two
+    /// lines that look alike. `worst`, by contrast, **is** the monitored-set answer, so the pair
+    /// carries both facts without either standing in for the other.
     public let svc: [ServiceEntry]
-    /// ``StatusHealth/worstProblem`` mapped to a ``ServiceStatus`` raw value (or `operational` when
-    /// nothing is wrong) — the value that drives the menu-bar status-dot colour.
+    /// ``StatusHealth/worstProblem(for:)`` over **this provider's** checks, mapped to a
+    /// ``ServiceStatus`` raw value (or `operational` when nothing is wrong) — the value that drives
+    /// this provider's status-dot colour.
+    ///
+    /// Per provider, not flattened across all of them: a `status` line describes one page, and a
+    /// worst-of-both would attribute another provider's outage to this one (#454 §2b).
+    ///
+    /// Note this is the aggregate over the **monitored** services, while ``svc`` is the whole feed —
+    /// the two answer different questions on purpose.
     public let worst: String
+
+    /// The version this build writes. Bump together with the case list on ``v``.
+    public static let currentVersion = 2
 
     public struct ServiceEntry: Sendable, Equatable, Codable {
         public let n: String
@@ -176,17 +215,38 @@ public struct StatusSample: Sendable, Equatable, Codable {
         }
     }
 
-    public init(t: String, svc: [ServiceEntry], worst: String) {
+    public init(
+        v: Int = StatusSample.currentVersion,
+        t: String,
+        provider: String = ProviderID.claude.rawValue,
+        svc: [ServiceEntry],
+        worst: String
+    ) {
+        self.v = v
         self.t = t
+        self.provider = provider
         self.svc = svc
         self.worst = worst
     }
 
-    private enum CodingKeys: String, CodingKey { case t, svc, worst }
+    private enum CodingKeys: String, CodingKey { case v, t, provider, svc, worst }
 
+    /// Tolerant decode — every field defaults, so an old line never fails and a newer one never breaks
+    /// this reader.
+    ///
+    /// The `provider` default is the one place "absent means Claude" is still written down, and it is
+    /// deliberately **not** the policy the archive relies on: the migration backfills the key onto every
+    /// stored line, so after one pass no file on disk exercises this branch. It survives for the cases a
+    /// rewrite cannot reach — a `.v1.bak`, a line pasted into a bug report, a journal copied from a
+    /// machine that has not launched the new build yet — where decoding to *something* honest beats
+    /// failing the record.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // An absent `v` is a v1 status line — the field did not exist before #456.
+        self.v = try c.decodeIfPresent(Int.self, forKey: .v) ?? 1
         self.t = try c.decodeIfPresent(String.self, forKey: .t) ?? ""
+        self.provider = try c.decodeIfPresent(String.self, forKey: .provider)
+            ?? ProviderID.claude.rawValue
         self.svc = try c.decodeIfPresent([ServiceEntry].self, forKey: .svc) ?? []
         self.worst = try c.decodeIfPresent(String.self, forKey: .worst) ?? "operational"
     }
