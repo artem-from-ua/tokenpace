@@ -117,6 +117,41 @@ phrase "still stands" for it; the corpus pins that wording
 
 **4. Update the index row.** Status and strikethrough per the table below.
 
+## Drafts: name a gate someone else can check
+
+A `draft` records a decision that is not final — it sits behind a spike, research, or an
+unimplemented direction. **State the gate as an event a third party can verify**, and name it:
+
+```markdown
+> **Draft.** Gated on the #E0 spike, which must prove the IPC channel end to end.
+```
+
+A closed issue, a merged PR, a symbol that exists in `Sources/` — all of these can be checked by
+someone who was not in the room. **"Finalizes once the maintainer confirms it" cannot**, and that
+phrasing is how [ADR-0060](../adr/0060-popup-native-semantic-colours.md) sat in `draft` for three
+weeks after shipping: the confirmation happened in another session, nothing recorded it, and by the
+time anyone looked, [ADR-0064](../adr/0064-popup-translucent-card-and-glow-bars.md) had already
+superseded part of a record that was still officially a draft — a state the lifecycle has no name
+for.
+
+### Propose the promotion when you pass the gate
+
+`draft → accepted` is the maintainer's call, not yours. What is yours is noticing, and **you notice
+at the moment you are already in the file**. Say so and ask, in one line, whenever:
+
+- **You implement what a draft describes.** The symbol it names now exists; the decision shipped.
+- **You supersede part of one.** Adding `superseded_by` to a `draft` produces a contradiction —
+  resolve the status in the same PR rather than leaving it.
+- **Its gate closes.** You close the issue, merge the PR, or land the spike a draft is gated on.
+- **You read one while working nearby** and its gate is visibly already passed.
+
+The check costs a grep. Drafts are listed by `grep -l "^status: draft" docs/adr/*.md`, and each one
+names its gate in the first blockquote.
+
+**Do not promote it yourself, and do not stay silent either.** An ADR is a record of what was
+decided; whether a decision is final is the maintainer's to state, and an unasked question leaves
+a draft that describes shipped behavior — which reads to the next person as "this may still change".
+
 ## Keeping the index in step
 
 Every operation above ends in the same place — one row of

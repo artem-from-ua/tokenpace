@@ -160,6 +160,14 @@ the required frontmatter keys, the body's sections, the form of a supersession p
 exactly what the index row may contain. Start a new record from
 [docs/adr/TEMPLATE.md](docs/adr/TEMPLATE.md).
 
+**`draft → accepted` is the maintainer's call — but noticing is mine, and I say so unprompted.**
+Whenever I implement what a draft describes, supersede part of one, close the issue it is gated on,
+or simply read one whose gate has visibly passed, I offer the promotion in a line and let him
+decide. ADR-0060 spent three weeks as a draft describing shipped behavior because its gate was
+"once the maintainer confirms it" — unverifiable by anyone else — and by the time it surfaced,
+ADR-0064 had superseded part of a record that was still officially a draft. So a new draft names a
+gate a third party can check: a closed issue, a merged PR, a symbol that exists.
+
 Most of that lived nowhere until recently — it was habit, recoverable only by opening a neighboring
 file, and habit drifts. It produced a status the lifecycle never had (`proposed`), keys left empty
 in some files and absent in others, five different openings for the same postscript, and an index
