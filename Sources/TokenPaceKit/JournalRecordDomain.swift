@@ -114,11 +114,12 @@ extension JournalRecord {
     /// `timeout`/`dns`/`network` — it already collapsed the `URLError.Code` the raw diagnostic outcome
     /// does not carry. HTTP/decode categories come from the diagnostic status/outcome directly.
     public static func error(diagnostics d: FetchDiagnostics, failure: FailureReason?, now: Date) -> JournalRecord {
-        let (code, reason) = errorCodeAndReason(d, failure: failure)
+        let (code, reason, detail) = errorCodeReasonAndDetail(d, failure: failure)
         return .error(ErrorSample(
             t: ResetClock.isoString(from: now),
             code: code,
             reason: reason,
+            detail: detail,
             retryAfter: d.retryAfter,
             ms: d.durationMs))
     }
@@ -187,16 +188,22 @@ extension JournalRecord {
                             timePct: w.timePct, sev: w.sev)
     }
 
-    /// Derive the journal `code` and `reason` from a fetch diagnostic (and, for transport failures, the
-    /// refined ``FailureReason``). Exhaustive over ``FetchDiagnostics/Outcome``.
-    private static func errorCodeAndReason(_ d: FetchDiagnostics, failure: FailureReason?) -> (ErrorCode, String) {
+    /// Derive the journal `code`, `reason` and `detail` from a fetch diagnostic (and, for transport
+    /// failures, the refined ``FailureReason``). Exhaustive over ``FetchDiagnostics/Outcome``.
+    ///
+    /// The name lists all three returns on purpose: while it named only two, the third — the
+    /// not-sent reason — was quietly dropped on the floor here, and a real journal recorded 122 408
+    /// failures that could not say whether the token had expired or the Keychain had refused.
+    private static func errorCodeReasonAndDetail(
+        _ d: FetchDiagnostics, failure: FailureReason?
+    ) -> (ErrorCode, String, String?) {
         switch d.outcome {
         case .success:
             // Never called for a success (the success path writes a usage record), but keep the
             // switch exhaustive rather than trapping.
-            return (.category("success"), "success")
+            return (.category("success"), "success", nil)
         case .httpError:
-            guard let status = d.httpStatus else { return (.category("network"), "network") }
+            guard let status = d.httpStatus else { return (.category("network"), "network", nil) }
             let reason: String
             switch status {
             case 401, 403:      reason = "auth"
@@ -204,21 +211,23 @@ extension JournalRecord {
             case 500...599:     reason = "serverProblem"
             default:            reason = "clientProblem"      // unexpected but response-bearing → client bucket
             }
-            return (.http(status), reason)
+            return (.http(status), reason, nil)
         case .decodeFailure:
-            return (.category("decode"), "decode")
+            return (.category("decode"), "decode", nil)
         case .transportError:
             // The diagnostic outcome does not carry the `URLError.Code`; `FailureReason` already refined
             // it (timeout / cannotResolveHost / network), so lean on that for the category.
             switch failure {
-            case .timeout:           return (.category("timeout"), "timeout")
-            case .cannotResolveHost: return (.category("dns"), "dns")
-            default:                 return (.category("network"), "network")
+            // The transport message is a `URLError` description, not a stable category, so it stays
+            // out of `detail`: whether it is `.public`-safe at journal scale is its own decision.
+            case .timeout:           return (.category("timeout"), "timeout", nil)
+            case .cannotResolveHost: return (.category("dns"), "dns", nil)
+            default:                 return (.category("network"), "network", nil)
             }
         case .nonHTTPResponse:
-            return (.category("nonHTTP"), "network")
-        case .notSent:
-            return (.category("notSent"), "notSent")
+            return (.category("nonHTTP"), "network", nil)
+        case let .notSent(reason):
+            return (.category("notSent"), "notSent", reason)
         }
     }
 }

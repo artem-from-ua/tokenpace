@@ -265,28 +265,65 @@ public struct ErrorSample: Sendable, Equatable, Codable {
     /// The journal error taxonomy (distinct from the UI's `FailureReason`): 4xx→`clientProblem`,
     /// 5xx→`serverProblem`, decode→`decode`, auth→`auth`, plus the transport categories.
     public let reason: String
+    /// A `.public`-safe refinement of ``reason`` — `"token expired"`, `"keychain access denied"`,
+    /// `"not signed in"`, `"keychain read failed"`, `"malformed credentials"`, `"missing User-Agent"`.
+    ///
+    /// Deliberately **not** folded into `reason`: that field is a closed taxonomy every downstream
+    /// count groups by, and a free-text value in it would silently split one bucket into six. The
+    /// detail was produced all along and shown in the Troubleshoot window, but dropped on the way to
+    /// the journal — so a 122 408-line outage recorded that the request was not sent and never why
+    /// (ADR-0123). `nil` for codes with no refinement to offer.
+    public let detail: String?
     /// `Retry-After` seconds, only on 429; `nil` otherwise.
     public let retryAfter: TimeInterval?
     /// Usage-API response latency in milliseconds, or `nil` when the request was never sent.
     public let ms: Int?
+    /// How many consecutive identical attempts this line stands for; absent means one.
+    ///
+    /// **A reader counting failures must sum `n ?? 1`, never count lines** — consecutive identical
+    /// failures are written once, so a line count reads a two-hour outage as a handful of events.
+    public let n: Int?
+    /// The last attempt's instant when this line collapses several; ``t`` is the first.
+    ///
+    /// `tEnd - t` is the run's *duration*, not the spacing between attempts: the individual instants
+    /// inside a run are not kept.
+    public let tEnd: String?
+    /// The version this build writes. Bump together with the shape.
+    public static let currentVersion = 2
+    /// This line's own format counter — unrelated to ``UsageSample/v`` and ``StatusSample/v``.
+    /// v1 predates ``detail``/``n``/``tEnd``; an absent `v` decodes as 1.
+    public let v: Int
 
-    public init(t: String, code: ErrorCode, reason: String, retryAfter: TimeInterval? = nil, ms: Int? = nil) {
+    public init(
+        t: String, code: ErrorCode, reason: String, detail: String? = nil,
+        retryAfter: TimeInterval? = nil, ms: Int? = nil,
+        n: Int? = nil, tEnd: String? = nil, v: Int = ErrorSample.currentVersion
+    ) {
         self.t = t
         self.code = code
         self.reason = reason
+        self.detail = detail
         self.retryAfter = retryAfter
         self.ms = ms
+        self.n = n
+        self.tEnd = tEnd
+        self.v = v
     }
 
-    private enum CodingKeys: String, CodingKey { case t, code, reason, retryAfter, ms }
+    private enum CodingKeys: String, CodingKey { case t, code, reason, detail, retryAfter, ms, n, tEnd, v }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.t = try c.decodeIfPresent(String.self, forKey: .t) ?? ""
         self.code = try c.decodeIfPresent(ErrorCode.self, forKey: .code) ?? .category("unknown")
         self.reason = try c.decodeIfPresent(String.self, forKey: .reason) ?? "unknown"
+        self.detail = try c.decodeIfPresent(String.self, forKey: .detail)
         self.retryAfter = try c.decodeIfPresent(TimeInterval.self, forKey: .retryAfter)
         self.ms = try c.decodeIfPresent(Int.self, forKey: .ms)
+        self.n = try c.decodeIfPresent(Int.self, forKey: .n)
+        self.tEnd = try c.decodeIfPresent(String.self, forKey: .tEnd)
+        // An absent `v` is a v1 error line — the field did not exist before ADR-0123.
+        self.v = try c.decodeIfPresent(Int.self, forKey: .v) ?? 1
     }
 }
 

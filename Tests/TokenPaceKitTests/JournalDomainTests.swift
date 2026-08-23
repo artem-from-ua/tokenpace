@@ -288,5 +288,39 @@ struct JournalErrorMappingTests {
         let s = try #require(errorSample(d, failure: .unknown))
         #expect(s.code == .category("notSent"))
         #expect(s.ms == nil)
+        #expect(s.detail == "missing User-Agent")
+    }
+
+    @Test func everyNotSentReasonReachesTheJournal() throws {
+        // The detail was produced all along and shown in Troubleshoot, but dropped on the way here,
+        // so a 122 408-line outage recorded that the request was not sent and never why (ADR-0123).
+        for reason in ["not signed in", "token expired", "keychain access denied",
+                       "keychain read failed", "malformed credentials"] {
+            let d = FetchDiagnostics(attemptAt: now, httpStatus: nil, body: nil,
+                                     outcome: .notSent(reason: reason))
+            let s = try #require(errorSample(d, failure: .unknown))
+            #expect(s.detail == reason)
+            // …and never at the cost of the closed taxonomy every count groups by.
+            #expect(s.reason == "notSent")
+        }
+    }
+
+    @Test func codesWithNoRefinementCarryNoDetail() throws {
+        let http = FetchDiagnostics(attemptAt: now, httpStatus: 503, body: nil, outcome: .httpError)
+        #expect(try #require(errorSample(http, failure: .serverProblem)).detail == nil)
+        let transport = FetchDiagnostics(attemptAt: now, httpStatus: nil, body: nil,
+                                         outcome: .transportError(message: "timed out"))
+        #expect(try #require(errorSample(transport, failure: .timeout)).detail == nil)
+    }
+
+    @Test func aLiveErrorLineIsNotPreCollapsed() throws {
+        // The writer collapses; the factory must not pre-stamp `n`, or a lone failure would gain
+        // run fields and every reader would have to special-case `n == 1`.
+        let d = FetchDiagnostics(attemptAt: now, httpStatus: nil, body: nil,
+                                 outcome: .notSent(reason: "token expired"))
+        let s = try #require(errorSample(d, failure: .unknown))
+        #expect(s.n == nil)
+        #expect(s.tEnd == nil)
+        #expect(s.v == ErrorSample.currentVersion)
     }
 }

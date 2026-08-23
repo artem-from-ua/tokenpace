@@ -1002,6 +1002,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         colorCycleTimer?.invalidate()
         awaitingCycleTimer?.invalidate()
         colorAnimator.finishAll()      // stop the transition frame timer (ADR-0070)
+        // Best-effort: write out an error run still accumulating (ADR-0123). This handler is
+        // synchronous and cannot await, so a run open at a hard kill is lost — acceptable, since a
+        // run still open describes a failure the next launch will record again within one cadence.
+        Task { [usageJournal] in await usageJournal.flushOpenErrorRun() }
         sleepWake?.stop()
         screenLock?.stop()
         network.stop()
