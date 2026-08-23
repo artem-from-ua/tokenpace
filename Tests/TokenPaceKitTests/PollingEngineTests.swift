@@ -343,6 +343,81 @@ struct MinIntervalFloorTests {
         #expect(PollingEngine.minInterval == 60)
     }
 
+    @Test func canPollNowIsTrueOnColdStart() {
+        // Nothing to be too soon after — a relaunch must be free to fetch.
+        #expect(PollingEngine.canPollNow(lastAttempt: nil, now: t0))
+    }
+
+    @Test func canPollNowIsFalseInsideTheFloor() {
+        #expect(!PollingEngine.canPollNow(lastAttempt: t0, now: t0.addingTimeInterval(59)))
+    }
+
+    @Test func canPollNowIsTrueAtExactlyTheFloor() {
+        // Boundary counts as elapsed, matching RefreshGate.allows(now:).
+        #expect(PollingEngine.canPollNow(lastAttempt: t0,
+                                         now: t0.addingTimeInterval(PollingEngine.minInterval)))
+    }
+
+    @Test func rearmDelayIsTheRemainderOfTheFloor() {
+        #expect(PollingEngine.rearmDelay(lastAttempt: t0, now: t0.addingTimeInterval(15)) == 45)
+        #expect(PollingEngine.rearmDelay(lastAttempt: t0, now: t0.addingTimeInterval(999)) == 0)
+        #expect(PollingEngine.rearmDelay(lastAttempt: nil, now: t0) == 0)
+    }
+
+    @Test func lastAttemptAdvancesOnFailure() {
+        // The whole bug in one assertion: a token error leaves `lastSuccess` nil forever, so it
+        // cannot bound anything — `lastAttempt` is what moves.
+        let next = PollingEngine.advance(
+            previous: PollState(), outcome: .tokenError(.itemNotFound),
+            claudeActive: true, now: t0)
+        #expect(next.lastAttempt == t0)
+        #expect(next.lastSuccess == nil)
+    }
+
+    @Test func lastAttemptAdvancesOnRateLimit() {
+        // The 429 path returns before `recordFailure`, so a stamp living there would miss it.
+        let next = PollingEngine.advance(
+            previous: PollState(), outcome: .usageError(.rateLimited(retryAfter: 600)),
+            claudeActive: true, now: t0)
+        #expect(next.lastAttempt == t0)
+    }
+
+    @Test func aTokenErrorStormPollsAtMostOncePerMinute() async {
+        // The incident: 122 408 attempts in 127 minutes because every `.networkRestored` walked past
+        // a guard keyed on `lastSuccess`, which a token error never advances. Here 200 signals arrive
+        // 60 ms apart (the observed ~16 Hz) over ~12 s of simulated time; the floor must cap the
+        // Keychain reads at one per minute, not one per signal.
+        let clock = MutableClock()
+        let counter = CredentialCounter()
+        let scheduler = StormScheduler(signal: .networkRestored, tick: 0.06, clock: clock)
+        let engine = PollingEngine(
+            transport: StubTransport.failing(URLError(.timedOut)),
+            tokenProvider: CountingTokenProvider(error: .keychainError(-25300), counter: counter),
+            scheduler: scheduler, probe: StubProbe(active: true), now: clock.now)
+
+        // The measure is signals-per-poll, not wall time: a signal cuts every wait short, so the
+        // clock barely moves and any time-based bound would be satisfied trivially. Both counters are
+        // read *inside* the loop — the stream keeps running after a `break`, and sampling afterwards
+        // measures whatever the loop did while winding down.
+        var outputs = 0
+        var signals = 0
+        var reads = 0
+        for await _ in engine.run() {
+            outputs += 1
+            if outputs >= 5 {
+                signals = await scheduler.calls
+                reads = counter.count
+                break
+            }
+        }
+
+        // Without the floor the loop consumes one signal per poll — 7 signals for 8 Keychain reads,
+        // the shape of the incident. With it, the same five outputs absorb hundreds of signals,
+        // because each refusal re-arms the wait instead of fetching.
+        #expect(signals > 100, "the storm only delivered \(signals) signals — the fake is not storming")
+        #expect(reads < signals / 10, "\(signals) signals produced \(reads) Keychain reads")
+    }
+
     @Test func loopWithInstantSchedulerStillRequestsFloorInterval() async {
         // A malicious/buggy scheduler that returns `.elapsed` instantly (the shape of the shipped
         // bug) must NOT let the loop request faster than the floor: every interval the loop hands the
@@ -903,6 +978,67 @@ private actor SequencedTransport: UsageTransport {
         let step = steps[min(index, steps.count - 1)]
         index += 1
         return try await step.data(for: request)
+    }
+}
+
+/// A clock the test moves by hand. Lock-guarded rather than an actor because the engine's `now`
+/// seam is a synchronous `@Sendable () -> Date` — the same reasoning as `RotatingTokenProvider`.
+private final class MutableClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var t: Date
+    init(_ start: Date = t0) { self.t = start }
+    var now: @Sendable () -> Date { { self.lock.withLock { self.t } } }
+    func advance(_ dt: TimeInterval) { lock.withLock { t += dt } }
+}
+
+/// A scheduler that never stops signalling: every wait returns `.interrupted(signal)` and nudges a
+/// clock forward by `tick`. `ManualScheduler` clamps to `.elapsed` once its script runs out, so it
+/// cannot express the incident — an unbounded signal source is the whole point here.
+private actor StormScheduler: PollScheduler {
+    private let signal: PollSignal
+    private let tick: TimeInterval
+    private let clock: MutableClock
+    private(set) var calls = 0
+
+    init(signal: PollSignal, tick: TimeInterval, clock: MutableClock) {
+        self.signal = signal
+        self.tick = tick
+        self.clock = clock
+    }
+
+    func waitForNextPoll(interval: TimeInterval) async -> PollWakeReason {
+        calls += 1
+        // The storm's defining property: a signal cuts the wait short, so only `tick` elapses no
+        // matter how long an interval the loop asked for. Advancing by `interval` instead would model
+        // a scheduler that honours the cadence — which is precisely the thing under test, and would
+        // make the fake pass with or without the floor.
+        clock.advance(tick)
+        // Never falls back to `.elapsed`: that is a *scheduled* poll, which the floor deliberately
+        // does not block, so emitting it once the budget ran out would let the loop spin freely and
+        // the counters would end up measuring that instead of the storm. The signal repeats for as
+        // long as the reader keeps consuming; the test stops it by breaking.
+        return .interrupted(signal)
+    }
+
+    func waitWhileAsleep() async {}
+}
+
+/// Counts Keychain reads. On a token error the transport is never reached, so a counting *transport*
+/// would read zero and any assertion on it would pass vacuously — the Keychain read is the cost the
+/// floor bounds.
+private final class CredentialCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func bump() { lock.withLock { value += 1 } }
+}
+
+private struct CountingTokenProvider: TokenProviding {
+    let error: TokenError
+    let counter: CredentialCounter
+    func currentCredentials(now: Date) throws -> TokenCredentials {
+        counter.bump()
+        throw error
     }
 }
 

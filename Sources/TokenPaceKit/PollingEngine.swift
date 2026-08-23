@@ -128,6 +128,16 @@ public struct PollState: Sendable, Equatable {
     public var backoff: PollingBackoff
     public var claudeActive: Bool
     public var lastSuccess: Date?
+    /// The instant of the last poll **attempt**, set whether it succeeded or failed.
+    ///
+    /// Distinct from ``lastSuccess``, and the distinction is the bug this field exists for: a token
+    /// error never advances `lastSuccess`, so a guard written against it reads every wake signal on
+    /// an unreadable Keychain as "poll now". With the screen-lock and network observers emitting
+    /// undebounced edges, a blinking display turned that into a 16 Hz request loop — 122 408
+    /// attempts in 127 minutes on a real journal (ADR-0123).
+    ///
+    /// In-memory only: a relaunch legitimately starts with an attempt free of the floor.
+    public var lastAttempt: Date?
     public var failingSince: Date?
     public var lastSnapshot: UsageSnapshot?
     public var reason: FailureReason?
@@ -174,6 +184,7 @@ public struct PollState: Sendable, Equatable {
         backoff: PollingBackoff = PollingBackoff(),
         claudeActive: Bool = true,
         lastSuccess: Date? = nil,
+        lastAttempt: Date? = nil,
         failingSince: Date? = nil,
         lastSnapshot: UsageSnapshot? = nil,
         reason: FailureReason? = nil,
@@ -187,6 +198,7 @@ public struct PollState: Sendable, Equatable {
         self.backoff = backoff
         self.claudeActive = claudeActive
         self.lastSuccess = lastSuccess
+        self.lastAttempt = lastAttempt
         self.failingSince = failingSince
         self.lastSnapshot = lastSnapshot
         self.reason = reason
@@ -295,8 +307,14 @@ public struct PollingEngine: Sendable {
     /// The **hard floor** on the gap between any two polls — a safety rail independent of the
     /// scheduler, so even a scheduler that returns instantly cannot hammer the API. 60 s is
     /// comfortably below the 180 s base cadence, so it never slows normal operation; it only caps
-    /// the worst case. Enforced twice: `effectiveInterval` never returns less, and `run()`
-    /// re-checks elapsed wall time after every wait.
+    /// the worst case. Enforced twice: ``effectiveInterval(_:)`` never returns less, and the loop
+    /// refuses a signal-driven poll within this of ``PollState/lastAttempt``
+    /// (``canPollNow(lastAttempt:now:)``).
+    ///
+    /// The second rail is written here because for a long time it was only *claimed* here: this
+    /// comment described a wall-clock re-check that `run()` did not perform, and a wake arriving on
+    /// an unreadable Keychain walked straight past the first rail into an unbounded fetch loop
+    /// (ADR-0123).
     public static let minInterval: TimeInterval = 60
 
     /// How long a spurious 5h session-idle is suppressed after an active window flips to idle on a
@@ -394,6 +412,11 @@ public struct PollingEngine: Sendable {
     ) -> PollState {
         var next = previous
         next.claudeActive = claudeActive
+        // Every branch below is an attempt, so stamp it once here rather than inside the outcome
+        // cases. `recordFailure` would be the tempting home and is the wrong one: the 429 path
+        // returns before calling it, so a stamp living there would leave rate-limited polls
+        // invisible to the floor — the same split that let `lastSuccess` be the only clock.
+        next.lastAttempt = now
 
         if let refresh {
             let stillExpired = outcome == .tokenError(.expired)
@@ -536,6 +559,26 @@ public struct PollingEngine: Sendable {
         let remaining = interval - now.timeIntervalSince(lastSuccess)
         guard remaining > 0 else { return nil }          // cache already stale → poll now
         return max(minInterval, remaining)
+    }
+
+    /// Whether a **signal-driven** poll may run at `now` — the second rail under ``minInterval``.
+    ///
+    /// Keyed on the last *attempt*, not the last success, and that is the whole point: a token error
+    /// leaves `lastSuccess` untouched forever, so ``wakeRearmInterval`` reads "cache stale, poll now"
+    /// for every wake signal while the Keychain stays unreadable. The screen-lock and network
+    /// observers emit undebounced edges, so a blinking display drove 16 polls a second for two hours
+    /// (ADR-0123). `lastAttempt == nil` (cold start / relaunch) allows the poll: there is nothing to
+    /// be too soon after. The boundary counts as elapsed, matching ``RefreshGate/allows(now:)``.
+    public static func canPollNow(lastAttempt: Date?, now: Date) -> Bool {
+        guard let lastAttempt else { return true }
+        return now.timeIntervalSince(lastAttempt) >= minInterval
+    }
+
+    /// How long to re-arm the wait when ``canPollNow(lastAttempt:now:)`` refuses — the remainder of
+    /// the floor, so the loop sleeps out the rest instead of spinning on every incoming signal.
+    public static func rearmDelay(lastAttempt: Date?, now: Date) -> TimeInterval {
+        guard let lastAttempt else { return 0 }
+        return max(0, minInterval - now.timeIntervalSince(lastAttempt))
     }
 
     /// Why the effective interval changed from `previous` to `next`, or `nil` if it did not move.
@@ -791,10 +834,20 @@ public struct PollingEngine: Sendable {
                         switch await scheduler.waitForNextPoll(interval: wait) {
                         case .interrupted(.sleep):
                             await scheduler.waitWhileAsleep()   // park: no fetch while asleep
+                            // A real park outlasts the floor, so this guard is inert for genuine
+                            // sleep. It is here because `ScreenLockObserver` maps display blinks to
+                            // `.sleep`/`.wake` **pairs**: guarding only the wake half would leave
+                            // half the storm running through this branch.
+                            guard Self.canPollNow(lastAttempt: state.lastAttempt, now: now()) else {
+                                wait = Self.rearmDelay(lastAttempt: state.lastAttempt, now: now())
+                                continue waitLoop
+                            }
                             break waitLoop                      // resume with an immediate poll
                         case .interrupted(.manualRefresh):
                             // A user-requested refresh clears any active 429 hold, so the immediate
                             // poll below runs at the base interval rather than deep in a Retry-After hold.
+                            // Deliberately outside the `minInterval` floor: a person pressing Refresh
+                            // is not a signal source, and the floor exists to bound signal sources.
                             state.backoff = state.backoff.reset()
                             break waitLoop
                         case .interrupted(.wake), .interrupted(.networkRestored):
@@ -806,7 +859,17 @@ public struct PollingEngine: Sendable {
                             guard let remaining = Self.wakeRearmInterval(
                                 lastSuccess: state.notPolling ? nil : state.lastSuccess,
                                 interval: interval, now: now())
-                            else { break waitLoop }              // stale (or no prior success) → poll now
+                            else {
+                                // Stale (or no prior success) — but "the cache is stale" is not on
+                                // its own a licence to fetch. A token error never advances
+                                // `lastSuccess`, so this branch reads stale for every signal until
+                                // the Keychain recovers; the floor is what makes that bounded.
+                                guard Self.canPollNow(lastAttempt: state.lastAttempt, now: now()) else {
+                                    wait = Self.rearmDelay(lastAttempt: state.lastAttempt, now: now())
+                                    continue waitLoop
+                                }
+                                break waitLoop
+                            }
                             wait = remaining
                             // loop: wait out the remainder; the next signal re-enters this switch.
                         case .elapsed:
