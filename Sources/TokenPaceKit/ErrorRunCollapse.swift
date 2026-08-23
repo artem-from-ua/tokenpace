@@ -70,10 +70,15 @@ public enum ErrorRunCollapse {
     /// its own right and never extends anything — that is what makes a second migration pass a
     /// no-op rather than a slow merge of everything into one line.
     public static func admit(_ run: ErrorRun?, sample: ErrorSample, at instant: Date) -> Decision {
+        // An already-collapsed sample carries its own end; taking `instant` for both would shrink the
+        // run to its first attempt every time it passed through, so a second migration pass would
+        // quietly rewrite `tEnd` and the pass would not be idempotent.
         let fresh = ErrorRun(
             code: sample.code, reason: sample.reason, detail: sample.detail,
             retryAfter: sample.retryAfter, ms: sample.ms,
-            first: instant, last: instant, count: sample.n ?? 1)
+            first: instant,
+            last: sample.tEnd.flatMap(ResetClock.parse) ?? instant,
+            count: sample.n ?? 1)
 
         guard let run else { return .extend(fresh) }   // nothing open yet
 

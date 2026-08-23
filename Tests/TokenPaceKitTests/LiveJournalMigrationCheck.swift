@@ -21,6 +21,23 @@ struct LiveJournalMigrationCheck {
         ProcessInfo.processInfo.environment["TOKENPACE_LIVE_JOURNALS"] ?? ""
     }
 
+    /// Count what the two post-collapse invariants are stated over: lines that are not `error`
+    /// records (which must be conserved exactly), and error *attempts* (`n ?? 1` summed, which must
+    /// be conserved even though the lines carrying them are folded).
+    private static func census(_ contents: String) -> (otherLines: Int, attempts: Int) {
+        let decoder = JSONDecoder()
+        var other = 0, attempts = 0
+        for raw in contents.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { other += 1; continue }
+            guard let data = line.data(using: .utf8),
+                  let record = try? decoder.decode(JournalRecord.self, from: data),
+                  case let .error(sample) = record else { other += 1; continue }
+            attempts += sample.n ?? 1
+        }
+        return (other, attempts)
+    }
+
     private static func journals() -> [(name: String, contents: String)] {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(atPath: directory)) ?? []
@@ -44,17 +61,34 @@ struct LiveJournalMigrationCheck {
         for (name, contents) in journals {
             let (migrated, _, outcome) = JournalMigration.migrate(contents: contents)
 
-            // Every line must survive: a migration that loses records is worse than one that does
-            // nothing, whatever else it improves.
+            // A migration that loses records is worse than one that does nothing, whatever else it
+            // improves. Since ADR-0123 that is two invariants rather than a raw line count, and both
+            // are stronger than the count they replace:
+            //
+            //  1. Every **non-error** line survives exactly. This is the protection the line count
+            //     was actually buying — a dropped usage or status line is unrecoverable.
+            //  2. Every error **attempt** survives, as itself or inside a run's `n`. A collapse folds
+            //     lines on purpose; losing an attempt is still a bug, and `sum(n ?? 1)` catches a
+            //     miscomputed count that a line count never could.
+            let (beforeOther, beforeAttempts) = Self.census(contents)
+            let (afterOther, afterAttempts) = Self.census(migrated)
+            #expect(beforeOther == afterOther,
+                    "\(name): non-error lines changed \(beforeOther) → \(afterOther)")
+            #expect(beforeAttempts == afterAttempts,
+                    "\(name): error attempts changed \(beforeAttempts) → \(afterAttempts)")
+
             let before = contents.split(separator: "\n", omittingEmptySubsequences: false).count
             let after = migrated.split(separator: "\n", omittingEmptySubsequences: false).count
-            #expect(before == after, "\(name): line count changed \(before) → \(after)")
+            if before != after {
+                print("\(name): \(before) → \(after) lines, \(beforeAttempts) error attempts preserved")
+            }
 
             // Re-running must be a no-op — the pass is one-off by construction.
             let again = JournalMigration.migrate(contents: migrated, state: .init())
             #expect(again.outcome.migrated == 0, "\(name): second pass rewrote lines")
             #expect(again.outcome.resetsRepaired == 0, "\(name): second pass repaired resets")
             #expect(again.outcome.statusTagged == 0, "\(name): second pass re-tagged status lines")
+            #expect(again.outcome.errorsCollapsed == 0, "\(name): second pass re-collapsed errors")
             #expect(!again.outcome.changedAnything, "\(name): second pass reports a change")
 
             // The #456 invariant: after the pass, no stored `status` line relies on "absent means
