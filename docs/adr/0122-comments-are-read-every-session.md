@@ -1,5 +1,5 @@
 ---
-status: draft
+status: accepted
 date: 2026-08-22
 supersedes: []
 superseded_by: []
@@ -13,13 +13,12 @@ superseded_by: []
 > [#489](https://github.com/artem-from-ua/tokenpace/issues/489) is the cleanup it authorizes,
 > [#490](https://github.com/artem-from-ua/tokenpace/pull/490) the pass that ran against it.
 
-> **Draft — not yet accepted.** Parts were decided by the maintainer in review, parts were not.
-> His: rule 2's scope ("a comment describes the current behavior — only that"), rule 4 in its
-> current form (an earlier draft said *link the ADR instead of retelling it*; he rejected it), the
-> issue-number clause, and rule 11. Mine, pending review: the per-read framing, rule 3, rules 5–7,
-> the decision in rule 8 not to build a checker, and recording any of this as an ADR at all. The
-> pass already ran against these rules, so accepting ratifies work that is done; rejecting a rule
-> means revisiting that work, not only this file.
+> **On authorship**, since it bears on how much weight a reader should give a rule. Four of these
+> were settled by the maintainer in review — rule 2's scope, rule 4 in its current form (an earlier
+> draft said *link the ADR instead of retelling it*, and he rejected it as trading one kind of rot
+> for another), the issue-number clause, and rule 11. The rest were derived by an agent from
+> measurements taken during the pass, and ratified rather than authored. They describe what went
+> wrong in one large trim; they are not decades of judgment about comments in general.
 
 ## Context
 
@@ -29,13 +28,11 @@ every week: a paragraph explaining why a constant is 14 and not 10 has repaid it
 What changed is who reads them, and how often. Every session — the maintainer's, an agent's — loads
 these files into a context window and pays for every byte, usually while looking for something else.
 
-| | Tokens |
-|---|---|
-| Comments in `Sources/` | **~312 000** |
-| Code in `Sources/` | ~172 000 |
-
-**47% of lines are comments and they occupy 64% of the bytes.** `PopupViewController.swift` spends
-~45 000 tokens on prose against ~22 000 on code; `PacingModel.swift` is 82% comment.
+**Roughly half the lines under `Sources/` are comments, and they hold close to two thirds of the
+bytes** — comments run to hundreds of thousands of tokens against a code half well under that.
+Opening `PopupViewController.swift` costs about twice as many tokens in prose as in code;
+`PacingModel.swift` is past 80% comment. The proportions shift as the corpus is worked on and the
+exact figures are not the argument; what does not shift is that a reader pays them on every read.
 
 The prose is not padded — it is dense, and much of it documents a past. `PacingModel.elapsedFraction`
 carried 19 lines of comment over 5 lines of code: three stated the boundary rules, the rest described
@@ -197,11 +194,17 @@ observed the sample was favourable: the files it happened to hit were the ones w
 The second was widened on that advice — documentation, the pure-logic layer, two to three hunks per
 file. An audit that does not describe its selection is not evidence.
 
-### 15. `docs/adr/` is exempt
+### 15. An ADR's body is exempt; its index is not
 
-History is the product in an ADR. A record states what was decided at a date, and a supersession
+History is the product inside a record. It states what was decided at a date, and a supersession
 postscript is the intended home for exactly the content rules 2 and 3 remove from code. ADRs are
 also read on demand, not dragged in beside a file opened for another reason.
+
+**The exemption ends at the record.** `docs/adr/README.md` is an index, and prose that introduces or
+navigates the corpus is ordinary documentation — the same rules apply. That index had grown to 165
+kB, its Title column carrying a summary of each Decision, and cutting it to 25 kB
+([#488](https://github.com/artem-from-ua/tokenpace/pull/488)) lost nothing: every supersession it
+described was already in the postscript of the record it described, in more detail.
 
 ## Consequences
 

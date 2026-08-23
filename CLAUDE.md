@@ -97,19 +97,19 @@ the method, the target values, the swatch mode.
   (`sizingOptions`/`safeAreaRegions`), not the SwiftUI modifiers —
   [ADR-0088](docs/adr/0088-settings-hosting-safe-area-and-manual-separator.md).
 
-## Writing or changing Swift code — four rules for the `//` and `///` you leave in it
+## Writing or changing Swift code — the rules for the `//` and `///` you leave in it
 
 These fire whenever you touch a source file: a new comment, an edited one, or a doc comment on a
 symbol you are adding. Not PR or issue text — those are prose for people, and are governed by the
 sections below.
 
 - **A comment is paid for on every read — length is a cost, not a virtue** ([ADR-0122](docs/adr/0122-comments-are-read-every-session.md)).
-  Comments are 47% of the lines in `Sources/` and **64% of the bytes**: opening
-  `PopupViewController.swift` spends ~45 000 tokens on prose against ~22 000 on code. Write the
+  Roughly half the lines in `Sources/` are comments and they hold close to two thirds of the bytes:
+  opening `PopupViewController.swift` costs about twice as many tokens in prose as in code. Write the
   shortest comment that answers what the next editor must know; where a paragraph and a sentence
   carry the same information, the sentence is right.
-- **Write the comment the code cannot write for itself, and mark a probe as a probe.** The other
-  three rules say what to cut; four things must be *there*: a **probe result** (what you tried and what
+- **Write the comment the code cannot write for itself, and mark a probe as a probe.** The rules
+  around this one say what to cut; four things must be *there*: a **probe result** (what you tried and what
   the platform did — "an `NSButton` outside the toolbar's own generation never draws the hover
   plate"), a **declaration that looks redundant and is not** (`.isSelected` is what makes VoiceOver
   announce the current choice), a **constraint living in another file**, and a **measurement with
@@ -119,6 +119,10 @@ sections below.
   recurs at several sites, **repeat the one-line reason at each** — `.isSelected` appears three
   times and was explained once, and the silent copies are what the next "remove the redundant
   trait" edit finds.
+- **Don't state a count you would have to maintain.** "18 named roles" over an enum breaks the next
+  time a case is added, and buys nothing — the enum is right there. Write "named roles". The test is
+  whether the claim stays true for free: a measurement nobody can re-derive earns its upkeep, a
+  number the reader can see for themselves does not.
 - **A comment describes the current behavior — only that.** Not what the code used to do, not what
   a constant was before, not which issue changed it, and **never where the code came from** — a
   bash prototype's line numbers cannot be followed. When you catch yourself writing "used to" /
@@ -137,7 +141,7 @@ sections below.
 
 ## Trimming comments or docs in bulk — read the ADR first
 
-The four rules above are what you need while *writing* a comment, and they are here because `docs/`
+The rules above are what you need while *writing* a comment, and they are here because `docs/`
 is not loaded into context automatically. **Before a pass that deletes prose across many files, open
 [docs/adr/0122-comments-are-read-every-session.md](docs/adr/0122-comments-are-read-every-session.md)** —
 it carries the eleven rules that only matter at that scale: how to delete without orphaning a token

@@ -138,7 +138,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0119](0119-status-polling-own-cadence-and-backoff.md) | Status polling gets its own heartbeat and a per-source 429 backoff | accepted |
 | [0120](0120-status-records-carry-their-provider.md) | `status` journal records carry their provider, and the archive is backfilled | accepted |
 | [0121](0121-github-as-a-status-only-provider.md) | GitHub as a status-only provider — one group, two plates, and a dot that only appears while calm | accepted |
-| [0122](0122-comments-are-read-every-session.md) | Comments are priced per read | draft |
+| [0122](0122-comments-are-read-every-session.md) | Comments are priced per read | accepted |
 | [0123](0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md) | One line per error run, and a wall-clock floor on signal-driven polls | accepted |
 
 ## Maintaining this index
