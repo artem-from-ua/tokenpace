@@ -18,7 +18,8 @@ import TokenPaceKit
 /// under `/Applications`, so a dev build never pollutes the release journal; `-YYYY-MM` from the
 /// record's UTC timestamp for natural monthly rotation.
 ///
-/// An `actor` so its in-memory gap clock (`lastWriteInstant`) stays consistent across the detached
+/// An `actor` so its in-memory gap clock (`lastPollInstant`) and the open error run stay consistent
+/// across the detached
 /// tasks that call it; the file lock guards *cross-process* consistency, the actor guards *in-process*.
 actor UsageJournal {
 
@@ -31,9 +32,21 @@ actor UsageJournal {
     /// fed to a downstream reader without touching the real journal.
     private let overrideFile: URL?
 
+    /// The last instant a usage poll was **recorded**, whether or not a line was written for it.
+    ///
+    /// The distinction matters since consecutive identical failures collapse into one line: a
+    /// suppressed write still means "we were looking", and the gap detector answers exactly that
+    /// question. Stamping only on an actual write would make a long collapsed run look like an
+    /// outage and emit a resume marker across time we spent polling hard.
+    ///
     /// In-memory only (resets on relaunch): after a relaunch the first poll legitimately emits a
     /// resume marker, the honest "we weren't looking while the app was down" signal.
-    private var lastWriteInstant: Date?
+    private var lastPollInstant: Date?
+
+    /// The error run being accumulated, if any — see ``ErrorRunCollapse``. In-memory only, and a hard
+    /// kill loses it: acceptable, because a run still open describes a failure that has not been
+    /// fixed, and the next launch records it again within one cadence.
+    private var openErrorRun: ErrorRun?
 
     init(
         directory: URL = UsageJournal.defaultDirectory,
@@ -69,19 +82,56 @@ actor UsageJournal {
 
     // MARK: - Append
 
-    /// Append one record. Before a `usage`/`error`/`status` record, emit a resume marker first if the
-    /// gap since the last write exceeds the expected interval. Never throws; logs and drops on failure.
+    /// Append one record. Before a `usage` record, emit a resume marker first if the gap since the
+    /// last poll exceeds the expected interval. Never throws; logs and drops on failure.
+    ///
+    /// An `error` record does not necessarily write a line: consecutive identical failures are
+    /// accumulated by ``ErrorRunCollapse`` and written once when the run ends (ADR-0123).
     ///
     /// - Parameters:
     ///   - record: The record to write (already built by a ``JournalRecord`` factory).
     ///   - at: The record's instant, for gap detection and month selection.
     ///   - expectedInterval: The cadence the caller expected since the last poll (for the gap marker).
     func append(_ record: JournalRecord, at instant: Date, expectedInterval: TimeInterval) {
-        if let marker = JournalGap.marker(previous: lastWriteInstant, now: instant, expectedInterval: expectedInterval) {
+        // An error may be the same error repeating: accumulate it and write only when the run ends.
+        // The gap clock advances either way — the poll happened.
+        if case let .error(sample) = record {
+            switch ErrorRunCollapse.admit(openErrorRun, sample: sample, at: instant) {
+            case let .extend(run):
+                openErrorRun = run
+            case let .flush(closed, next):
+                writeClosedRun(closed)
+                openErrorRun = next
+            }
+            lastPollInstant = instant
+            return
+        }
+
+        // Any other record ends the run: write it out first so the file keeps its order.
+        flushOpenErrorRun()
+
+        if let marker = JournalGap.marker(previous: lastPollInstant, now: instant, expectedInterval: expectedInterval) {
             writeLine(.resume(marker), at: instant)
         }
         writeLine(record, at: instant)
-        lastWriteInstant = instant
+        lastPollInstant = instant
+    }
+
+    /// Write the accumulated run, if any. Called when a non-error record arrives and at termination.
+    func flushOpenErrorRun() {
+        guard let run = openErrorRun else { return }
+        writeClosedRun(run)
+        openErrorRun = nil
+    }
+
+    /// Serialise one closed run at the instant of its **first** attempt — where the failure began,
+    /// and where a reader scanning by time expects to find it.
+    private func writeClosedRun(_ run: ErrorRun) {
+        guard let sample = ErrorRunCollapse.close(run) else { return }
+        // No gap check here: the run's own first attempt already advanced the clock when it arrived,
+        // so this write is never the far side of a hole. The marker for a genuine outage is emitted
+        // by whatever record follows the run.
+        writeLine(.error(sample), at: run.first)
     }
 
     /// The dev-fixture path: no gap detection, no gates — the fixture already carries its own resume
@@ -94,7 +144,8 @@ actor UsageJournal {
 
     /// Unlike ``append(_:at:expectedInterval:)`` this runs **no** gap detection and does **not** touch
     /// the usage gap clock — a status poll landing between two usage polls must not emit a spurious
-    /// resume marker.
+    /// resume marker. It leaves any open error run alone for the same reason: a status poll is not a
+    /// break in the *usage* series.
     func appendStatus(_ record: JournalRecord, at instant: Date) {
         writeLine(record, at: instant)
     }

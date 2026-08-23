@@ -2,9 +2,19 @@
 status: accepted
 date: 2026-07-25
 supersedes: [0011]
+superseded_by: [0123]
 ---
 
 # ADR-0032: Simplified polling cadence — a 3-minute base, honor-only `Retry-After`, pause on lock
+
+> **Partially superseded by [ADR-0123](0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md).**
+> Only §D4's carve-out is superseded — "there hasn't been a single success yet (cold start / failure
+> — a wake is entitled to a fetch)". It had no bound, and a token error never advances `lastSuccess`,
+> so on an unreadable Keychain every signal took it: a blinking display drove 16 polls a second for
+> two hours. A wake is still entitled to a fetch, now floored at one per `minInterval` against
+> `PollState.lastAttempt`. **The decision itself still stands in full**: the 3-minute base, the
+> honor-only `Retry-After`, the `minInterval` floor, pausing on screen lock, and the conditional
+> re-poll for a wake that arrives while the cache is fresh.
 
 > **Postscript (2026-08-22).** §D3's decision stands unchanged — no Claude Code session still means
 > a 15-minute interval. Only the *mechanism* named in it is superseded by

@@ -99,6 +99,10 @@ public enum JournalMigration {
         /// backup after a *usage* generation; folding status lines into it would make a file whose only
         /// change was a relabelling claim its usage history had been rewritten.
         public let statusTagged: Int
+        /// `error` lines folded into runs — the number of collapsed lines **written**.
+        public let errorsCollapsed: Int
+        /// Attempts folded away (`sum(n) - lines written`) — how much the file shrank.
+        public let errorLinesRemoved: Int
         /// The **lowest** format version found among the lines this pass rewrote, or `nil` when it
         /// rewrote nothing.
         ///
@@ -119,6 +123,7 @@ public enum JournalMigration {
         public init(migrated: Int, passedThrough: Int, skipped: Int, outOfOrder: Int,
                     resetsRepaired: Int = 0, severitiesRecomputed: Int = 0,
                     statusTagged: Int = 0,
+                    errorsCollapsed: Int = 0, errorLinesRemoved: Int = 0,
                     migratedFromVersion: Int? = nil) {
             self.migrated = migrated
             self.passedThrough = passedThrough
@@ -127,6 +132,8 @@ public enum JournalMigration {
             self.resetsRepaired = resetsRepaired
             self.severitiesRecomputed = severitiesRecomputed
             self.statusTagged = statusTagged
+            self.errorsCollapsed = errorsCollapsed
+            self.errorLinesRemoved = errorLinesRemoved
             self.migratedFromVersion = migratedFromVersion
         }
 
@@ -143,7 +150,7 @@ public enum JournalMigration {
         /// file computed a correct rewrite and was then silently declined by the shell — the pass would
         /// have reported success and changed nothing on disk. **Any future counter that marks a
         /// rewritten line must be added here too**, or it will fail the same way.
-        public var changedAnything: Bool { migrated > 0 || statusTagged > 0 }
+        public var changedAnything: Bool { migrated > 0 || statusTagged > 0 || errorsCollapsed > 0 }
 
         /// A `.public`-safe one-liner for the migration log.
         public var logMessage: String {
@@ -151,6 +158,9 @@ public enum JournalMigration {
             if resetsRepaired > 0 { out += ", \(resetsRepaired) weekly resets repaired" }
             if severitiesRecomputed > 0 { out += ", \(severitiesRecomputed) severities recomputed" }
             if statusTagged > 0 { out += ", \(statusTagged) status lines tagged" }
+            if errorsCollapsed > 0 {
+                out += ", \(errorsCollapsed) error runs collapsed (\(errorLinesRemoved) lines folded)"
+            }
             if skipped > 0 { out += ", \(skipped) unparseable" }
             if outOfOrder > 0 { out += ", \(outOfOrder) out of order" }
             return out
@@ -190,6 +200,7 @@ public enum JournalMigration {
         var lastAccepted: Date?
         var migrated = 0, passedThrough = 0, skipped = 0, outOfOrder = 0, resetsRepaired = 0
         var severitiesRecomputed = 0, statusTagged = 0
+        var errorsCollapsed = 0, errorLinesRemoved = 0
         var out: [String] = []
         // The oldest generation this pass had to rewrite — what the file *was*, which is what its
         // backup should be named after (#401).
@@ -203,19 +214,79 @@ public enum JournalMigration {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
 
+        // The error run being accumulated. Adjacency in the file is the grouping key, not a time
+        // window: real journals hold genuinely out-of-order timestamps (two processes under `flock`),
+        // and a window would behave erratically across those inversions.
+        var openRun: ErrorRun?
+        // The original bytes of a run of one, so a line with nothing to collapse is passed through
+        // untouched rather than re-encoded: a pass that rewrites what it cannot improve makes every
+        // journal a changed file and every launch a rewrite.
+        var openRunLine: String?
+        // Close the run and emit its line. Must be called at the top of **every** branch that appends
+        // something else, and once after the loop — a missed call silently drops attempts.
+        func flushRun() {
+            guard let run = openRun else { return }
+            openRun = nil
+            defer { openRunLine = nil }
+            guard run.count > 1 else {
+                if let line = openRunLine { out.append(line); passedThrough += 1 }
+                return
+            }
+            guard let sample = ErrorRunCollapse.close(run),
+                  let encoded = try? encoder.encode(JournalRecord.error(sample)),
+                  let text = String(data: encoded, encoding: .utf8) else {
+                if let line = openRunLine { out.append(line); skipped += 1 }
+                return
+            }
+            out.append(text)
+            errorsCollapsed += 1
+            errorLinesRemoved += run.count - 1
+        }
+
         for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(rawLine)
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { out.append(line); continue }
+            if trimmed.isEmpty { flushRun(); out.append(line); continue }
 
             let parsed = trimmed.data(using: .utf8).flatMap {
                 try? decoder.decode(JournalRecord.self, from: $0)
+            }
+
+            // `error` lines fold into runs: consecutive identical failures say one thing, and writing
+            // each attempt made 98% of a real journal a single Keychain outage repeating (ADR-0123).
+            if case let .error(sample) = parsed {
+                guard let at = ResetClock.parse(sample.t) else {
+                    flushRun()                       // an undatable line cannot join a run
+                    out.append(line)
+                    passedThrough += 1
+                    continue
+                }
+                // An already-collapsed line is finished work: pass its bytes through and let it end
+                // whatever run preceded it. Re-encoding it would make every launch rewrite the file.
+                guard sample.n == nil else {
+                    flushRun()
+                    out.append(line)
+                    passedThrough += 1
+                    continue
+                }
+                switch ErrorRunCollapse.admit(openRun, sample: sample, at: at) {
+                case let .extend(run):
+                    openRun = run
+                    if run.count == 1 { openRunLine = line }
+                case let .flush(closed, next):
+                    openRun = closed
+                    flushRun()
+                    openRun = next
+                    openRunLine = next.count == 1 ? line : nil
+                }
+                continue
             }
 
             // `status` lines are rewritten in place when their format is behind (#456) — a relabelling,
             // not a recomputation, so it is handled here rather than in the usage pipeline below, which
             // would have nothing to offer it.
             if case let .status(sample) = parsed {
+                flushRun()
                 guard sample.v < StatusSample.currentVersion else {
                     out.append(line)                 // already tagged
                     passedThrough += 1
@@ -245,10 +316,13 @@ public enum JournalMigration {
             guard case let .usage(sample) = parsed else {
                 // Not a usage or status line, or not parseable at all: keep the original bytes. A file
                 // that cannot be fully understood is still a file worth preserving exactly.
+                flushRun()
                 out.append(line)
                 if parsed == nil { skipped += 1 } else { passedThrough += 1 }
                 continue
             }
+
+            flushRun()   // a usage line ends any run: the failure stopped when this poll succeeded
 
             // Two independent reasons to rewrite, either sufficient: the line's *format* is behind, or
             // its *colour model* is (#426). The second can be true on its own — a v4 line judged by a
@@ -347,12 +421,15 @@ public enum JournalMigration {
             out.append(text)
             migrated += 1
         }
+        // A run still open at end of input: without this the file's final storm vanishes.
+        flushRun()
 
         return (out.joined(separator: "\n"), interpolator,
                 Outcome(migrated: migrated, passedThrough: passedThrough,
                         skipped: skipped, outOfOrder: outOfOrder, resetsRepaired: resetsRepaired,
                         severitiesRecomputed: severitiesRecomputed,
                         statusTagged: statusTagged,
+                        errorsCollapsed: errorsCollapsed, errorLinesRemoved: errorLinesRemoved,
                         migratedFromVersion: lowestVersion))
     }
 

@@ -84,6 +84,25 @@ struct JournalRecordCodableTests {
         #expect(try roundTrip(.error(cat)) == .error(cat))
     }
 
+    @Test func aCollapsedErrorRoundTrips() throws {
+        let run = ErrorSample(t: "2026-08-19T21:00:00Z", code: .category("notSent"),
+                              reason: "notSent", detail: "token expired",
+                              n: 2940, tEnd: "2026-08-19T21:03:00Z")
+        #expect(try roundTrip(.error(run)) == .error(run))
+    }
+
+    @Test func aPreCollapseErrorLineDecodesAsV1() throws {
+        // The shape a real journal is full of: no `v`, no `detail`, no `n`. It must keep decoding,
+        // and must not pretend to carry a count it never had.
+        let raw = #"{"kind":"error","t":"2026-08-19T21:00:00Z","code":"notSent","reason":"notSent"}"#
+        let record = try JSONDecoder().decode(JournalRecord.self, from: Data(raw.utf8))
+        guard case let .error(s) = record else { Issue.record("expected an error record"); return }
+        #expect(s.v == 1)
+        #expect(s.detail == nil)
+        #expect(s.n == nil)
+        #expect(s.reason == "notSent")
+    }
+
     @Test func resumeRoundTrips() throws {
         let marker = ResumeMarker(t: "2026-08-03T13:40:00Z", gap: 15840)
         #expect(try roundTrip(.resume(marker)) == .resume(marker))

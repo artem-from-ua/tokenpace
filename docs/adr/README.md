@@ -48,7 +48,7 @@ current design, because the reasoning is worth as much as the outcome.
 | ~~[0029](0029-reset-countdown-selection-by-severity.md)~~ | ~~Selecting the reset time in the menu bar by 5h × 7d states + a radio-group mode~~ | superseded → [0042](0042-settings-swiftui-form.md), [0043](0043-unified-reset-line-and-remove-resetnow.md), [0044](0044-dynamic-pacing-threshold.md), [0091](0091-countdown-only-where-work-is-not-running.md) |
 | ~~[0030](0030-optimistic-reset-and-exact-timer.md)~~ | ~~An optimistic reset on an exact timer instead of a passive `.resetNow` state (⏰)~~ | superseded → [0043](0043-unified-reset-line-and-remove-resetnow.md) |
 | [0031](0031-session-log-archiver.md) | Raw Claude Code session log archiver (accumulate-only) | accepted |
-| [0032](0032-simplified-polling-cadence.md) | Simplified polling cadence — a 3-minute base, honor-only `Retry-After`, pause on lock | accepted |
+| [0032](0032-simplified-polling-cadence.md) | Simplified polling cadence — a 3-minute base, honor-only `Retry-After`, pause on lock | partially superseded → [0123](0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md) |
 | [0033](0033-automatic-update-install.md) | Automatic update install — a custom minimal installer, not Sparkle | partially superseded → [0036](0036-update-signals-single-dropdown-item.md) |
 | ~~[0034](0034-hide-calm-seven-day-bar.md)~~ | ~~Hiding the calm 7d strip in the menu bar (an option, default-on)~~ | superseded → [0086](0086-tri-state-calm-bar-hiding.md) |
 | [0035](0035-settings-window-sidebar-grouped-inset.md) | Settings window — sidebar navigation and grouped-inset cards | partially superseded → [0040](0040-native-system-metrics-no-hardcoded-ui.md), [0042](0042-settings-swiftui-form.md), [0069](0069-settings-window-height-resizable.md) |
@@ -83,7 +83,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0064](0064-popup-translucent-card-and-glow-bars.md) | The popup — unconditionally translucent, a Control Center card, rebuilt bars with glow | accepted |
 | [0065](0065-macos-widgetkit-widget-architecture.md) | macOS WidgetKit widget architecture — App Group snapshot, shared rendering, deep link into the dropdown | draft |
 | [0066](0066-detect-sessions-awaiting-input.md) | Detecting Claude Code sessions that are awaiting the user's input | accepted |
-| [0067](0067-local-usage-journal.md) | Local usage journal (append-only JSONL) | accepted |
+| [0067](0067-local-usage-journal.md) | Local usage journal (append-only JSONL) | partially superseded → [0123](0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md) |
 | [0068](0068-credits-in-use-marker-anatomy.md) | Anatomy of the "credits in use" marker — a pill with a knocked-out currency glyph | partially superseded → [0114](0114-extra-usage-is-one-name.md) |
 | [0069](0069-settings-window-height-resizable.md) | The Settings window — height-resizable, vertical zoom, a validated persistent frame | accepted |
 | [0070](0070-smooth-bar-colour-transitions.md) | Smooth pacing-bar color transitions — the project's first animation | partially superseded → [0073](0073-awaiting-icon-reserved-slot-and-slide.md) |
@@ -139,6 +139,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0120](0120-status-records-carry-their-provider.md) | `status` journal records carry their provider, and the archive is backfilled | accepted |
 | [0121](0121-github-as-a-status-only-provider.md) | GitHub as a status-only provider — one group, two plates, and a dot that only appears while calm | accepted |
 | [0122](0122-comments-are-read-every-session.md) | Comments are priced per read | draft |
+| [0123](0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md) | One line per error run, and a wall-clock floor on signal-driven polls | accepted |
 
 ## Maintaining this index
 

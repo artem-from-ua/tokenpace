@@ -68,7 +68,17 @@ same amount of time.
 ## What a line contains
 
 One object per line, tagged with `kind`. For analytics the `usage` lines are the interesting ones;
-`status`, `error` and `resume` are described in [ADR-0067](../adr/0067-local-usage-journal.md).
+`status` and `resume` are described in [ADR-0067](../adr/0067-local-usage-journal.md), and `error`
+in the subsection below — it carries a trap worth reading before you count anything.
+
+> **Never count `error` lines — sum `n ?? 1`.** Since
+> [ADR-0123](../adr/0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md) consecutive
+> identical failures are written as **one** record carrying the count, and existing archives were
+> collapsed retroactively by the launch migration. One real journal held 122 592 identical `notSent`
+> lines from a single Keychain outage; after the collapse that is 132 records. A line count reads it
+> as 132 failures — wrong by three orders of magnitude. A rate computed from the spacing between
+> lines is wrong in the other direction: it reads one failure every three minutes where there were
+> sixteen a second.
 
 | Field | Type | What it is |
 |---|---|---|
@@ -110,6 +120,27 @@ count over `worst` measures *the user's exposure*. Never substitute one for the 
 Which services were monitored is a **setting**, and it is not in the line. That is why `svc` is not
 narrowed to it: a narrowed feed would silently change meaning whenever the user flipped a toggle, and
 two lines that look alike would not be comparable.
+
+### The `error` line
+
+One record per **run** of consecutive identical failures, not per attempt
+([ADR-0123](../adr/0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md)):
+
+| Field | Type | What it is |
+|---|---|---|
+| `v` | Int | the version of the **`error`** line format (**2** is current); absent reads as 1 — a pre-collapse line, one attempt, no `detail` |
+| `t` / `tEnd` | ISO-8601 UTC | the **first** and **last** attempt of the run. `tEnd` is absent when the line is a single attempt; `tEnd − t` is the run's duration, never the spacing between attempts |
+| `n` | Int | how many attempts this line stands for; **absent means 1** |
+| `code` | Int **or** String | an HTTP status (`429`, `503`) when a response arrived, or a category (`notSent`/`timeout`/`dns`/`network`/`decode`/`nonHTTP`) when none did. A bare JSON number or string — a parser must accept both |
+| `reason` | String | the **closed** taxonomy: `clientProblem`/`serverProblem`/`auth`/`decode`/`timeout`/`dns`/`network`/`notSent`. Safe to group by |
+| `detail` | String | an **open** refinement of `reason`, present only where there is one to give — the six not-sent causes (`token expired`, `keychain access denied`, `not signed in`, `keychain read failed`, `malformed credentials`, `missing User-Agent`). Group by it only with a fallback bucket |
+| `retryAfter` | Number | `Retry-After` seconds, 429 only. Part of the run's identity, so two 429s with different hints never merge |
+| `ms` | Int | latency of the run's **first** attempt; absent when the request was never sent |
+
+**`detail` is absent on every archived line, and that is not a gap in the data.** The reason was
+dropped before it reached the journal until ADR-0123, so no line written before it can carry one. A
+count of `notSent` causes over an old archive is not "mostly unknown" — it is unanswerable, and the
+`.v<n>.bak` does not help either.
 
 **Status lines are on a different cadence from usage lines** (ADR-0013) and carry no resume markers of
 their own, so never interleave the two series or read a gap in one as a gap in the other.
@@ -270,7 +301,8 @@ Practical consequences:
 - **Every segment is a separate line on the chart.** No stroke crosses a gap.
 - **Increments sum only within one segment**, and only positive ones.
 - **`error` is not a gap.** "We looked and could not" is a separate layer; drawing it in the same gray
-  as "we did not look" means stating something untrue.
+  as "we did not look" means stating something untrue. Nor is one `error` line one attempt — see the
+  `n` trap above; a band drawn from `t` to `tEnd` is the honest width for a collapsed run.
 - **A gap shorter than ~30 min** should be drawn as a tick on the axis, not a full-height band:
   otherwise a 15-minute gap carries as much visual weight as a nine-hour one.
 
