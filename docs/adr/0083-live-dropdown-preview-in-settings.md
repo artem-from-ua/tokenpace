@@ -155,6 +155,25 @@ this window is touched. The split itself can't be touched — it's already
 nowhere hardcoded (the class is read off the live delegate), so a rename in a future macOS degrades to
 a cosmetic flaw rather than a break.
 
+**The controller is subject to that same KVO hazard, just later** (#492). It is an `NSResponder` in
+the window's chain, and `_NSTouchBarFinder` KVO-observes `nextResponder` on every link of that chain
+— so the delegate arrives clean and acquires an `NSKVONotifying_` wrapper afterwards. Since
+`pinSidebarSplit()` runs again on every open (twice per `show()`), the pass has to recognise that
+wrapper. The original marker check could not: it tested only the leaf class name, and KVO's wrapper
+is named after *our* subclass rather than carrying its prefix, so the check read "not swizzled" for
+an object that was. The second `object_setClass` then dropped KVO's notifying layer while the
+observation was still registered, and the paired `removeObserver:` at window teardown dereferenced a
+class pointer that no longer existed — a SIGSEGV under `-[_NSTouchBarFinderObservation invalidate]`,
+on a Touch Bar Mac only.
+
+Two guards replace the one marker check: the "already ours" test walks the isa **ancestry**, and an
+object whose isa is a KVO notifying class is left alone outright. Verified against the live
+Objective-C runtime rather than by reasoning — a standalone program that registers a real observer
+reproduces the old check returning `false` for an already-swizzled object, and both guards holding
+across the four states (clean, ours, KVO-over-ours, KVO-over-pristine). Note the runtime spells the
+wrapper `..NSKVONotifying_…`, with a leading `..`, for a Swift class: a prefix match on
+`NSKVONotifying_` would miss exactly the case that matters.
+
 ## Consequences
 
 - **+** Dropdown settings finally have feedback: the result is visible the moment you flip a toggle.
@@ -168,9 +187,13 @@ a cosmetic flaw rather than a break.
   had patched in: a preview built at night still draws dark in the morning. The same applies to the
   dev tuner's preview, which is built once and shown many times. Both now reassign the appearance at
   the moment of showing.
-- **−** An isa-swizzle of a private SwiftUI class showed up in the code. Scoped to one instance,
-  idempotent, the class name isn't hardcoded — but it's a dependency on SwiftUI's internal structure,
-  and it needs a live check on every macOS update.
+- **−** An isa-swizzle of a private SwiftUI class showed up in the code. Scoped to one instance and
+  the class name isn't hardcoded — but it's a dependency on SwiftUI's internal structure, and it
+  needs a live check on every macOS update. It was also recorded here as *idempotent*, and that was
+  wrong in the one way that mattered: the marker check missed a KVO wrapper and let a second
+  `object_setClass` through, which crashed the app on close (#492, fixed by the two guards in §9).
+  The cost of the technique is that any object AppKit may observe can acquire a KVO layer at a
+  moment nothing signals — so the guards, not the technique, are what keep it safe.
 - **−** Two surfaces now draw the popup (the live one + the preview). Thanks to the shared animator and
   the single mirroring point this doesn't double the work, but every new `PopupViewController` handle
   now has to land in `syncPresentation()` too.
