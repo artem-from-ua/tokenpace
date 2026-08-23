@@ -22,7 +22,10 @@ Keychain (OAuth token)
 ## Polling cadence (ADR-0032)
 
 A flat 3-minute base with two overrides; the reset trigger lives in a shell timer (#36, ADR-0030);
-pausing on screen lock is an option; a redundant wake is suppressed if the cache is still fresh.
+pausing on screen lock is an option; a redundant wake is suppressed if the cache is still fresh, and
+a signal-driven poll is refused outright within `minInterval` of the last **attempt** — the rail that
+holds when `lastSuccess` cannot, because a token error never advances it
+([ADR-0123](../../adr/0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md)).
 
 **Interval-selection priority:**
 
@@ -52,15 +55,15 @@ stop
 @startuml
 title Polling loop — pause / wake / redundant-wake lifecycle
 [*] --> Polling
-Polling --> Polling : .elapsed (scheduled poll)\n.manualRefresh (reset hold + poll now)\n.wake / .networkRestored\n  → poll now IF cache stale,\n     else re-arm for remainder
+Polling --> Polling : .elapsed (scheduled poll)\n.manualRefresh (reset hold + poll now)\n.wake / .networkRestored\n  → poll now IF cache stale\n     AND ≥60 s since last attempt,\n     else re-arm for remainder
 Polling --> Parked : .sleep\n(system sleep, OR screen lock/off/screensaver\nwhen pausePollingWhenScreenLocked = ON)
-Parked --> Polling : .wake / .networkRestored\n(resume; poll now only if cache stale)
+Parked --> Polling : .wake / .networkRestored\n(resume; poll now only if cache stale\nand the 60 s floor has elapsed)
 Parked : no fetch while parked
 Parked : waitWhileAsleep()
 @enduml
 ```
 
-![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/TLBBJiCm4BpdA_QOGjFUYq1mGK9259L33uI3vQo9bSqwiXsYtZZn0OWlx9UmCNs1X0_nUcSodjdaEaJbOzzI5cqaX4T7PFaLoBaEjkzVqAa-8CnXKCsuUQnwhXJ78ZN86jGRJPWzdxr0KLpj1RAzq4aF5Z13Kbt02lAWQv4YAJj19oNFMiMzeXKQZw66N9uOeNPKmNdY0BjXvEsSp1ZZu7opmX2Ts2ePOFlnUQ32tIre9RU0H2ISZhWi98dZiL2-1UEybAsoNA7_xLZvHgo9uK28NSbvs8I8BQJZ59Oh2DeZiWnADtDdpFpd7DGR-fA7Mg0qkftgMXfFYN4lBuZq9ImV9jdkdZz3-ZVXE9I-nOjZICUq0MjEanvK5y80Wr7NCDHMFcwN-aTuK3QkH-GcnSedsJLo9J_3Dm00)
+![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/TLAnJiCm4Dtp5MzieMcP68f0hOIGa52Boj21C9oI2udYs97j47LZGc95_08_rY_X4jAM8k4XzjsxlBltx9dpP7rTgi3dNZ7kZLAvVeOofiBszHCLrOunGKD5krbEQfsGzc6NK7dAyIPM73oUF24ChtO4mOxeLmvJZ5bHvJZ1mCMPK2avLe8E8pqkITUaLfnQTXa6ycMFpAW4frqDj6dQkdwIiMRV65kis7aZOqKQsBvzx4jnUuEOf0j4ek8MbZLVN6Fx_dL-1WUNwrWaaFCWxxci_AYlOYMQBOTaIwJ6oh6aN2TiZsMHBMH-KUKKSnNfWTiuuK4NZh1SmSMMMOkRSJ4nQJhvYHszi8rqamdK-TkphYNnq5NSoGz2VOdbOXZqVVuu-QyDhNDroHS79unM6-JfiHsa4tW9EojIkM-BZ1pw2zftdGe3KlPnXYRBvOLKNVu0DvJxTOlCEzc3OJ1ZdSYB-WO0)
 
 ## Token: reading and delegated refresh (ADR-0017 / 0019 / 0020)
 
@@ -310,6 +313,13 @@ disk is later read back for analytics. Three links, each its own session/PR agai
    (`JournalRecord`), plus resume markers on sampling gaps. Written by `UsageJournal` (an actor,
    non-blocking); read back by `JournalReader.parse(_:)`. Type details are in the "JournalRecord
    …" row of [services-and-config.md](services-and-config.md).
+
+   A failed poll is **not** one row per attempt: consecutive identical failures are folded by the
+   pure `ErrorRunCollapse` into one record carrying `n`/`t`/`tEnd`, bounded at 3 minutes wide, and
+   the launch migration folds runs already on disk the same way
+   ([ADR-0123](../../adr/0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md)). The
+   actor's gap clock (`lastPollInstant`) advances on every attempt, written or not — the resume
+   marker answers "were we polling", and inside a run we were.
 2. **Aggregator (#244)** — the pure `UsageGridAggregator.grid(...)`: `[JournalRecord]` → a
    **days × hours** grid for one metric under one filter (5h/7d). The pilot metric
    `sampleDensity` counts sample density; gap cells (`GridCell.gap`) are kept separate from "0

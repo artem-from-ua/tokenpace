@@ -1,9 +1,19 @@
 ---
 status: accepted
 date: 2026-08-04
+superseded_by: [0123]
 ---
 
 # ADR-0067: Local usage journal (append-only JSONL)
+
+> **Partially superseded by [ADR-0123](0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md).**
+> Only the `error` line's shape is superseded: it now carries `v`, `detail` (the not-sent reason §1's
+> taxonomy never listed), and `n`/`tEnd`, because consecutive identical failures are written as one
+> record rather than one per attempt — a reader must sum `n ?? 1` rather than count lines. **The
+> decision itself still stands in full**: the append-only JSONL, the `kind` discriminator and its four
+> shapes, tolerant decoding, the derived states on `usage` lines, default-off collection with a
+> Settings toggle, monthly rotation, `flock` across instances, and the permanently-kept `.v<n>.bak`
+> backups.
 
 ## Context
 
