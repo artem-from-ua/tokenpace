@@ -1452,6 +1452,12 @@ What breaks most easily:
    it disappears; restore → it comes back.
 7. **The sidebar divider.** It does not drag **and** the cursor over it stays an arrow. These are two separate
    mechanisms and they break independently (ADR-0083).
+   **Then close and reopen Settings a few times, and close it once more** — the app must still be in
+   the menu bar. The cursor tweak isa-swizzles the split controller, and a close that takes the whole
+   app down with it is what a mishandled second swizzle looks like (#492). Reopening is the part that
+   matters: the first open cannot show the bug. **On a Touch Bar Mac specifically** — the crash runs
+   through `_NSTouchBarFinder`, so a machine without that hardware will pass this step no matter what
+   the code does.
 8. **Theme.** Flip light↔dark with the preview open: neutrals re-resolve and the colors **snap** rather
    than blend. Measure colors with Digital Color Meter in sRGB, not off a screenshot.
 

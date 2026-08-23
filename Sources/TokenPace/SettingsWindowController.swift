@@ -90,8 +90,31 @@ final class SettingsWindowController: NSWindowController {
     private var sidebarClickMonitor: Any?
 
     /// Prefix for the runtime subclass that neutralises the sidebar divider (see `claimDividerCursor`).
-    /// Also the marker that makes that pass idempotent.
+    /// The marker `isFixedDividerClass(_:)` looks for — on the whole isa ancestry, not just the leaf.
     private static let fixedDividerClassPrefix = "TokenPaceFixedDivider_"
+
+    /// Is `cls`, or anything it inherits from, the divider subclass this controller generates?
+    ///
+    /// The ancestry walk is the point. KVO wraps an observed object in a notifying subclass of the
+    /// class it found, so our marker ends up one link *up* the chain rather than on the leaf, and a
+    /// `hasPrefix` on the leaf name alone reports "not swizzled" for an object that is (#492).
+    private static func isFixedDividerClass(_ cls: AnyClass) -> Bool {
+        var current: AnyClass? = cls
+        while let step = current {
+            if NSStringFromClass(step).hasPrefix(fixedDividerClassPrefix) { return true }
+            current = class_getSuperclass(step)
+        }
+        return false
+    }
+
+    /// Is `cls` one of KVO's generated notifying classes?
+    ///
+    /// Matched on the substring, not a prefix: the runtime hands these back with a leading `..` on
+    /// a Swift class (measured — `..NSKVONotifying_TokenPaceFixedDivider_SwiftUI.…`), so anchoring
+    /// at the start misses exactly the case that matters here.
+    private static func isKVONotifyingClass(_ cls: AnyClass) -> Bool {
+        NSStringFromClass(cls).contains("NSKVONotifying_")
+    }
 
     /// The detail column's live scroll view and split item, plus the bounds observation driving the
     /// titlebar separator over that column (see `driveDetailTitlebarSeparator()`). Weak: both belong
@@ -468,11 +491,30 @@ final class SettingsWindowController: NSWindowController {
     /// right target. The private class name is never hard-coded (the class is read back from the live
     /// delegate), so if a future macOS renames it this degrades to the old cosmetic wart rather than
     /// breaking.
+    ///
+    /// **The controller is not exempt from that same hazard, only later to it** (#492). It is an
+    /// `NSResponder` in this window's chain — `splitController(for:)` finds it *by* walking
+    /// `nextResponder` — and `_NSTouchBarFinder` KVO-observes `nextResponder` on every link of that
+    /// chain. So the object arrives here clean and acquires a KVO wrapper afterwards; the two guards
+    /// below exist because this method runs again (twice per `show()`, and `show()` runs on every
+    /// open) and must recognise that wrapper instead of swizzling straight through it.
     private func claimDividerCursor(on split: NSSplitView) {
         guard let delegate = split.delegate as? NSSplitViewController else { return }
         let baseClass: AnyClass = object_getClass(delegate)!
         let baseName = NSStringFromClass(baseClass)
-        guard !baseName.hasPrefix(Self.fixedDividerClassPrefix) else { return }   // already swizzled
+        // Already ours, at any depth. KVO registers *after* this pass and wraps whatever it finds in
+        // a notifying class of its own, so by the second pass the isa can read
+        // `..NSKVONotifying_TokenPaceFixedDivider_…` — a name that does not start with our prefix.
+        // A leaf-only check misses that and swizzles a second time; walking the ancestry does not.
+        guard !Self.isFixedDividerClass(baseClass) else { return }
+        // Never re-isa an object KVO is holding. `object_setClass` past a notifying class drops that
+        // layer while Foundation still believes the observation is installed, and the paired
+        // `removeObserver:` then dereferences a class pointer that is gone — measured as a SIGSEGV
+        // under `_NSTouchBarFinderObservation invalidate` on window close (#492). The touch-bar
+        // finder observes `nextResponder` on every link of the responder chain, and this controller
+        // is one of them, so on a Touch Bar Mac the wrapper is live by the time the window closes.
+        // Losing the cursor tweak is a cosmetic wart; taking the app down with it is not.
+        guard !Self.isKVONotifyingClass(baseClass) else { return }
 
         let subclassName = Self.fixedDividerClassPrefix + baseName
         let subclass: AnyClass
