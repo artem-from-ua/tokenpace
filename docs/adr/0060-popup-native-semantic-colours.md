@@ -1,5 +1,5 @@
 ---
-status: draft
+status: accepted
 date: 2026-08-02
 superseded_by: [0064]
 ---
@@ -11,8 +11,10 @@ superseded_by: [0064]
 > deliberately leaving the popup palette on fixed values. This ADR (a) extends that same philosophy
 > to the popup and (b) **merges duplicated menu-vs-popup roles into one flat set of semantic
 > colors** — one color per tone, shared by both surfaces' pacing bars and service dots.
-> **Experimental status (`draft`):** finalizes (→ `accepted`) after the maintainer confirms it on
-> the real popup in both themes.
+> **Partially superseded by [ADR-0064](0064-popup-translucent-card-and-glow-bars.md)**, which takes
+> only the cross-link to ADR-0022's solid opaque background: the popup is now unconditionally
+> translucent. **The decision itself stands** — the popup draws in system semantic colors, and the
+> menu-vs-popup roles are one flat set. `ColorRole` is read at 44 sites in `PopupViewController`.
 
 ## Context
 
