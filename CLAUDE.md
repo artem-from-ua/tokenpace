@@ -270,6 +270,16 @@ arrived.
   whether he is free yet.
 - This applies **only** to actions that genuinely depend on GUI state. Builds, tests, git, editing
   files need neither a warning nor an all-clear.
+- **Address the app by PID, never by process name — and never read a quiet AX answer as a pass.**
+  Several TokenPace instances run at once, so `tell process "TokenPace"` resolves to an arbitrary
+  one: it answered `0 windows` for a process that had a window open, where
+  `tell (first process whose unix id is <pid>)` answered `1`. **A wrong-instance query returns an
+  empty result, not an error**, so a script reads it as "nothing to do, step passed" — a 20-run
+  repro loop scored 20 clean passes having never once found the window
+  ([#492](https://github.com/artem-from-ua/tokenpace/issues/492)). Assert the precondition held
+  (window found, click landed) and count a run that fails it as **invalid**, never as a pass. Same
+  trap, second mouth: revoked assistive access makes every AX call a no-op and every run look clean.
+  Details in [agent-workflow.md](docs/guides/agent-workflow.md).
 
 ## UI verification before a PR
 

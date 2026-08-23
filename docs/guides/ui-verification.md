@@ -13,10 +13,14 @@ the specifics are here.
 > ⚠️ **Screenshot automation is unreliable: the menu bar holds several identically named TokenPace
 > instances** (the release plus dev copies from various sessions). AX/`osascript` cannot tell them
 > apart, so a blind click on a menu-bar item opens the wrong build; the dropdown (NSMenu) cannot be
-> screenshotted at all. **Do not click a menu-bar item by name or index** — reliable UI verification
-> means the maintainer opens the right dev icon live himself. The full method (launching, stopping by
-> your own PID, why never a broad kill) is in [agent-workflow.md](agent-workflow.md), section
-> "Launching the app to check the UI".
+> screenshotted at all. **Do not click a menu-bar item by name or index** — and do not address the
+> process by name at all: `tell process "TokenPace"` answered `0 windows` for a process that had one
+> open, where a `unix id is <pid>` query answered `1` (#492). **An AX query that picks the wrong
+> instance returns an empty answer, not an error**, so a script reads it as "nothing to do here" and
+> reports a pass — assert the window was actually found before trusting any result. Reliable UI
+> verification means the maintainer opens the right dev icon live himself. The full method
+> (launching, stopping by your own PID, why never a broad kill) is in
+> [agent-workflow.md](agent-workflow.md), section "Launching the app to check the UI".
 
 > 📸 **A full-screen screenshot is allowed ONLY with the maintainer's explicit permission. Every other
 > screenshot captures individual windows only.** `screencapture` without an area restriction
