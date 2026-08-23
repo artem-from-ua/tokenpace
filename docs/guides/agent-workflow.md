@@ -78,11 +78,30 @@ resort, not the desired fix.
   release. What can be running at once: the notarized release from `/Applications` **plus several dev
   copies** with different stubs, launched from different Claude Code sessions. **All of them are
   called `TokenPace`.**
-- ⚠️ **Screenshot automation (AX / `osascript` / System Events) cannot tell the instances apart.**
-  `click menu bar item 1` blindly opens the Settings/menu of **some** TokenPace — easily the release
-  or *someone else's* dev copy, not the one carrying your change. The screenshot then shows the wrong
-  build, or the window "isn't found" in your process. Therefore:
+- ⚠️ **AX automation (AX / `osascript` / System Events) cannot tell the instances apart — and fails
+  quietly when it picks wrong.** `click menu bar item 1` blindly opens the Settings/menu of **some**
+  TokenPace — easily the release or *someone else's* dev copy, not the one carrying your change. The
+  screenshot then shows the wrong build, or the window "isn't found" in your process. This applies to
+  every AX use, not just screenshots: driving a window, counting windows, closing one. Therefore:
   - **don't click a menu-bar item by name or index** to open the dropdown/Settings;
+  - **don't address the process by name either** — `tell process "TokenPace"` resolves to *some*
+    instance, and this bites hardest where nothing is being clicked at all. Measured in the same
+    session, seconds apart: `tell process "TokenPace" to count windows` answered **0** while
+    `tell (first process whose unix id is <pid>) to count windows` answered **1** for the very
+    process that owned the window. Address it by PID:
+
+    ```applescript
+    tell application "System Events" to tell (first process whose unix id is 12345)
+      -- click button 1 of window 1, count windows, …
+    end tell
+    ```
+  - **a query that finds nothing returns a value, not an error** — and `0 windows` reads exactly like
+    "the window is already closed, the step passed". A loop built on that reports success without
+    having tested anything: a 20-run crash-repro loop scored 20 clean passes while every run had
+    silently failed to find the window (#492). So **assert that the precondition held** — the window
+    was found, the click landed — and count a run that fails it as *invalid*, never as a pass. The
+    same trap has a second mouth: revoked assistive access makes every AX call a no-op, and the run
+    still looks clean.
   - even `pgrep -f '\.build/debug/TokenPace' | head -1` picks *some* dev PID — when there are several
     copies, narrow it down by **your own** PID (`$!` from your own `&` launch), not by name;
   - **the dropdown (NSMenu) can't be screenshotted reliably at all** — menu tracking blocks it;
