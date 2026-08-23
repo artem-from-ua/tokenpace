@@ -144,9 +144,9 @@ sections below.
 The rules above are what you need while *writing* a comment, and they are here because `docs/`
 is not loaded into context automatically. **Before a pass that deletes prose across many files, open
 [docs/adr/0122-comments-are-read-every-session.md](docs/adr/0122-comments-are-read-every-session.md)** —
-it carries the eleven rules that only matter at that scale: how to delete without orphaning a token
-the surviving text still leans on, why cross-references break in pairs, and the three-step filter
-that audits a large trim for the cost of one cheap model instead of reviewing every hunk.
+it carries the rules that only matter at that scale: how to delete without orphaning a token the
+surviving text still leans on, why cross-references break in pairs, and the three-step filter that
+audits a large trim for the cost of one cheap model instead of reviewing every hunk.
 
 The first such pass here ran without those rules and had to be corrected four times. They exist
 because it did.
