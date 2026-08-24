@@ -126,7 +126,10 @@ final class TroubleshootWindowController: NSWindowController {
 
         // Codex — the quota collector's own source, which has no entry in Claude's `PollOutput`.
         codexHeader = Self.sectionHeader("Codex quota")
-        codexLabels = (0..<4).map { _ in Self.infoLabel() }
+        // One per line `CodexQuotaTroubleshoot.lines` can emit. A line with no label to land in is
+        // dropped without a word, and the missing one would be the diagnostic somebody opened the
+        // window to read — `CodexQuotaTests` asserts the constant against a maximal call.
+        codexLabels = (0..<CodexQuotaTroubleshoot.maxLineCount).map { _ in Self.infoLabel() }
         codexStack = NSStackView(views: [codexHeader] + codexLabels)
         codexStack.orientation = .vertical
         codexStack.alignment = .leading
@@ -292,8 +295,13 @@ final class TroubleshootWindowController: NSWindowController {
         let lines = CodexQuotaTroubleshoot.lines(
             binaryPath: diagnostics.binaryPath, candidates: candidates,
             version: diagnostics.version, lastSuccess: diagnostics.lastSuccess,
-            lastLatency: diagnostics.lastLatency, lastError: diagnostics.lastError, now: now)
-        for (label, text) in zip(codexLabels, lines) { label.stringValue = text }
+            lastLatency: diagnostics.lastLatency, lastError: diagnostics.lastError,
+            lastResets: diagnostics.lastResets, now: now)
+        for (index, label) in codexLabels.enumerated() {
+            label.stringValue = index < lines.count ? lines[index] : ""
+            // A line the collector had nothing to say for leaves no blank row behind it.
+            label.isHidden = index >= lines.count
+        }
     }
 
     func render(_ output: PollOutput?) {

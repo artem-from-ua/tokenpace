@@ -277,9 +277,9 @@ public struct TroubleshootLayout: Sendable, Equatable {
 
 // MARK: - CodexQuotaTroubleshoot
 
-/// The Codex collector's four Troubleshoot lines, as pure text.
+/// The Codex collector's Troubleshoot lines, as pure text.
 ///
-/// Its own type rather than four more fields on ``TroubleshootLayout``: that one is built from a
+/// Its own type rather than more fields on ``TroubleshootLayout``: that one is built from a
 /// ``PollOutput`` — Claude's poll — and the Codex collector is a different source with no entry in it.
 ///
 /// **What can never appear here**: the account email (`account/read` is never called), `codexHome`
@@ -287,10 +287,21 @@ public struct TroubleshootLayout: Sendable, Equatable {
 /// string below is assembled from a path, a version, a duration or an already-worded error.
 public enum CodexQuotaTroubleshoot {
 
+    /// The most lines ``lines(binaryPath:candidates:version:lastSuccess:lastLatency:lastError:lastResets:now:)``
+    /// can emit. The Troubleshoot window builds exactly this many labels and fills them by index, so
+    /// a line with no label is dropped without a word — this constant is what keeps the two in step,
+    /// and a test asserts it against a maximal call.
+    public static let maxLineCount = 5
+
     /// - Parameters:
     ///   - binaryPath: The executable in use, or `nil` when none was found.
     ///   - candidates: The paths that were tried — shown only when nothing was found, so "not found"
     ///     names them rather than leaving the user to guess what was searched.
+    ///   - lastResets: The raw `resetsAt` of every window the last read reported, in report order.
+    ///     Verbatim epoch seconds beside the instant they name, because the popup deliberately draws
+    ///     **no** countdown for a window that has not started — without this line the value the
+    ///     server actually sent is on no surface at all, and the backend's behaviour stops being
+    ///     observable from inside the app.
     public static func lines(
         binaryPath: String?,
         candidates: [String],
@@ -298,6 +309,7 @@ public enum CodexQuotaTroubleshoot {
         lastSuccess: Date?,
         lastLatency: TimeInterval?,
         lastError: String?,
+        lastResets: [Date?] = [],
         now: Date
     ) -> [String] {
         var lines: [String] = []
@@ -316,6 +328,16 @@ public enum CodexQuotaTroubleshoot {
             lines.append("Last read: never")
         }
         lines.append("Last error: \(lastError ?? "none")")
+        if !lastResets.isEmpty {
+            let parts = lastResets.map { reset -> String in
+                guard let reset else { return "none" }
+                // Epoch seconds first, because that is the literal the server sent and the form a bug
+                // report can be compared against; the timestamp behind it is for reading.
+                let epoch = Int(reset.timeIntervalSince1970.rounded())
+                return "\(epoch) (\(TroubleshootLayout.timestampText(reset)))"
+            }
+            lines.append("Reported resets: \(parts.joined(separator: ", "))")
+        }
         return lines
     }
 }

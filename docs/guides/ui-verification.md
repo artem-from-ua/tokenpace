@@ -93,7 +93,7 @@ stub name from the table below, and `summary` is its description.
 >
 > **Markers in the dev-tools dropdown:** **⚡** — the scenario pulls data from the **real usage API**
 > (`Real network`); **⏱** — the scenario runs off the **real clock** (`optimistic-reset`,
-> `reset-grace`, `color-cycle`); **⏭** — the scenario is a **sequence** that advances one step per
+> `reset-grace`, `color-cycle`, `codex-quota-not-started`); **⏭** — the scenario is a **sequence** that advances one step per
 > poll, so you have to watch it **step by step**, and the **Refresh now** button in Troubleshoot is
 > that step (`weekly-interp`, `weekly-reset-blackout`, `standby-floor`, `optimistic-reset`,
 > `reset-grace`, `just-unblocked`, `subscription-reset-on-credits`, `credits-onset`, `stale-error`).
@@ -133,6 +133,7 @@ stub name from the table below, and `summary` is its description.
 | `codex-quota-orange` | The Codex week ahead of pace. With Claude's own `7-day` row on screen at the same time, this is the frame for the **tween-key collision**: the two rows share a title, and if the colour of one slides when the other changes, `TweenKey.bar` lost its `provider` |
 | `codex-quota-exhausted` | The Codex week at 100 %. Confirm the **red blocking badge does not appear** — not on this row, and not moved onto one of Claude's rows above. Codex rows live in their own array precisely so they cannot renumber the indices that badge is keyed to |
 | `codex-two-windows` | **Two Codex windows at once** — the only way to exercise the N>1 path, since the live server sends `secondary: null`. Both bars sit on the Codex plate, and Claude's rows above are unchanged in count and order |
+| `codex-quota-not-started` ⏱ | **The state right after a Codex reset** (#515): `usedPercent 0` and a `resetsAt` the server recomputes as `now + 7d` on **every** read, so a rendered countdown would slide forward and never tick down. The row must show **no second line** — no `0%`, no reset, and specifically no `resetting…` — just `7-day  ready to start` over a green knobless bar. Runs on the **real clock**, because the value only creeps while the clock moves: **Troubleshoot → Codex quota** keeps a `Reported resets` line whose epoch advances between reads, which is the raw value the popup deliberately stops drawing |
 | `codex-not-signed-in` | `codex` installed but signed out: the plate keeps its status half and shows **no bars**. No warning banner appears in the popup — that banner is Claude's, and a Codex failure surfacing there would read as a problem with the bars above. The reason lives in **Troubleshoot → Codex quota** |
 | `codex-cli-missing` | No `codex` on this Mac. **Troubleshoot → Codex quota** lists the candidate paths that were tried rather than a bare "not found" — the app never consults `$PATH`, so naming what it looked at is the only way the user can tell why |
 | `codex-cli-old` | A `codex` predating `account/rateLimits/read`. Exercises the two-part detection: `-32600` **and** the method name in the message. `-32600` alone is also what a malformed request returns, so a one-part check would report our own bug as the user's out-of-date install |

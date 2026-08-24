@@ -174,6 +174,58 @@ they draw is one the user already meets on the Claude side, and the sentences ar
 view's localisation seam; a parallel Codex vocabulary would double that seam to say the same things.
 The mapper is exhaustive with no `default:`, so a new cause must be mapped consciously.
 
+### D13. A reset equal to `now` plus the window's own length means the window has not started
+
+`account/rateLimits/read` does not always name an instant. On a spotless window it answers with
+`now + windowDurationMins × 60`, **recomputed per request**. Measured on the live Plus account,
+codex-cli 0.148.0 — three reads across thirteen seconds of wall clock:
+
+| `usedPercent` | `resetsAt` | `resetsAt − now` | offset from a whole window |
+|---:|---:|---:|---:|
+| 0 | 1788142481 | 604 800 s | 0 s |
+| 0 | 1788142487 | 604 799 s | −1 s |
+| 0 | 1788142494 | 604 800 s | 0 s |
+
+The reset advanced **13 s across those 13 s**. The −1 s is our own `now`, taken before a 0.44 s
+round trip; the server's arithmetic is exact. Passed through as an instant this draws a 7-day
+countdown that slides forward every poll and never ticks down — a number that looks precise and
+means nothing.
+
+The same account returns the anchored form when something has been spent: `usedPercent 3` against a
+reset fixed at `22:37:31Z`, an arbitrary wall-clock second rather than a grid boundary. **That is
+what says the window is rolling** — it starts on the first spend after a reset and runs its own
+length from there.
+
+**The rule.** A window has not started when `resetsAt − now` is within **±120 s** of
+`durationSeconds` **and** `utilization == 0`.
+
+**±120 s**, because the budget is the gap between the server's `now` and ours — a 0.44 s round trip
+behind a spawn D10 may retry once, plus clock skew — while the ceiling is the 180 s poll interval.
+Under one interval, at most **one** poll of a genuinely anchored window can be misread, and that is
+the poll in which the window really has just opened, where both readings agree.
+
+**One sample, not a run of consecutive polls.** Requiring the shape to persist would render the
+sliding countdown for a full poll every time a window actually resets, and would need state that has
+nowhere to live — the quota is not journalled (D11), and this stays a pure function of one payload.
+It buys nothing, because `utilization == 0` is an independent second witness: 3 % of a window that
+has not started cannot exist, so anything spent rules the state out on its own.
+
+**The row is Claude's idle shape, not a new one.** `sessionIdle` already means "no window exists
+server-side, so there is nothing to pace and nothing to count down to", and the view answers it with
+a green knobless track, the status word `ready to start`, and no detail line. Reaching for it keeps
+a state the user has already met from arriving in a second dialect.
+
+The alternatives both make the row worse. Rendering **no countdown** means `resetLine: nil`, which
+draws `resetting…` — a claim that a reset is happening this second, a second false statement rather
+than a fix for the first. **Reconstructing an anchor** the way
+[ADR-0107](0107-weekly-reset-reconstructed-from-the-last-known-one.md) does for Claude has nothing to
+roll forward: that works because Anthropic's weekly resets sit on a stable per-plan grid, and Codex's
+do not — a rolling window's next reset depends on a first spend that has not happened.
+
+**The raw value stays observable.** Troubleshoot gains a `Reported resets` line carrying the epoch
+seconds verbatim. With no countdown drawn, that is the only surface left showing what the server
+actually sent, and it is the evidence the state rests on.
+
 ## Consequences
 
 - **TokenPace now runs a program on the user's machine to fetch data.** That is a different class of
@@ -191,6 +243,12 @@ The mapper is exhaustive with no `default:`, so a new cause must be mapped consc
 - **The retry-and-cooldown means a broken install goes quiet for five minutes at a time**, so a user
   who fixes their `codex` mid-cooldown waits up to five minutes for the bars, rather than seeing them
   at the next tick.
+- **A Codex row can now be idle**, which the plate previously had no path to. Its detail line is
+  dropped the way Claude's idle 5-hour row drops its own, and the spoken label takes the status word
+  in place of the `0%` the sighted render omits.
+- **A window sitting at 0 % for its whole life would read as never started.** That is the state's
+  correct reading — the window genuinely has not begun accruing — and it self-corrects on the first
+  spend, when `utilization` rises and the reset anchors.
 - **`PacingModel.blueBehindWidthSeconds`'s proportional fallback is now reachable from real data.** Its
   docblock said it was only reachable from synthetic layouts; that sentence is rewritten, and any
   future window whose length is neither 5 h nor 7 d takes the `0.20 · duration` branch by design.
@@ -222,13 +280,21 @@ The mapper is exhaustive with no `default:`, so a new cause must be mapped consc
 
 ## Verification
 
-Seven stubs, none of which spawns a process — the source is a canned one under every scenario, so a
-stub renders identically on a machine that has never installed `codex`: `codex-quota-green`,
+Stubs, none of which spawns a process — the source is a canned one under every scenario, so a stub
+renders identically on a machine that has never installed `codex`: `codex-quota-green`,
 `codex-quota-orange`, `codex-quota-exhausted`, `codex-two-windows` (the only way to see the N>1 path
-before the server sends a `secondary`), `codex-not-signed-in`, `codex-cli-missing`, `codex-cli-old`.
+before the server sends a `secondary`), `codex-quota-not-started` (D13, on the real clock so the raw
+epoch in Troubleshoot visibly creeps), `codex-not-signed-in`, `codex-cli-missing`, `codex-cli-old`.
 
 Live, against the real `codex`: the 7-day window renders with **one** row and no 5-hour row, the plan
 reads `Plus`, and two reads three minutes apart each logged `codex quota: 1 window(s)`.
+
+**D13 against the live account**, through the production path — decode, normalize, rows — by the
+opt-in `LiveCodexQuotaCheck` (skipped unless `TOKENPACE_LIVE_CODEX` names the binary, so `swift test`
+never spawns a process). Three reads: offsets from a whole window of `0 s, −1 s, 0 s`, the reset
+advancing 13 s across 13 s of wall clock, and every read yielding `hasNotStarted == true` with a row
+that is `sessionIdle` and carries no reset line. It exists because a frozen fixture cannot show a
+value that moves between reads, and the movement is the whole defect.
 
 **Process hygiene, observed rather than assumed.** A sampler parented-matched on the dev app saw the
 child in 14 samples with `max_concurrent=1`, and none between reads. An earlier sampler reported a
@@ -246,4 +312,5 @@ negative.
 - [ADR-0017](0017-delegated-token-refresh.md) — the other subprocess, spawned for a side effect rather than for data
 - [ADR-0124](0124-journal-records-carry-their-provider.md) — the per-provider clocks this deliberately leaves unused
 - [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — the pure-core split the wire model and normalizer follow
-- [#501](https://github.com/artem-from-ua/tokenpace/issues/501), [#504](https://github.com/artem-from-ua/tokenpace/issues/504), [#508](https://github.com/artem-from-ua/tokenpace/issues/508)
+- [ADR-0107](0107-weekly-reset-reconstructed-from-the-last-known-one.md) — the same creeping shape on Claude's side, where a stable weekly grid makes reconstruction possible and D13's rolling window does not
+- [#501](https://github.com/artem-from-ua/tokenpace/issues/501), [#504](https://github.com/artem-from-ua/tokenpace/issues/504), [#508](https://github.com/artem-from-ua/tokenpace/issues/508), [#515](https://github.com/artem-from-ua/tokenpace/issues/515)

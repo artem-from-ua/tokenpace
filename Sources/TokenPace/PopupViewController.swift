@@ -2321,30 +2321,39 @@ final class PopupViewController: NSViewController {
         for (index, row) in quotaRows.enumerated() {
             addTitleStatusLine(title: row.title, status: Self.statusText(row),
                                style: barStyleCaption(), to: plate.stack)
-            addDetailLine(
-                used: Self.usedText(row, verbose: optionHeld),
-                reset: Self.resetText(row, verbose: optionHeld),
-                // No blocking badge on a satellite plate: `blockingReset` answers "which reset
-                // unblocks *Claude* work", and it is picked from Claude's rows alone.
-                resetIsBlocking: false,
-                to: plate.stack)
-            // The ⌥ stand-by line, gated on the window being a **week** rather than on a row index.
-            // Claude's gate is `index == 1` because its layout fixes that order; here the single row
-            // sits at 0 and its window is the week — precisely the case the line exists for. The
-            // duration is the better test either way: pacing on a 5-hour window is not worth waiting
-            // out, and what makes that true is the length, not the position.
-            if optionHeld,
-               row.bar.windowDurationSeconds == LimitWindow.sevenDay.durationSeconds,
-               let text = Self.standByText(row) {
-                addStandByLine(text, to: plate.stack)
+            // An idle row carries no second line, exactly as on Claude's plate: a window that has not
+            // started has nothing spent and no instant to count down to, so "0%" and a reset would
+            // both be filler. Here that row is a Codex week whose reset came back as `now` plus the
+            // window's own length — see `CodexQuotaWindow.hasNotStarted(now:)`.
+            if !row.sessionIdle {
+                addDetailLine(
+                    used: Self.usedText(row, verbose: optionHeld),
+                    reset: Self.resetText(row, verbose: optionHeld),
+                    // No blocking badge on a satellite plate: `blockingReset` answers "which reset
+                    // unblocks *Claude* work", and it is picked from Claude's rows alone.
+                    resetIsBlocking: false,
+                    to: plate.stack)
+                // The ⌥ stand-by line, gated on the window being a **week** rather than on a row
+                // index. Claude's gate is `index == 1` because its layout fixes that order; here the
+                // single row sits at 0 and its window is the week — precisely the case the line
+                // exists for. The duration is the better test either way: pacing on a 5-hour window
+                // is not worth waiting out, and what makes that true is the length, not the position.
+                if optionHeld,
+                   row.bar.windowDurationSeconds == LimitWindow.sevenDay.durationSeconds,
+                   let text = Self.standByText(row) {
+                    addStandByLine(text, to: plate.stack)
+                }
             }
             let bar = addBar(row, isLast: index == quotaRows.count - 1 && !monitorsStatus,
                              to: plate.stack, provider: provider)
             // The popup's quota bars carry no labels today, and a general pass over that is its own
             // change — but a bar arriving now should not arrive worse than what is there. Names the
             // provider because two plates hold a row called "7-day".
+            // An idle row's "0%" is the placeholder the sighted render omits, so the spoken label
+            // takes the status word instead and says the same thing the plate does.
             bar?.setAccessibilityLabel(
-                "\(provider.displayName) \(row.title): \(Self.usedText(row))")
+                "\(provider.displayName) \(row.title): "
+                + (row.sessionIdle ? Self.statusText(row) : Self.usedText(row)))
         }
 
         // ⌥ switches the dimension here exactly as it does on Claude's plate (ADR-0071 §2): the

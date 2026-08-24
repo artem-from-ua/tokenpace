@@ -186,6 +186,43 @@ public struct CodexQuotaWindow: Sendable, Equatable {
         self.durationSeconds = durationSeconds
         self.resetsAt = resetsAt
     }
+
+    /// How far `resetsAt` may sit from `now + durationSeconds` and still read as "the window has not
+    /// started": **±120 s**.
+    ///
+    /// The budget it has to cover is the gap between the server computing its own `now` and us
+    /// reading ours — one `account/rateLimits/read` is a 0.44 s round trip (measured, codex-cli
+    /// 0.148.0) behind a spawn that may be retried once — plus local clock skew against the server's.
+    /// The ceiling is the 180 s poll interval: a tolerance below it can misread at most **one** poll
+    /// of a genuinely anchored window, and that is the poll in which the window really has just
+    /// opened, so both readings agree there.
+    public static let notStartedTolerance: TimeInterval = 120
+
+    /// Whether this window has **not started yet** — the server is answering "if you began now, it
+    /// would end then" rather than naming an instant.
+    ///
+    /// Measured on a live Plus account (codex-cli 0.148.0): three reads spanning 13 s returned
+    /// `usedPercent 0` with `resetsAt` at `now + 604 800 s` each time, and the value itself advanced
+    /// 13 s — second-for-second with the clock. Rendered as an instant it is a 7-day countdown that
+    /// never ticks down. The anchored form exists on the same account — `usedPercent 3` against a reset
+    /// fixed at an arbitrary wall-clock second — which is what says the window is **rolling**: it
+    /// starts on the first spend after a reset and runs `durationSeconds` from there, so there is no
+    /// weekly grid to roll an anchor forward on.
+    ///
+    /// Two conditions, and the conjunction is what makes a single sample enough:
+    /// - the reset sits a whole ``durationSeconds`` ahead, within ``notStartedTolerance``;
+    /// - nothing is spent. Spending is the contradiction that rules out a real window this far off —
+    ///   3 % of a window that has not started cannot exist.
+    ///
+    /// Requiring the shape to hold across consecutive polls was the alternative. It would render the
+    /// sliding countdown for one full poll every time a window really does reset, to rule out a case
+    /// `utilization == 0` already rules out, and it would need state that has nowhere to live: the
+    /// quota is not journalled and this decision is a pure function of one payload.
+    public func hasNotStarted(now: Date) -> Bool {
+        guard utilization == 0, durationSeconds > 0, let resetsAt else { return false }
+        let ahead = resetsAt.timeIntervalSince(now)
+        return abs(ahead - Double(durationSeconds)) <= Self.notStartedTolerance
+    }
 }
 
 // MARK: - CodexQuotaNormalizer
@@ -224,6 +261,7 @@ public enum CodexQuotaNormalizer {
     /// Codex reports the windows it has; the plate shows those and no others.
     public static func rows(from snapshot: CodexQuotaSnapshot, now: Date) -> [LimitRow] {
         snapshot.windows.map { window in
+            if window.hasNotStarted(now: now) { return notStartedRow(for: window) }
             let resetsAt = window.resetsAt ?? now
             let bar = PacingModel.barLayout(
                 utilization: window.utilization,
@@ -248,6 +286,35 @@ public enum CodexQuotaNormalizer {
                     ResetClock.resetLine(resetsAt: $0, now: now, verbose: true)
                 })
         }
+    }
+
+    /// The row for a window that has not started (``CodexQuotaWindow/hasNotStarted(now:)``): the
+    /// title and the tick ruler its length earns, `sessionIdle: true`, and **no reset line**.
+    ///
+    /// `sessionIdle` is Claude's shape for the same fact — no window exists server-side, so there is
+    /// nothing to pace and nothing to count down to — and the view already answers it with a green
+    /// knobless track, the status word "ready to start", and no detail line at all. Reaching for it
+    /// here is what keeps a state the user has already met from arriving in a second dialect.
+    ///
+    /// The reset line has to go **with** the detail line, not on its own: `LimitRow.resetLine == nil`
+    /// renders as `"resetting…"`, which claims a reset is happening this second — a second false
+    /// statement in place of the sliding one, and no improvement on it.
+    ///
+    /// The bar is inert. `.onPaceOrBehind` makes `severity` read `.calm` before `remainingSeconds` is
+    /// consulted, so the zeroes below are never drawn from.
+    static func notStartedRow(for window: CodexQuotaWindow) -> LimitRow {
+        LimitRow(
+            title: title(forDurationSeconds: window.durationSeconds),
+            utilization: 0,
+            pacing: .onPaceOrBehind,
+            indicator: .neutral,
+            bar: BarLayout(
+                usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0,
+                windowDurationSeconds: window.durationSeconds, blueAllowed: false),
+            subdivisions: PacingModel.subdivisions(
+                forWindowDurationSeconds: window.durationSeconds),
+            resetLine: nil,
+            sessionIdle: true)
     }
 
     /// The row's heading, named after its length so the two providers' weeks read alike: `"7-day"`

@@ -371,7 +371,8 @@ struct CodexQuotaTests {
 
     // MARK: Troubleshoot
 
-    /// Four lines, and none of them can carry an email, a `codexHome`, or a response body.
+    /// The four lines a read with no reported resets emits, and none of them can carry an email, a
+    /// `codexHome`, or a response body.
     @Test("the Troubleshoot lines name the binary, version, last read and last error")
     func troubleshootLines() {
         let lines = CodexQuotaTroubleshoot.lines(
@@ -402,6 +403,211 @@ struct CodexQuotaTests {
         #expect(lines[1] == "Version: unknown")
         #expect(lines[2] == "Last read: never")
         #expect(lines[3] == "Last error: codex not found")
+    }
+
+    /// The window that has not started puts a raw epoch on the only surface still carrying it. Every
+    /// line here is assembled from a path, a version, a duration or a timestamp — never a body.
+    @Test("the reported resets appear verbatim in Troubleshoot")
+    func troubleshootCarriesTheRawResets() {
+        let reset = Self.now.addingTimeInterval(604_800)
+        let lines = CodexQuotaTroubleshoot.lines(
+            binaryPath: "/opt/homebrew/bin/codex", candidates: CodexQuotaTests.candidates,
+            version: "0.148.0", lastSuccess: Self.now, lastLatency: 0.44, lastError: nil,
+            lastResets: [reset], now: Self.now)
+        #expect(lines.count == 5)
+        #expect(lines[4].hasPrefix("Reported resets: "))
+        #expect(lines[4].contains("\(Int(reset.timeIntervalSince1970))"))
+    }
+
+    /// The window builds exactly `maxLineCount` labels and fills them by index, dropping any line it
+    /// has no label for — silently, and the missing one would be what the window was opened to read.
+    /// Two windows are the widest call there is; the resets share one line.
+    @Test("no call emits more lines than the window has labels for")
+    func troubleshootNeverOutgrowsItsLabels() {
+        let lines = CodexQuotaTroubleshoot.lines(
+            binaryPath: "/opt/homebrew/bin/codex", candidates: CodexQuotaTests.candidates,
+            version: "0.148.0", lastSuccess: Self.now, lastLatency: 0.44,
+            lastError: "codex exited during the read",
+            lastResets: [Self.now.addingTimeInterval(604_800), nil], now: Self.now)
+        #expect(lines.count <= CodexQuotaTroubleshoot.maxLineCount)
+    }
+
+    // MARK: - A window that has not started (#515)
+
+    /// The server answers `usedPercent 0` with a `resetsAt` recomputed as `now` plus the window's own
+    /// length on every read. Measured on a live Plus account (codex-cli 0.148.0), three reads across
+    /// 13 s: `resetsAt` advanced by those same 13 s, holding `now + 604 800 s` to the second.
+    /// Rendered as an instant that is a 7-day countdown that never ticks down.
+    ///
+    /// The fixture reproduces the third of those reads verbatim, so the numbers here are the server's
+    /// arithmetic rather than a hand-written approximation of it.
+    static let notStartedShape = """
+    {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {"usedPercent": 0, "windowDurationMins": 10080, "resetsAt": 1788141798},
+        "secondary": null,
+        "planType": "plus"
+      }
+    }
+    """
+
+    /// The `now` the fixture above was read at — its reset sits exactly 604 800 s ahead.
+    private static let notStartedNow = Date(timeIntervalSince1970: 1_787_536_998)
+
+    @Test("a reset exactly one window ahead of a spotless window has not started")
+    func detectsTheCreepingReset() throws {
+        let snapshot = try CodexQuotaNormalizer.snapshot(from: decode(Self.notStartedShape))
+        let window = try #require(snapshot.windows.first)
+        #expect(window.resetsAt == Date(timeIntervalSince1970: 1_788_141_798))
+        #expect(window.hasNotStarted(now: Self.notStartedNow))
+    }
+
+    /// The creeping value moves with the clock, which is the whole defect — so the detection has to
+    /// survive it rather than catching only the instant it was first measured at.
+    @Test("the detection holds as the value creeps forward")
+    func detectionSurvivesTheCreep() {
+        for step in stride(from: 0.0, through: 3_600, by: 600) {
+            let now = Self.notStartedNow.addingTimeInterval(step)
+            let window = CodexQuotaWindow(
+                utilization: 0, durationSeconds: 604_800,
+                resetsAt: now.addingTimeInterval(604_800))
+            #expect(window.hasNotStarted(now: now))
+        }
+    }
+
+    /// The anchored form on the same account: a real instant that holds still. It must pass through
+    /// untouched, or the fix has replaced one wrong row with another.
+    @Test("an anchored reset is not mistaken for one that has not started")
+    func anchoredResetPassesThrough() throws {
+        let snapshot = try CodexQuotaNormalizer.snapshot(from: decode(Self.liveShape))
+        let window = try #require(snapshot.windows.first)
+        #expect(!window.hasNotStarted(now: Self.now))
+
+        let rows = CodexQuotaNormalizer.rows(from: snapshot, now: Self.now)
+        let row = try #require(rows.first)
+        #expect(!row.sessionIdle)
+        #expect(row.utilization == 3)
+        #expect(row.resetLine != nil)
+    }
+
+    /// The tolerance is ±120 s and it is checked on **both** sides. A reset further out than one
+    /// window is not a window that has not started, and neither is one already ticking down — reading
+    /// either as such would suppress a countdown that is doing its job.
+    @Test("a reset outside the tolerance is not detected, in either direction")
+    func toleranceIsBounded() {
+        let duration = 604_800
+        func window(_ ahead: TimeInterval) -> CodexQuotaWindow {
+            CodexQuotaWindow(utilization: 0, durationSeconds: duration,
+                             resetsAt: Self.now.addingTimeInterval(ahead))
+        }
+        let full = Double(duration)
+        let tolerance = CodexQuotaWindow.notStartedTolerance   // 120 s
+
+        // Inside, to the second, on both edges.
+        #expect(window(full).hasNotStarted(now: Self.now))
+        #expect(window(full - tolerance).hasNotStarted(now: Self.now))
+        #expect(window(full + tolerance).hasNotStarted(now: Self.now))
+
+        // Outside, by one second, on both edges.
+        #expect(!window(full - tolerance - 1).hasNotStarted(now: Self.now))
+        #expect(!window(full + tolerance + 1).hasNotStarted(now: Self.now))
+
+        // A window well into its life, which is the ordinary case.
+        #expect(!window(full / 2).hasNotStarted(now: Self.now))
+    }
+
+    /// **Spending is the second witness, and it is what makes one sample enough.** 3 % of a window
+    /// that has not started cannot exist, so a reset a full window out with anything spent against it
+    /// is an anchored reset that happens to be far away — and its countdown is real.
+    @Test("anything spent rules out a window that has not started")
+    func spendingRulesItOut() {
+        let resetsAt = Self.now.addingTimeInterval(604_800)
+        #expect(!CodexQuotaWindow(utilization: 3, durationSeconds: 604_800, resetsAt: resetsAt)
+            .hasNotStarted(now: Self.now))
+        #expect(!CodexQuotaWindow(utilization: 0.5, durationSeconds: 604_800, resetsAt: resetsAt)
+            .hasNotStarted(now: Self.now))
+        #expect(CodexQuotaWindow(utilization: 0, durationSeconds: 604_800, resetsAt: resetsAt)
+            .hasNotStarted(now: Self.now))
+    }
+
+    /// An omitted reset is the server saying nothing, not the server saying `now + 7d`. Two different
+    /// states, and only one of them is this one.
+    @Test("a missing reset is not a window that has not started")
+    func missingResetIsNotDetected() {
+        #expect(!CodexQuotaWindow(utilization: 0, durationSeconds: 604_800, resetsAt: nil)
+            .hasNotStarted(now: Self.now))
+    }
+
+    /// The row the state renders: `sessionIdle`, so the view drops the whole second line rather than
+    /// leaving a countdown, a bare `"0%"`, or the `"resetting…"` a nil reset line renders on its own —
+    /// that last one claims a reset is happening this second, which is a second false statement, not
+    /// a fix for the first.
+    @Test("a window that has not started renders idle, with no reset line")
+    func notStartedRendersIdle() throws {
+        let snapshot = try CodexQuotaNormalizer.snapshot(from: decode(Self.notStartedShape))
+        let rows = CodexQuotaNormalizer.rows(from: snapshot, now: Self.notStartedNow)
+        let row = try #require(rows.first)
+
+        #expect(row.title == "7-day")
+        #expect(row.sessionIdle)
+        #expect(row.resetLine == nil)
+        #expect(row.resetLineVerbose == nil)
+        #expect(row.utilization == 0)
+        // The tick ruler is the one its length earns, so the row keeps the anatomy of the bars
+        // around it rather than arriving as a differently-shaped placeholder.
+        #expect(row.subdivisions == LimitWindow.sevenDay.subdivisions)
+        // Not blocked: `sessionBlocked` is Claude's "7d exhausted and credits cannot cover", and
+        // nothing about a fresh window is blocked.
+        #expect(!row.sessionBlocked)
+    }
+
+    /// The row must not read as spent-and-paced. `.calm` is what keeps the plate quiet, and it has to
+    /// hold without any of the zeroed placeholder fields being consulted.
+    @Test("the not-started row is calm and paces nothing")
+    func notStartedRowIsCalm() throws {
+        let snapshot = try CodexQuotaNormalizer.snapshot(from: decode(Self.notStartedShape))
+        let row = try #require(
+            CodexQuotaNormalizer.rows(from: snapshot, now: Self.notStartedNow).first)
+        #expect(row.bar.usageFraction == 0)
+        #expect(row.bar.pacing == .onPaceOrBehind)
+        #expect(row.indicator == .neutral)
+        #expect(row.bar.windowDurationSeconds == 604_800)
+    }
+
+    /// The state is per **window**, not per read: with two windows reported, one may have just reset
+    /// while the other is mid-life, and each row must answer for itself.
+    @Test("only the window that has not started goes idle")
+    func detectionIsPerWindow() {
+        let snapshot = CodexQuotaSnapshot(
+            windows: [
+                CodexQuotaWindow(utilization: 0, durationSeconds: 604_800,
+                                 resetsAt: Self.now.addingTimeInterval(604_800)),
+                CodexQuotaWindow(utilization: 12, durationSeconds: 18_000,
+                                 resetsAt: Self.now.addingTimeInterval(9_000)),
+            ],
+            planLabel: "Plus")
+        let rows = CodexQuotaNormalizer.rows(from: snapshot, now: Self.now)
+        #expect(rows.count == 2)
+        #expect(rows[0].sessionIdle)
+        #expect(rows[0].resetLine == nil)
+        #expect(!rows[1].sessionIdle)
+        #expect(rows[1].resetLine != nil)
+        #expect(rows[1].utilization == 12)
+    }
+
+    /// The rule is stated in terms of the window's own reported length, never a week — the server
+    /// picks these and an enum cannot list what it will pick next.
+    @Test("the rule follows the reported duration, not a hard-coded week")
+    func ruleFollowsTheReportedDuration() {
+        let fiveHours = 18_000
+        let window = CodexQuotaWindow(utilization: 0, durationSeconds: fiveHours,
+                                      resetsAt: Self.now.addingTimeInterval(Double(fiveHours)))
+        #expect(window.hasNotStarted(now: Self.now))
+        // A week ahead is not this window's length, so it is an anchored reset far out.
+        #expect(!CodexQuotaWindow(utilization: 0, durationSeconds: fiveHours,
+                                  resetsAt: Self.now.addingTimeInterval(604_800))
+            .hasNotStarted(now: Self.now))
     }
 
     private static let candidates = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]

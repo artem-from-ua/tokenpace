@@ -15,8 +15,14 @@ protocol CodexQuotaSource: Sendable {
 
 // MARK: - CodexQuotaDiagnostics
 
-/// The four facts Troubleshoot shows about the Codex collector.
+/// The facts Troubleshoot shows about the Codex collector.
 struct CodexQuotaDiagnostics: Sendable, Equatable {
+    /// The raw `resetsAt` of every window the last successful read reported, in report order.
+    ///
+    /// Kept because a window that has not started draws **no** countdown, so this is the only surface
+    /// left carrying what the server actually sent — and that value is the evidence for the
+    /// not-started reading in the first place.
+    var lastResets: [Date?] = []
     /// The executable actually used, or `nil` when none was found — the candidates are then listed
     /// instead, so "not found" names the paths that were tried rather than leaving the user guessing.
     var binaryPath: String?
@@ -172,6 +178,7 @@ actor CodexAppServer: CodexQuotaSource {
             throw CodexQuotaError.malformedResponse
         }
         let snapshot = try CodexQuotaNormalizer.snapshot(from: decoded)
+        diag.lastResets = snapshot.windows.map(\.resetsAt)
         diag.lastSuccess = now()
         diag.lastLatency = diag.lastSuccess?.timeIntervalSince(started)
         diag.lastError = nil
@@ -330,6 +337,10 @@ struct StubCodexQuotaSource: CodexQuotaSource {
     enum Outcome: Sendable {
         /// `(usedPercent, windowDurationSeconds)` per window, in report order.
         case windows([(Double, Int)])
+        /// Windows that have not started: `usedPercent 0` and a reset the server recomputes as `now`
+        /// plus the window's own length on every read, so it never ticks down. The stub reproduces
+        /// that by deriving the reset from its own clock at read time, exactly as the server does.
+        case notStarted([Int])
         case failure(CodexQuotaError)
     }
 
@@ -357,15 +368,28 @@ struct StubCodexQuotaSource: CodexQuotaSource {
                         resetsAt: base.addingTimeInterval(Double(duration) * 0.45))
                 },
                 planLabel: "Plus")
+        case let .notStarted(durations):
+            let base = now()
+            return CodexQuotaSnapshot(
+                windows: durations.map { duration in
+                    CodexQuotaWindow(
+                        utilization: 0,
+                        durationSeconds: duration,
+                        resetsAt: base.addingTimeInterval(Double(duration)))
+                },
+                planLabel: "Plus")
         }
     }
 
     func diagnostics() async -> CodexQuotaDiagnostics {
         var d = CodexQuotaDiagnostics(binaryPath: "/opt/homebrew/bin/codex", version: "0.148.0")
         switch outcome {
-        case .windows:
+        case .windows, .notStarted:
             d.lastSuccess = now()
             d.lastLatency = 0.44
+            // A second read, so a `notStarted` scenario recomputes its reset from `now` here exactly
+            // as the server does per request — which is what makes the creep visible in Troubleshoot.
+            d.lastResets = (try? await read())?.windows.map(\.resetsAt) ?? []
         case let .failure(error):
             if case .cliNotFound = error { d.binaryPath = nil; d.version = nil }
             d.lastError = CodexAppServer.describe(error)
