@@ -12,14 +12,15 @@ the specifics are here.
 
 > ⚠️ **Screenshot automation is unreliable: the menu bar holds several identically named TokenPace
 > instances** (the release plus dev copies from various sessions). AX/`osascript` cannot tell them
-> apart, so a blind click on a menu-bar item opens the wrong build; the dropdown (NSMenu) cannot be
-> screenshotted at all. **Do not click a menu-bar item by name or index** — and do not address the
-> process by name at all: `tell process "TokenPace"` answered `0 windows` for a process that had one
+> apart, so a blind click on a menu-bar item opens the wrong build. **Do not click a menu-bar item by
+> name or index** — and do not address the process by name at all:
+> `tell process "TokenPace"` answered `0 windows` for a process that had one
 > open, where a `unix id is <pid>` query answered `1` (#492). **An AX query that picks the wrong
 > instance returns an empty answer, not an error**, so a script reads it as "nothing to do here" and
-> reports a pass — assert the window was actually found before trusting any result. Reliable UI
-> verification means the maintainer opens the right dev icon live himself. The full method
-> (launching, stopping by your own PID, why never a broad kill) is in
+> reports a pass — assert the window was actually found before trusting any result. What *is* safely
+> automatable is the capture itself: the open dropdown is a layer-101 window owned by your PID, so it
+> screenshots by window-id (recipe below). The maintainer's live check on the right dev icon is still
+> what a PR waits on. The full method (launching, stopping by your own PID, why never a broad kill) is in
 > [agent-workflow.md](agent-workflow.md), section "Launching the app to check the UI".
 
 > 📸 **A full-screen screenshot is allowed ONLY with the maintainer's explicit permission. Every other
@@ -30,13 +31,20 @@ the specifics are here.
 > Capture **a specific window by window-id** (`-l<windowID>`), never the screen:
 >
 > ```sh
-> # find the CG window-id of a TokenPace window (the popup is the larger window under the menu bar, layer 101):
-> #   a Swift one-liner over CGWindowListCopyWindowInfo, filtering owner == "TokenPace"
+> # find the CG window-id over CGWindowListCopyWindowInfo, filtering kCGWindowOwnerPID == your own
+> # PID (never by owner *name* — that is the wrong instance waiting to happen)
 > screencapture -o -l<windowID> popup.png   # captures exactly this window
 > ```
 >
 > - **The popup dropdown and the Settings window** are real `NSWindow`s: **open the dropdown** and
 >   capture its window by window-id. You do NOT need the whole screen for that.
+> - **The open dropdown (NSMenu) is capturable — verified (#513).** Its host appears in the window
+>   list as **layer 101 owned by your PID**, sized like the popup and sitting just under the menu bar;
+>   `screencapture -l<id>` grabs it cleanly, no full-screen grab and nothing for the maintainer to
+>   open by hand. The layer-25 `Item-0` next to it is the status item, not the menu.
+> - **No layer-101 window under your PID → the run is INVALID, not a pass.** The menu never opened, so
+>   there is nothing to capture and nothing was tested — the #492 trap in a new place. Assert the
+>   window was found before believing any result built on it.
 > - **The menu-bar widget** is captured as **its own area**, not the whole screen — `NSStatusItem` has
 >   no window-id, so grab **a tight frame around the widget itself** (`-R<x,y,w,h>` over its rect), not
 >   the entire top strip and certainly not the whole desktop.

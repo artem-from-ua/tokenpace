@@ -104,10 +104,12 @@ resort, not the desired fix.
     still looks clean.
   - even `pgrep -f '\.build/debug/TokenPace' | head -1` picks *some* dev PID — when there are several
     copies, narrow it down by **your own** PID (`$!` from your own `&` launch), not by name;
-  - **the dropdown (NSMenu) can't be screenshotted reliably at all** — menu tracking blocks it;
-    **Settings** only if you're guaranteed to have hit your own dev icon. The reliable route: **hand it
-    to the maintainer** to open the specific dev build and verify live (that is the canonical UI
-    verification before a PR anyway).
+  - **the open dropdown (NSMenu) does screenshot** — verified (#513): its host is a **layer-101 window
+    owned by your PID** in `CGWindowListCopyWindowInfo`, so `screencapture -l<id>` captures it alone.
+    Filter that list by `kCGWindowOwnerPID`, never by owner name, and treat **no layer-101 window under
+    your PID as an invalid run** — the menu never opened, so nothing was tested. **Settings** likewise,
+    provided you hit your own dev icon. None of this replaces the maintainer opening the specific dev
+    build and verifying live — that is the canonical UI verification before a PR.
 - A temporary `.app` bundle is only needed for signing-dependent features (launch-at-login /
   SMAppService, update signals). Details and the list of stubs are in
   [ui-verification.md](ui-verification.md).
@@ -119,9 +121,9 @@ the maintainer says he's looked", no competing `log stream`): CLAUDE.md § Prohi
 there:
 
 - **Trigger phrases for hands-off:** "run it", "show me", "check", "I'll take a look" put the process
-  hands-off until "saw it", "ok", "stop", "run the other stub". Can't screenshot yourself
-  (`screencapture` returns an empty frame) — that's not grounds for a restart; hand it to the
-  maintainer instead.
+  hands-off until "saw it", "ok", "stop", "run the other stub". If `screencapture` hands back an empty
+  frame (screen-recording permission is missing for your shell), that's not grounds for a restart —
+  hand it to the maintainer instead.
 - **The broad-kill ban covers pattern matching on the bundle path too**
   (`pgrep -f 'build/TokenPace.app'`, `pgrep -f '\.build/debug/TokenPace'`), not just `pkill`/`killall`
   by name: it matches other sessions' and the maintainer's instances. **Why it's worse than it looks:**
