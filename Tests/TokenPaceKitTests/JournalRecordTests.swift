@@ -15,8 +15,11 @@ struct JournalRecordCodableTests {
     @Test func usageRoundTrips() throws {
         let sample = UsageSample(
             t: "2026-08-03T09:12:04Z", ms: 142, plan: "max", tier: "default_claude_max_5x",
-            h5: WindowSample(util: 41.2, reset: "2026-08-03T11:00:00Z", timePct: 0.62, sev: .green),
-            d7: WindowSample(util: 63.8, reset: "2026-08-07T00:00:00Z", timePct: 0.55, sev: .orange),
+            windows: [
+                WindowSample(util: 41.2, reset: "2026-08-03T11:00:00Z", timePct: 0.62, sev: .green,
+                             windowSeconds: LimitWindow.fiveHour.durationSeconds),
+                WindowSample(util: 63.8, reset: "2026-08-07T00:00:00Z", timePct: 0.55, sev: .orange),
+            ],
             opus: WindowSample(util: 12, reset: "2026-08-07T00:00:00Z", timePct: 0.55, sev: .green),
             sonnet: nil,
             scoped: [ScopedSample(name: "Fable", pct: 8, reset: "2026-08-07T00:00:00Z", timePct: 0.55, sev: .green)],
@@ -74,7 +77,7 @@ struct JournalRecordCodableTests {
     /// because they are all spelled `v` on the wire, which is the whole trap.
     @Test func everyKindVersionsItselfSeparately() {
         #expect(StatusSample.currentVersion == 2)
-        #expect(UsageSample.currentVersion == 5)
+        #expect(UsageSample.currentVersion == 6)
         #expect(ErrorSample.currentVersion == 3)
         #expect(ResumeMarker.currentVersion == 1)
     }

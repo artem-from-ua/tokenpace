@@ -34,6 +34,11 @@ public struct UsageSample: Sendable, Equatable, Codable {
     ///   two disagree. Adds the field, so it is a format bump as well as a colour-model one.
     /// - **5** — #502: ``provider`` names whose quota the line measures. Nothing else moves, and
     ///   ``sevV`` deliberately does not: the colour model is unchanged.
+    /// - **6** — #508: the windows move from the fixed `h5`/`d7` keys into ``windows``, each stamped
+    ///   with its own ``WindowSample/secs``. A provider with one window writes one entry; nothing
+    ///   requires a provider to have any particular window. The old keys are **gone**, not kept
+    ///   beside the array — a duplicated field in an append-only file is permanent, and a reader
+    ///   that accepts either spelling is a branch every consumer carries forever.
     public let v: Int
     /// Which generation of the **colour model** produced this line's `sev` values — the second axis
     /// described on ``v``.
@@ -60,8 +65,27 @@ public struct UsageSample: Sendable, Equatable, Codable {
     public let plan: String?
     /// Rate-limit tier from the Keychain (`rateLimitTier`, e.g. `"default_claude_max_5x"`), or `nil`.
     public let tier: String?
-    public let h5: WindowSample
-    public let d7: WindowSample
+    /// Every limit window this poll read, in the order the provider reported them.
+    ///
+    /// **Any number, including one**, and no window is required: Claude writes its five-hour and
+    /// seven-day rows, Codex writes however many the server named — one today. Each entry carries
+    /// its own ``WindowSample/secs``, which is what identifies it; the array's order is the
+    /// provider's and means nothing.
+    public let windows: [WindowSample]
+    /// The five-hour window, or `nil` on a provider that has none.
+    ///
+    /// Looked up by duration, never by position: Codex dropped its five-hour limit for a stretch and
+    /// left the weekly one in the slot named `primary`, so a slot index would have read the week as
+    /// a five-hour window.
+    public var h5: WindowSample? { window(ofSeconds: LimitWindow.fiveHour.durationSeconds) }
+    /// The seven-day window, or `nil` on a provider that has none. Found the same way as ``h5``.
+    public var d7: WindowSample? { window(ofSeconds: LimitWindow.sevenDay.durationSeconds) }
+
+    /// The first window of exactly `seconds`, or `nil`.
+    public func window(ofSeconds seconds: Int) -> WindowSample? {
+        windows.first { $0.secs == seconds }
+    }
+
     public let opus: WindowSample?
     public let sonnet: WindowSample?
     public let scoped: [ScopedSample]
@@ -76,7 +100,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
     public let blockingReset: BlockingResetSample?
 
     /// The version this build writes. Bump together with the case list on ``v``.
-    public static let currentVersion = 5
+    public static let currentVersion = 6
 
     /// The colour-model generation this build writes into ``sevV``. Bump it whenever a change to
     /// ``PacingBucket``/``PacingModel`` would give an existing sample a different `sev` — that is the
@@ -94,8 +118,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
         ms: Int? = nil,
         plan: String? = nil,
         tier: String? = nil,
-        h5: WindowSample,
-        d7: WindowSample,
+        windows: [WindowSample],
         opus: WindowSample? = nil,
         sonnet: WindowSample? = nil,
         scoped: [ScopedSample] = [],
@@ -113,8 +136,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
         self.ms = ms
         self.plan = plan
         self.tier = tier
-        self.h5 = h5
-        self.d7 = d7
+        self.windows = windows
         self.opus = opus
         self.sonnet = sonnet
         self.scoped = scoped
@@ -127,8 +149,13 @@ public struct UsageSample: Sendable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case v, sevV, provider, t, ms, plan, tier, h5, d7, opus, sonnet, scoped, sessionIdle, spend
+        case v, sevV, provider, t, ms, plan, tier, windows, opus, sonnet, scoped, sessionIdle, spend
         case blocked, credits, brokenReset, blockingReset
+        /// The pre-v6 spellings, **read-only**: a line the rewrite has not reached still yields its
+        /// windows instead of decoding to none. Never written — writing both would make the rename
+        /// permanent in an append-only file, which is the whole reason the archive is rewritten.
+        case legacyH5 = "h5"
+        case legacyD7 = "d7"
     }
 
     /// Tolerant decode — a partial line (an older/newer schema) fills defaults rather than failing.
@@ -147,10 +174,20 @@ public struct UsageSample: Sendable, Equatable, Codable {
         self.ms = try c.decodeIfPresent(Int.self, forKey: .ms)
         self.plan = try c.decodeIfPresent(String.self, forKey: .plan)
         self.tier = try c.decodeIfPresent(String.self, forKey: .tier)
-        self.h5 = try c.decodeIfPresent(WindowSample.self, forKey: .h5)
-            ?? WindowSample(util: 0, reset: "", timePct: 0, sev: .green)
-        self.d7 = try c.decodeIfPresent(WindowSample.self, forKey: .d7)
-            ?? WindowSample(util: 0, reset: "", timePct: 0, sev: .green)
+        // v6 first, then the pre-v6 keys — each stamped with the length its key stated, since a
+        // window written under `h5` carries no `secs` of its own. An empty array is the honest
+        // answer for a line that has neither: it says the poll named no window, not that it named a
+        // zero-percent one, which is what a synthesized placeholder would have claimed.
+        if let windows = try c.decodeIfPresent([WindowSample].self, forKey: .windows) {
+            self.windows = windows
+        } else {
+            self.windows = [
+                try c.decodeIfPresent(WindowSample.self, forKey: .legacyH5)?
+                    .stamped(secs: LimitWindow.fiveHour.durationSeconds),
+                try c.decodeIfPresent(WindowSample.self, forKey: .legacyD7)?
+                    .stamped(secs: LimitWindow.sevenDay.durationSeconds),
+            ].compactMap { $0 }
+        }
         self.opus = try c.decodeIfPresent(WindowSample.self, forKey: .opus)
         self.sonnet = try c.decodeIfPresent(WindowSample.self, forKey: .sonnet)
         self.scoped = try c.decodeIfPresent([ScopedSample].self, forKey: .scoped) ?? []
@@ -161,6 +198,30 @@ public struct UsageSample: Sendable, Equatable, Codable {
             ?? CreditsFlags(active: false, showIcon: false, onCredits: false)
         self.brokenReset = try c.decodeIfPresent(Bool.self, forKey: .brokenReset) ?? false
         self.blockingReset = try c.decodeIfPresent(BlockingResetSample.self, forKey: .blockingReset)
+    }
+
+    /// Explicit rather than synthesized so ``CodingKeys/legacyH5``/``CodingKeys/legacyD7`` stay
+    /// read-only: a synthesized encoder would emit them from the computed ``h5``/``d7`` and the
+    /// archive would carry both spellings forever.
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(v, forKey: .v)
+        try c.encode(sevV, forKey: .sevV)
+        try c.encode(provider, forKey: .provider)
+        try c.encode(t, forKey: .t)
+        try c.encodeIfPresent(ms, forKey: .ms)
+        try c.encodeIfPresent(plan, forKey: .plan)
+        try c.encodeIfPresent(tier, forKey: .tier)
+        try c.encode(windows, forKey: .windows)
+        try c.encodeIfPresent(opus, forKey: .opus)
+        try c.encodeIfPresent(sonnet, forKey: .sonnet)
+        try c.encode(scoped, forKey: .scoped)
+        try c.encode(sessionIdle, forKey: .sessionIdle)
+        try c.encodeIfPresent(spend, forKey: .spend)
+        try c.encode(blocked, forKey: .blocked)
+        try c.encode(credits, forKey: .credits)
+        try c.encode(brokenReset, forKey: .brokenReset)
+        try c.encodeIfPresent(blockingReset, forKey: .blockingReset)
     }
 }
 

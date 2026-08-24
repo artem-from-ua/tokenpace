@@ -146,6 +146,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0127](0127-codex-quota-from-the-app-server.md) | Codex quota from a short-lived `app-server` process, with window durations as data rather than enum cases | partially superseded → [0129](0129-ready-to-start-is-gated-on-the-account-reached-flags.md) |
 | [0128](0128-menu-bar-repeats-a-block-per-provider.md) | The menu bar repeats a block per provider, with the status dot pinned rightmost | accepted |
 | [0129](0129-ready-to-start-is-gated-on-the-account-reached-flags.md) | A Codex read that reports the limit reached at zero usage is malformed data, not a quota state | accepted |
+| [0130](0130-one-usage-record-with-a-windows-array.md) | One usage record with a windows array, so any provider fits | accepted |
 
 ## Maintaining this index
 

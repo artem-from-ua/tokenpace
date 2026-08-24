@@ -21,12 +21,16 @@ struct JournalUsageMappingTests {
         guard case let .usage(s) = JournalRecord.usage(from: snapshot, now: now, durationMs: 123) else {
             Issue.record("expected .usage"); return
         }
-        #expect(s.h5.util == 40)
-        #expect(s.d7.util == 60)
+        let h5 = try #require(s.h5)
+        #expect(h5.util == 40)
+        #expect(try #require(s.d7).util == 60)
         #expect(s.ms == 123)
         #expect(s.t == ResetClock.isoString(from: now))
         // timePct is the elapsed fraction — half-elapsed 5h → ~0.5.
-        #expect(abs(s.h5.timePct - 0.5) < 0.001)
+        #expect(abs(h5.timePct - 0.5) < 0.001)
+        // Each window says which one it is by its own length, not by the key it sat under.
+        #expect(s.windows.map(\.secs) == [LimitWindow.fiveHour.durationSeconds,
+                                          LimitWindow.sevenDay.durationSeconds])
     }
 
     @Test func exhaustedWindowIsBlockedAndRed() throws {
@@ -37,7 +41,7 @@ struct JournalUsageMappingTests {
             Issue.record("expected .usage"); return
         }
         #expect(s.blocked == true)          // 5h exhausted, no credits cover
-        #expect(s.h5.sev == .red)
+        #expect(try #require(s.h5).sev == .red)
     }
 
     @Test func spendMapsToFullMoney() throws {
@@ -67,8 +71,9 @@ struct JournalUsageMappingTests {
         guard case let .usage(s) = JournalRecord.usage(from: snapshot, now: now) else {
             Issue.record("expected .usage"); return
         }
-        #expect(abs(s.h5.gap - (s.h5.timePct * 100 - 40)) < 0.001)
-        #expect(s.h5.gap > 0)   // behind pace → positive headroom
+        let h5 = try #require(s.h5)
+        #expect(abs(h5.gap - (h5.timePct * 100 - 40)) < 0.001)
+        #expect(h5.gap > 0)   // behind pace → positive headroom
     }
 
     @Test func creditGapNilWithoutLimit() throws {
@@ -322,5 +327,109 @@ struct JournalErrorMappingTests {
         #expect(s.n == nil)
         #expect(s.tEnd == nil)
         #expect(s.v == ErrorSample.currentVersion)
+    }
+}
+
+// MARK: - usage(fromCodex:) mapping and the admission rule (#508)
+
+/// Codex writes the same `kind: usage` under its own `provider`: both records answer how much of a
+/// window is spent and when it resets, and the only difference — which windows exist — is data.
+@Suite("JournalRecord.usage(fromCodex:)")
+struct CodexUsageMappingTests {
+
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func snapshot(_ windows: [CodexQuotaWindow], plan: String? = "Plus")
+        -> CodexQuotaSnapshot {
+        CodexQuotaSnapshot(windows: windows, planLabel: plan)
+    }
+
+    /// A weekly window anchored 3 days out — the shape a live Plus account reports once it has spent
+    /// something.
+    private var anchoredWeek: CodexQuotaWindow {
+        CodexQuotaWindow(utilization: 3, durationSeconds: 604_800,
+                         resetsAt: now.addingTimeInterval(3 * 86_400))
+    }
+
+    @Test func oneWindowWritesOneEntryAndNoFiveHourRowIsInvented() throws {
+        guard case let .usage(s)? = JournalRecord.usage(
+            fromCodex: snapshot([anchoredWeek]), now: now, durationMs: 440) else {
+            Issue.record("expected .usage"); return
+        }
+        #expect(s.provider == ProviderID.codex.rawValue)
+        #expect(s.v == UsageSample.currentVersion)
+        #expect(s.windows.count == 1)
+        #expect(s.h5 == nil)                                  // not reported, so not invented
+        let d7 = try #require(s.d7)
+        #expect(d7.util == 3)
+        #expect(d7.secs == 604_800)
+        #expect(d7.timePct > 0)
+        #expect(s.ms == 440)
+        #expect(s.plan == "Plus")
+    }
+
+    /// A window is identified by its length, never by the slot it arrived in: Codex left its weekly
+    /// window in `primary` while its five-hour limit was absent.
+    @Test func aWindowIsClassifiedByItsDurationNotItsPosition() throws {
+        let fiveHour = CodexQuotaWindow(utilization: 40, durationSeconds: 18_000,
+                                        resetsAt: now.addingTimeInterval(3_600))
+        guard case let .usage(s)? = JournalRecord.usage(
+            fromCodex: snapshot([anchoredWeek, fiveHour]), now: now) else {
+            Issue.record("expected .usage"); return
+        }
+        // The weekly window arrived first and is still found as `d7`.
+        #expect(try #require(s.d7).util == 3)
+        #expect(try #require(s.h5).util == 40)
+    }
+
+    /// The admission rule. A not-started window describes the *absence* of a window: the server
+    /// answers "if you began now, it would end then", and the horizon slides with the clock. Stored,
+    /// it would be a permanent record of a reset that never happened.
+    @Test func aNotStartedWindowIsNotPersisted() {
+        let notStarted = CodexQuotaWindow(utilization: 0, durationSeconds: 604_800,
+                                          resetsAt: now.addingTimeInterval(604_800))
+        #expect(JournalRecord.usage(fromCodex: snapshot([notStarted]), now: now) == nil)
+    }
+
+    /// The drop is per window, not per read: an anchored window beside a sliding one still gets its
+    /// line, carrying only the measurement.
+    @Test func anAnchoredWindowSurvivesBesideANotStartedOne() throws {
+        let notStarted = CodexQuotaWindow(utilization: 0, durationSeconds: 18_000,
+                                          resetsAt: now.addingTimeInterval(18_000))
+        guard case let .usage(s)? = JournalRecord.usage(
+            fromCodex: snapshot([anchoredWeek, notStarted]), now: now) else {
+            Issue.record("expected .usage"); return
+        }
+        #expect(s.windows.count == 1)
+        #expect(s.h5 == nil)
+        #expect(try #require(s.d7).util == 3)
+    }
+
+    /// A window the server could not anchor keeps its measurement and paces against nothing, rather
+    /// than being dropped: it reported a percentage, which is a measurement of a real window.
+    @Test func aWindowWithNoResetKeepsItsUtilizationAndPacesAgainstNothing() throws {
+        let undated = CodexQuotaWindow(utilization: 55, durationSeconds: 604_800, resetsAt: nil)
+        guard case let .usage(s)? = JournalRecord.usage(
+            fromCodex: snapshot([undated]), now: now) else {
+            Issue.record("expected .usage"); return
+        }
+        let d7 = try #require(s.d7)
+        #expect(d7.util == 55)
+        #expect(d7.reset == "")
+        #expect(d7.timePct == 0)
+        #expect(d7.sev == .green)
+        #expect(s.brokenReset == false)      // omitted, not unparseable
+    }
+
+    /// The line round-trips through the journal's own encoder, so a Codex sample is readable by the
+    /// same reader Claude's lines go through.
+    @Test func aCodexLineRoundTrips() throws {
+        let record = try #require(JournalRecord.usage(fromCodex: snapshot([anchoredWeek]), now: now))
+        let data = try JSONEncoder().encode(record)
+        #expect(try JSONDecoder().decode(JournalRecord.self, from: data) == record)
+        let text = try #require(String(data: data, encoding: .utf8))
+        #expect(text.contains("\"windows\""))
+        #expect(!text.contains("\"h5\""))
+        #expect(!text.contains("\"d7\""))
     }
 }
