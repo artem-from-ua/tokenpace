@@ -209,19 +209,35 @@ public struct CodexQuotaWindow: Sendable, Equatable {
     /// starts on the first spend after a reset and runs `durationSeconds` from there, so there is no
     /// weekly grid to roll an anchor forward on.
     ///
-    /// Two conditions, and the conjunction is what makes a single sample enough:
-    /// - the reset sits a whole ``durationSeconds`` ahead, within ``notStartedTolerance``;
-    /// - nothing is spent. Spending is the contradiction that rules out a real window this far off —
-    ///   3 % of a window that has not started cannot exist.
+    /// Two conditions:
+    /// - the reset sits **at or beyond** a whole ``durationSeconds`` ahead, within ``notStartedTolerance``;
+    /// - nothing is spent.
     ///
-    /// Requiring the shape to hold across consecutive polls was the alternative. It would render the
-    /// sliding countdown for one full poll every time a window really does reset, to rule out a case
-    /// `utilization == 0` already rules out, and it would need state that has nowhere to live: the
-    /// quota is not journalled and this decision is a pure function of one payload.
+    /// The near edge is bounded to the second, the far edge loosely. A window that has not started can
+    /// only ever report its full duration remaining, so a horizon *shorter* than the duration means
+    /// time has already run off it — an anchored window, however small the shortfall — while a horizon
+    /// slightly beyond it is the same not-started state read across a clock that disagrees with the
+    /// server's. Skew can only push a reading the far way, which is why that side is the forgiving one.
+    ///
+    /// It is not unbounded, though: a horizon of a *week* against a five-hour window is not a window
+    /// waiting to start, it is two fields that do not describe the same thing. Twice the duration is
+    /// the ceiling — far past any plausible skew, and still far short of a mismatch that large.
+    ///
+    /// `utilization == 0` is **not** independent corroboration, and an earlier version of this comment
+    /// claimed it was. Measured on a live account: a window reported 3 % against a fixed reset, spent
+    /// ~14 hours reporting 0 % with a moving horizon, then returned to 3 % against a fresh anchor — the
+    /// counter was preserved behind the zero the whole time. So the load-bearing signal is the horizon,
+    /// and the zero only narrows it.
+    ///
+    /// This stays a pure function of one payload, which means it can be wrong for one poll while a
+    /// degraded backend is answering. That is bounded on purpose: the row shows a state and no
+    /// countdown, raises no notification, and the quota is not journalled, so nothing here has to be
+    /// walked back when the next reading disagrees.
     public func hasNotStarted(now: Date) -> Bool {
         guard utilization == 0, durationSeconds > 0, let resetsAt else { return false }
         let ahead = resetsAt.timeIntervalSince(now)
-        return abs(ahead - Double(durationSeconds)) <= Self.notStartedTolerance
+        let full = Double(durationSeconds)
+        return ahead >= full - Self.notStartedTolerance && ahead <= full * 2
     }
 }
 

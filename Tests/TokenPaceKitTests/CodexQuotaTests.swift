@@ -494,7 +494,7 @@ struct CodexQuotaTests {
     /// The tolerance is ±120 s and it is checked on **both** sides. A reset further out than one
     /// window is not a window that has not started, and neither is one already ticking down — reading
     /// either as such would suppress a countdown that is doing its job.
-    @Test("a reset outside the tolerance is not detected, in either direction")
+    @Test("the near edge is bounded to the second, the far side deliberately is not")
     func toleranceIsBounded() {
         let duration = 604_800
         func window(_ ahead: TimeInterval) -> CodexQuotaWindow {
@@ -504,14 +504,20 @@ struct CodexQuotaTests {
         let full = Double(duration)
         let tolerance = CodexQuotaWindow.notStartedTolerance   // 120 s
 
-        // Inside, to the second, on both edges.
+        // The near edge is where the test bites, and it is exact to the second.
         #expect(window(full).hasNotStarted(now: Self.now))
         #expect(window(full - tolerance).hasNotStarted(now: Self.now))
-        #expect(window(full + tolerance).hasNotStarted(now: Self.now))
-
-        // Outside, by one second, on both edges.
         #expect(!window(full - tolerance - 1).hasNotStarted(now: Self.now))
-        #expect(!window(full + tolerance + 1).hasNotStarted(now: Self.now))
+
+        // The far side is deliberately unbounded: a window that has not started can only ever report
+        // its full duration remaining, so a horizon beyond that is the same state, not a stranger one.
+        // Clock skew can only push a reading this way, which is why the old symmetric bound was wrong.
+        #expect(window(full + tolerance).hasNotStarted(now: Self.now))
+        #expect(window(full + tolerance + 1).hasNotStarted(now: Self.now))
+        #expect(window(full * 2).hasNotStarted(now: Self.now))
+
+        // Bounded all the same: a horizon twice the window over is no longer skew, it is a mismatch.
+        #expect(!window(full * 2 + 1).hasNotStarted(now: Self.now))
 
         // A window well into its life, which is the ordinary case.
         #expect(!window(full / 2).hasNotStarted(now: Self.now))
