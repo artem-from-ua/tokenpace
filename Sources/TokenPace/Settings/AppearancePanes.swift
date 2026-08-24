@@ -293,16 +293,20 @@ struct MenuBarPane: View {
             // The list is what is **collecting usage**, not every `ProviderID`: a status-only provider
             // has no bars, so a row for it would be a checkbox over nothing.
             if model.menuBarProviderChoices.count > 1 {
-                Section("Providers to display:") {
-                    VStack(alignment: .leading, spacing: 4) {
+                Section("Providers to display") {
+                    // Checkboxes, not the switches the rest of Settings uses: these are a **set** —
+                    // several rows answering one question together — where a switch row answers its own
+                    // question on its own. The checkbox also puts the control before the name, so the
+                    // column of boxes reads as one list rather than a stack of unrelated settings.
+                    VStack(alignment: .leading, spacing: 6) {
                         ForEach(model.menuBarProviderChoices, id: \.self) { provider in
                             Toggle(provider.displayName, isOn: Binding(
                                 get: { !model.menuBarHiddenProviders.contains(provider) },
                                 set: { model.setShowsInMenuBar(provider, $0) }))
+                                .toggleStyle(.checkbox)
                         }
-                        SettingsHint(text: "The widget grows with each provider it draws, and the menu "
-                            + "bar is shared with every other app. Untick the ones you do not watch.")
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 

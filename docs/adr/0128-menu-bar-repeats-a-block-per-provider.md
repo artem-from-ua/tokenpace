@@ -93,7 +93,7 @@ about Claude Code sessions, not about a quota.
 
 ### D6. Crowding is answered by a checkbox, never by hiding a block
 
-Appearance → Menu bar gains **"Providers to display:"** — one checkbox per provider whose usage
+Appearance → Menu bar gains **"Providers to display"** — one checkbox per provider whose usage
 collection is on, all ticked by default, stored as the *hidden* set so a provider added later needs
 no migration. The section appears only when there is more than one provider to choose between.
 
