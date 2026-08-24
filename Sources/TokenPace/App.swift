@@ -199,55 +199,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The transport used for status polls — the same seam as the usage transport (real
     /// `URLSession.shared`, or the stub under `TOKENPACE_STUB=1`). Set in `startPolling`.
     private var statusTransport: UsageTransport = URLSession.shared
-    /// The latest mapped service status, or `nil` until the first status poll lands (cold start →
-    /// no status lines in the popup).
-    private var lastStatusHealth: StatusHealth?
-    /// Instant of the last **successful** status poll, driving `StatusCadence.isDue`. A failed poll
-    /// does not advance it, so the next usage tick retries.
+    /// The three status sources' state, one ``StatusSourceState`` each. Nothing is shared between
+    /// them: a 429 from one page holds only that source, an unreachable page greys only its own rows,
+    /// and one provider's incident never drags another's poll down to the 60-second problem floor
+    /// against a third party's page (ADR-0119 §2, §6).
     ///
-    /// Stamped with `currentDate()`, not `Date()`: this value also reaches `PopupLayout` (via
-    /// `withStatusAge`), a deterministic layer, so under a time-mocking stub a wall-clock stamp would
+    /// Claude's `lastSuccess` also reaches `PopupLayout` (via `withStatusAge`), a deterministic
+    /// layer — hence stamped with `currentDate()` rather than `Date()`, so a time-mocking stub cannot
     /// render an age that is negative or jumps.
-    private var lastStatusSuccess: Date?
-    /// The in-flight status fetch, if any — held so a new tick can cancel a slow one rather than
-    /// overlap.
-    private var statusTask: Task<Void, Never>?
-    /// The status loop's own heartbeat (ADR-0119) — a `LivePollScheduler` on its own `SignalHub`
-    /// subscription, so status polling runs whether or not the usage poll is ticking (or enabled at
-    /// all). Cancelled on terminate.
-    private var statusLoopTask: Task<Void, Never>?
-    /// The **status source's own** 429 hold — one `PollingBackoff` per status source, never shared
-    /// (ADR-0119 §2): hold at exactly `Retry-After` (or 180 s), no escalation across consecutive
-    /// 429s, first 200 clears it. Independent of the usage engine's backoff in both directions.
-    private var statusBackoff = PollingBackoff()
-
-    // MARK: GitHub status source
-
-    /// The second status source, in the per-source shape ADR-0119 left room for: its own heartbeat,
-    /// its own 429 hold, its own last-success marker and its own in-flight task. Nothing here is
-    /// shared with Claude's — a 429 from `githubstatus.com` must hold only this source, an
-    /// unreachable GitHub must not grey Claude's rows, and a Claude incident must not drag this poll
-    /// down to the 60-second problem floor against a third party's page.
-    private var githubLoopTask: Task<Void, Never>?
-    private var githubTask: Task<Void, Never>?
-    private var githubBackoff = PollingBackoff()
-    private var lastGitHubSuccess: Date?
-    /// The GitHub half of the rendered health. Kept apart from `lastStatusHealth` and merged only at
-    /// render time, so neither provider's poll can overwrite the other's checks.
-    private var lastGitHubHealth: StatusHealth?
-
-    // MARK: Codex status source (#503)
-
-    /// The third status source, in the same per-source shape: its own heartbeat, its own 429 hold,
-    /// its own last-success marker and its own in-flight task.
-    private var codexLoopTask: Task<Void, Never>?
-    private var codexTask: Task<Void, Never>?
-    /// **One** hold for both of Codex's requests. A 429 is the *page* asking us to slow down, and
-    /// there is one page behind both URLs — holding the components request while hammering the
-    /// incidents one would be honouring the letter of the header and not the request.
-    private var codexBackoff = PollingBackoff()
-    private var lastCodexSuccess: Date?
-    private var lastCodexHealth: StatusHealth?
+    private var claudeSource = StatusSourceState()
+    private var githubSource = StatusSourceState()
+    /// Codex's single hold covers **both** of its requests. A 429 is the *page* asking us to slow
+    /// down, and there is one page behind both URLs — holding the components request while hammering
+    /// the incidents one would honour the letter of the header and not the request.
+    private var codexSource = StatusSourceState()
     /// Whether the last successful poll got its incidents from the undocumented endpoint. Read by
     /// Troubleshoot: a success there must never quietly hide which path the data came from.
     private(set) var codexIncidentsFromProxy = false
@@ -309,21 +274,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `PersistedConfig.statusPayloadLogEnabled` is set from Development tools, and holding it here
     /// keeps the "last fingerprint" across polls so unchanged payloads never reach the disk.
     private let statusPayloadLog = StatusPayloadLog()
-    /// The incidents the last successful status poll deemed visible. Retained like
-    /// `lastStatusHealth` so a re-render between polls (⌥ pressed, a usage tick) keeps showing them
-    /// instead of blanking the section.
-    private var lastClaudeIncidents: [VisibleIncident] = []
-    /// GitHub's visible incidents, kept apart from Claude's for the same reason the healths are: the
-    /// two arrive on independent polls, so a single list would be rewritten by whichever landed last
-    /// and the other provider's incidents would vanish until its own next poll.
-    private var lastGitHubIncidents: [VisibleIncident] = []
-    /// Codex's visible incidents, kept apart for the same reason.
-    private var lastCodexIncidents: [VisibleIncident] = []
-    /// Both providers' incidents as one list — what the popup renders under Option, and what the
-    /// episode subscription and its notifications read. That is what makes GitHub incidents flow
-    /// through the existing notification mechanism with no toggle of their own.
+    /// Every provider's incidents as one list — what the popup renders under Option, and what the
+    /// episode subscription and its notifications read. That is what makes a new provider's incidents
+    /// flow through the existing notification mechanism with no toggle of their own.
+    ///
+    /// Concatenated at read time rather than stored: each source's list arrives on its own poll, so a
+    /// single stored list would be rewritten by whichever landed last and the others' incidents would
+    /// vanish until their own next poll.
     private var lastVisibleIncidents: [VisibleIncident] {
-        lastClaudeIncidents + lastGitHubIncidents + lastCodexIncidents
+        claudeSource.incidents + githubSource.incidents + codexSource.incidents
     }
     /// Routes taps on incident banners. Held for the process's lifetime — `UNUserNotificationCenter`
     /// keeps only a weak reference to its delegate, so letting this go would silently stop routing.
@@ -840,8 +799,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// would silently do nothing for up to `Retry-After` seconds.
     private func forceRefresh() {
         AppLogger.lifecycle.notice("manual refresh requested (Troubleshoot)")
-        lastStatusSuccess = nil            // make the status poll due on the next (immediate) tick
-        statusBackoff = statusBackoff.reset()
+        claudeSource.makeDue()             // make the status poll due, and drop a hold that would outrank it
         signals.send(.manualRefresh)       // wake both loops now + reset backoff (engine)
     }
 
@@ -920,7 +878,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Apply a new provider-monitoring config chosen in Settings: adopt it, drop the stale status (it
     /// was resolved under the old config), and force an immediate re-poll so the popup/menu-bar
-    /// reflect the new services within a moment. Clearing `lastStatusHealth` briefly hides the status
+    /// reflect the new services within a moment. Clearing the health briefly hides the status
     /// rows/dot until that fetch lands — honest, since the retained value describes services that are
     /// no longer the ones being monitored.
     ///
@@ -929,8 +887,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// each iteration, so it needs to be woken, not reconfigured.
     func providerMonitoringChanged(_ config: ProviderMonitoring) {
         providerMonitoring = config
-        lastStatusHealth = nil
-        lastStatusSuccess = nil            // status poll is due again on the immediate tick
+        claudeSource.health = nil
+        claudeSource.lastSuccess = nil     // status poll is due again on the immediate tick
         signals.send(.manualRefresh)       // wake the usage loop now, which rides the status poll
         reRenderForCurrentTime()           // clear the stale rows/dot right away
     }
@@ -1070,12 +1028,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         pollTask?.cancel()
-        statusTask?.cancel()
-        statusLoopTask?.cancel()
-        githubLoopTask?.cancel()
-        githubTask?.cancel()
-        codexLoopTask?.cancel()
-        codexTask?.cancel()
+        claudeSource.cancelAll()
+        githubSource.cancelAll()
+        codexSource.cancelAll()
         codexQuotaLoopTask?.cancel()
         codexQuotaTask?.cancel()
         updateTask?.cancel()
@@ -1247,7 +1202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         colorAnimator.reset()
         updateColorCycle(for: scenario)
         buildAndRunEngine(for: scenario)
-        lastStatusSuccess = nil          // make the status poll due on the next (immediate) tick
+        claudeSource.lastSuccess = nil   // make the status poll due on the next (immediate) tick
         // The awaiting-input watcher is gated on `.realNetwork`, so switching *into* a stub tears it
         // down and switching back out brings it up again — without this the gate would only ever be
         // evaluated at launch. Also refresh the Settings hints that explain the stubbed state.
@@ -1462,7 +1417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func advanceEpisodeSubscription() {
         let (events, next) = EpisodeEvaluator.evaluate(
             subscription: PersistedConfig.episodeSubscription,
-            incidents: lastClaudeIncidents,
+            incidents: claudeSource.incidents,
             now: currentDate())
         PersistedConfig.episodeSubscription = next
 
@@ -1570,24 +1525,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reRenderForCurrentTime()
     }
 
-    /// The status loop's own heartbeat (ADR-0119): wait ``StatusCadence/nextInterval(backoff:usageInterval:hasProblem:)``,
+    /// A status source's heartbeat (ADR-0119): wait ``StatusCadence/nextInterval(backoff:usageInterval:hasProblem:)``,
     /// then poll if due — repeating for the process's lifetime.
     ///
-    /// Built once at launch on its **own** `SignalHub` subscription, so it sees the same platform
-    /// signals as the usage loop without competing for them: `.sleep` parks it until
-    /// `.wake`/`.networkRestored`, exactly as `PollingEngine` does; `.wake`, `.networkRestored` and
-    /// `.manualRefresh` cut the wait short and re-ask `isDue` rather than fetching unconditionally.
+    /// Built once at launch on the source's **own** `SignalHub` subscription, so every source sees
+    /// the same platform signals as the usage loop without competing for them: `.sleep` parks it
+    /// until `.wake`/`.networkRestored`, exactly as `PollingEngine` does; `.wake`, `.networkRestored`
+    /// and `.manualRefresh` cut the wait short and re-ask `isDue` rather than fetching
+    /// unconditionally.
     ///
-    /// The usage tick still calls `pollStatusIfDue` too. Both entrances funnel through the same
-    /// `isDue` gate and the same in-flight `statusTask`, so the two heartbeats cannot double the
-    /// request rate; what the second one buys is that status keeps running when the first one is slow,
-    /// off, or absent.
-    private func startStatusLoop() {
-        let scheduler = LivePollScheduler(signals: signals.newStream(for: .status))
-        statusLoopTask = Task { [weak self] in
+    /// - Parameters:
+    ///   - pollFirst: Poll **before** the first wait. `waitForNextPoll` sleeps the whole interval up
+    ///     front, so a source without a second heartbeat would sit empty for the five-minute
+    ///     politeness floor after every launch. Claude passes `false`: its status also rides the
+    ///     usage tick, so it already has one.
+    ///   - interval: How long to wait before the next poll — read fresh each iteration, so a hold
+    ///     armed by the previous poll takes effect immediately.
+    private func startStatusSourceLoop(
+        subscriber: SignalHub.Subscriber,
+        pollFirst: Bool,
+        loopTask: ReferenceWritableKeyPath<AppDelegate, Task<Void, Never>?>,
+        interval: @escaping @MainActor (AppDelegate) -> TimeInterval,
+        poll: @escaping @MainActor (AppDelegate) -> Void
+    ) {
+        let scheduler = LivePollScheduler(signals: signals.newStream(for: subscriber))
+        self[keyPath: loopTask] = Task { [weak self] in
+            if pollFirst, let self { poll(self) }
             while !Task.isCancelled {
                 guard let self else { return }
-                let wait = self.statusPollInterval()
+                let wait = interval(self)
                 switch await scheduler.waitForNextPoll(interval: wait) {
                 case .interrupted(.sleep):
                     await scheduler.waitWhileAsleep()   // park: no status fetch while asleep/locked
@@ -1595,7 +1561,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     break
                 }
                 guard !Task.isCancelled else { return }
-                self.pollStatusIfDue()
+                poll(self)
             }
         }
     }
@@ -1624,46 +1590,130 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// checks and sorts by display order, so it is associative here — and the switch would need a
     /// case per subset, eight of them at three providers.
     private var renderedStatusHealth: StatusHealth? {
-        [lastStatusHealth, lastGitHubHealth, lastCodexHealth]
+        [claudeSource.health, githubSource.health, codexSource.health]
             .compactMap { $0 }
             .reduce(nil) { merged, next in merged?.merging(next) ?? next }
     }
 
+    /// Run one status source's poll: the cadence gate, the in-flight swap, and everything that
+    /// happens to the source's state once a fetch has resolved. The **fetch itself** is the caller's
+    /// — it is the only step the three sources genuinely differ in.
+    ///
+    /// The differences the per-source docblocks used to enumerate (endpoint, User-Agent, config type,
+    /// health constructor, success marker, health slot) all feed that one step and leave through one
+    /// ``StatusFetchOutcome``, so folding them costs a single closure rather than a parameter per
+    /// difference. What is shared is the part a new source would otherwise re-derive and get subtly
+    /// wrong: the disabled-source teardown, the `isDue` gate, cancelling a slow fetch instead of
+    /// overlapping it, and the backoff arming rules ADR-0119 §2 fixed.
+    ///
+    /// - Parameters:
+    ///   - source: The source's state slot. A key path rather than an `inout` because the fetch
+    ///     suspends — by the time the outcome lands, an `inout` view of the struct would be stale.
+    ///   - isEnabled: Whether the user is monitoring anything on this source. `false` tears the
+    ///     source's plate down rather than merely skipping the fetch, so turning a provider off
+    ///     clears it on the spot instead of leaving it until the next launch.
+    ///   - usageInterval: The usage cadence to settle with, or `nil` to stand on the politeness floor
+    ///     alone. Only Claude has a usage poll to settle with.
+    ///   - hasProblem: **This source's** problem signal, never a flattened one — one provider's
+    ///     incident must not accelerate polling against another's page (ADR-0119 §6).
+    ///   - logPrefix: How this source names itself in the "backoff holding" line.
+    ///   - clearedMessage: The whole "hold released" line. Each source words it differently on
+    ///     purpose, so a grep for one source never returns another's.
+    ///   - fetch: Performs the request(s) and maps them to a ``StatusFetchOutcome``. Runs off the
+    ///     main actor; it must not touch `self` beyond what it captures.
+    ///   - onSuccess: Anything only this source does with a successful outcome — journalling, a
+    ///     payload log, recording which path the data came from.
+    private func pollStatusSource(
+        _ source: ReferenceWritableKeyPath<AppDelegate, StatusSourceState>,
+        isEnabled: Bool,
+        usageInterval: TimeInterval?,
+        hasProblem: Bool,
+        logPrefix: String,
+        clearedMessage: String,
+        fetch: @escaping @Sendable () async -> StatusFetchOutcome,
+        onSuccess: @escaping @MainActor (AppDelegate, StatusFetchOutcome) -> Void = { _, _ in }
+    ) {
+        guard isEnabled else {
+            // Nothing to watch. Drop any stale health so the popup's section disappears with the
+            // switch rather than lingering until the next launch.
+            if self[keyPath: source].clearIfPresent() { reRenderForCurrentTime() }
+            return
+        }
+        guard StatusCadence.isDue(
+            lastSuccess: self[keyPath: source].lastSuccess,
+            backoff: self[keyPath: source].backoff,
+            usageInterval: usageInterval,
+            hasProblem: hasProblem,
+            now: Date()) else { return }
+
+        self[keyPath: source].task?.cancel()   // cancel a slow in-flight fetch rather than overlap
+        self[keyPath: source].task = Task { [weak self] in
+            let outcome = await fetch()
+            guard let self, !Task.isCancelled else { return }
+            self[keyPath: source].health = outcome.health
+            if outcome.succeeded {
+                self[keyPath: source].incidents = outcome.incidents
+                // Before the success stamp: a source that distinguishes its first landed poll reads
+                // `lastSuccess == nil` to do it.
+                onSuccess(self, outcome)
+                self[keyPath: source].lastSuccess = self.currentDate()
+                self.advanceEpisodeSubscription()
+                // The first 200 clears any hold — PollingBackoff's own rule (ADR-0008/0032), reused
+                // verbatim rather than re-decided here. A 200 that still carried a 429 on a second
+                // request is not a clear: the page is still asking.
+                if self[keyPath: source].backoff.isHolding, outcome.rateLimited == nil {
+                    AppLogger.network.notice("\(clearedMessage, privacy: .public)")
+                    self[keyPath: source].backoff = self[keyPath: source].backoff.reset()
+                }
+            }
+            if case let .some(retryAfter) = outcome.rateLimited {
+                // Re-set (never escalate) the hold at the server's number, or 180 s without one.
+                let candidate = self[keyPath: source].backoff.honoring(retryAfter: retryAfter)
+                let current = self[keyPath: source].backoff
+                // A source that already holds and still answered 429 keeps the longer of the two:
+                // only a *partial* success reaches here while holding — a 200 on one request and a
+                // 429 on the other — and honouring the shorter would go back to a page that asked
+                // for more. A source whose hold has elapsed takes the new number outright, which is
+                // the only path a single-request source ever takes.
+                if candidate.interval > current.interval || !current.isHolding || !outcome.succeeded {
+                    self[keyPath: source].backoff = candidate
+                }
+                AppLogger.network.notice(
+                    "\(logPrefix, privacy: .public) backoff holding for \(self[keyPath: source].backoff.interval, privacy: .public)s")
+            }
+            self.reRenderForCurrentTime()
+        }
+    }
+
     /// The GitHub provider's switch changed in Settings: poll **now** rather than at the next tick.
-    /// Clearing `lastGitHubSuccess` is what makes the poll due: the cadence gate measures from the
-    /// last success. Turning the provider *off* takes the same path — the poll sees the disabled
-    /// config and clears the plate on the spot.
+    /// `makeDue` is what makes the poll due: the cadence gate measures from the last success, and a
+    /// live hold would outrank the request. Turning the provider *off* takes the same path — the poll
+    /// sees the disabled config and clears the plate on the spot.
     private func gitHubMonitoringChanged() {
-        lastGitHubSuccess = nil
-        githubBackoff = githubBackoff.reset()
+        githubSource.makeDue()
         pollGitHubIfDue()
     }
 
-    /// The GitHub status source's heartbeat — the same shape as Claude's, on its own `SignalHub`
-    /// subscription so the two never contend for a signal.
-    ///
-    /// Started unconditionally; the poll itself is what checks whether the provider is enabled.
+    /// Claude's status heartbeat. `pollFirst: false` — its status also rides the usage tick, so it
+    /// already has a second entrance covering the interval before the first wait elapses. Both
+    /// entrances funnel through the same `isDue` gate and the same in-flight task, so the two
+    /// heartbeats cannot double the request rate.
+    private func startStatusLoop() {
+        startStatusSourceLoop(
+            subscriber: .status,
+            pollFirst: false,
+            loopTask: \.claudeSource.loopTask,
+            interval: { $0.statusPollInterval() },
+            poll: { $0.pollStatusIfDue() })
+    }
+
     private func startGitHubLoop() {
-        let scheduler = LivePollScheduler(signals: signals.newStream(for: .github))
-        githubLoopTask = Task { [weak self] in
-            // Poll **before** the first wait. `waitForNextPoll` sleeps the whole interval up front, so
-            // starting with it would leave the section empty for the five-minute politeness floor
-            // after every launch. Claude never had this problem because its status also rides the
-            // usage tick; this source has no second heartbeat to cover for it.
-            self?.pollGitHubIfDue()
-            while !Task.isCancelled {
-                guard let self else { return }
-                let wait = self.githubPollInterval()
-                switch await scheduler.waitForNextPoll(interval: wait) {
-                case .interrupted(.sleep):
-                    await scheduler.waitWhileAsleep()
-                case .elapsed, .interrupted:
-                    break
-                }
-                guard !Task.isCancelled else { return }
-                self.pollGitHubIfDue()
-            }
-        }
+        startStatusSourceLoop(
+            subscriber: .github,
+            pollFirst: true,
+            loopTask: \.githubSource.loopTask,
+            interval: { $0.githubPollInterval() },
+            poll: { $0.pollGitHubIfDue() })
     }
 
     /// GitHub's own cadence: its own hold, its own problem signal. `usageInterval` is always `nil` —
@@ -1671,124 +1721,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// optional for.
     private func githubPollInterval() -> TimeInterval {
         StatusCadence.nextInterval(
-            backoff: githubBackoff,
+            backoff: githubSource.backoff,
             usageInterval: nil,
-            hasProblem: lastGitHubHealth?.worstProblem(of: .github) != nil)
+            hasProblem: githubSource.health?.worstProblem(of: .github) != nil)
     }
 
     /// Fetch GitHub's status page when its own cadence says it is due.
-    ///
-    /// A near-twin of `pollStatusIfDue`, deliberately not folded into it: the two differ in every
-    /// input that matters — endpoint, User-Agent, config type, backoff, success marker, health slot —
-    /// so a shared implementation would be a parameter list as long as the body.
     private func pollGitHubIfDue() {
         let config = PersistedConfig.githubMonitoring
-        guard config.isMonitoringAnything else {
-            // Nothing to watch. Drop any stale health so the popup's GitHub section disappears with
-            // the switch rather than lingering until the next launch.
-            if lastGitHubHealth != nil || !lastGitHubIncidents.isEmpty {
-                lastGitHubHealth = nil
-                lastGitHubSuccess = nil
-                lastGitHubIncidents = []
-                reRenderForCurrentTime()
-            }
-            return
-        }
-        guard StatusCadence.isDue(
-            lastSuccess: lastGitHubSuccess, backoff: githubBackoff, usageInterval: nil,
-            hasProblem: lastGitHubHealth?.worstProblem(of: .github) != nil, now: Date()) else { return }
-
-        githubTask?.cancel()
         let transport = statusTransport
-        githubTask = Task { [weak self] in
-            let health: StatusHealth
-            var succeeded = false
-            var rateLimited: TimeInterval??
-            var fetchedSummary: StatusSummary?
-            do {
-                let summary = try await StatusClient.fetch(
-                    transport: transport,
-                    endpoint: StatusHealth.githubEndpoint,
-                    // Not `claude-code/<version>`: that string is correct for Anthropic's page and
-                    // misleading anywhere else (ADR-0119 §4).
-                    userAgent: "TokenPace/\(TokenPaceKit.version)")
-                health = .fromGitHub(summary, config: config)
-                fetchedSummary = summary
-                succeeded = true
-            } catch StatusFetchError.rateLimited(let retryAfter) {
-                health = .unknownGitHub(for: config)
-                rateLimited = .some(retryAfter)
-            } catch {
-                health = .unknownGitHub(for: config)
-            }
-            guard let self, !Task.isCancelled else { return }
-            self.lastGitHubHealth = health
-            if succeeded, let summary = fetchedSummary {
-                // GitHub's incidents, filtered against GitHub's own monitored names — never Claude's.
-                // A failed poll leaves the previous list alone: an unreachable status page is not
-                // evidence an incident ended.
-                self.lastGitHubIncidents = IncidentVisibility.visible(
-                    in: summary,
-                    monitoredComponentNames: StatusHealth.monitoredGitHubComponentNames(for: config),
-                    now: self.currentDate(),
-                    maxAge: PersistedConfig.incidentMaxAge)
-                self.advanceEpisodeSubscription()
-            }
-            if succeeded {
-                self.lastGitHubSuccess = self.currentDate()
-                if self.githubBackoff.isHolding {
-                    AppLogger.network.notice("github status: 200 cleared the backoff hold")
-                    self.githubBackoff = self.githubBackoff.reset()
+        let now = currentDate()
+        let maxAge = PersistedConfig.incidentMaxAge
+        pollStatusSource(
+            \.githubSource,
+            isEnabled: config.isMonitoringAnything,
+            usageInterval: nil,
+            hasProblem: githubSource.health?.worstProblem(of: .github) != nil,
+            logPrefix: "github status",
+            clearedMessage: "github status: 200 cleared the backoff hold",
+            fetch: {
+                do {
+                    let summary = try await StatusClient.fetch(
+                        transport: transport,
+                        endpoint: StatusHealth.githubEndpoint,
+                        // Not `claude-code/<version>`: that string is correct for Anthropic's page and
+                        // misleading anywhere else (ADR-0119 §4).
+                        userAgent: "TokenPace/\(TokenPaceKit.version)")
+                    return StatusFetchOutcome(
+                        health: .fromGitHub(summary, config: config),
+                        succeeded: true,
+                        // GitHub's incidents, filtered against GitHub's own monitored names — never
+                        // Claude's.
+                        incidents: IncidentVisibility.visible(
+                            in: summary,
+                            monitoredComponentNames: StatusHealth.monitoredGitHubComponentNames(for: config),
+                            now: now,
+                            maxAge: maxAge),
+                        summary: summary)
+                } catch StatusFetchError.rateLimited(let retryAfter) {
+                    return StatusFetchOutcome(
+                        health: .unknownGitHub(for: config), rateLimited: .some(retryAfter))
+                } catch {
+                    return StatusFetchOutcome(health: .unknownGitHub(for: config))
                 }
-            } else if case let .some(retryAfter) = rateLimited {
-                self.githubBackoff = self.githubBackoff.honoring(retryAfter: retryAfter)
-                AppLogger.network.notice(
-                    "github status backoff holding for \(self.githubBackoff.interval, privacy: .public)s")
-            }
-            self.reRenderForCurrentTime()
-        }
+            })
     }
 
     // MARK: Codex status source (#503)
 
     /// The Codex provider's switches changed in Settings: poll **now** rather than at the next tick.
     private func codexMonitoringChanged() {
-        lastCodexSuccess = nil
-        codexBackoff = codexBackoff.reset()
+        codexSource.makeDue()
         pollCodexIfDue()
     }
 
-    /// Codex's status heartbeat — the same shape as the other two, on its own `SignalHub`
-    /// subscription so no source contends for a signal.
     private func startCodexLoop() {
-        let scheduler = LivePollScheduler(signals: signals.newStream(for: .codex))
-        codexLoopTask = Task { [weak self] in
-            // Poll **before** the first wait, for the reason GitHub's loop does: `waitForNextPoll`
-            // sleeps the whole interval up front, so starting with it would leave the plate empty for
-            // the five-minute politeness floor after every launch.
-            self?.pollCodexIfDue()
-            while !Task.isCancelled {
-                guard let self else { return }
-                let wait = self.codexPollInterval()
-                switch await scheduler.waitForNextPoll(interval: wait) {
-                case .interrupted(.sleep):
-                    await scheduler.waitWhileAsleep()
-                case .elapsed, .interrupted:
-                    break
-                }
-                guard !Task.isCancelled else { return }
-                self.pollCodexIfDue()
-            }
-        }
+        startStatusSourceLoop(
+            subscriber: .codex,
+            pollFirst: true,
+            loopTask: \.codexSource.loopTask,
+            interval: { $0.codexPollInterval() },
+            poll: { $0.pollCodexIfDue() })
     }
 
     /// Codex's own cadence: its own hold, its own problem signal. `usageInterval` is `nil` — this
     /// provider's status half has no usage poll to settle with.
     private func codexPollInterval() -> TimeInterval {
         StatusCadence.nextInterval(
-            backoff: codexBackoff,
+            backoff: codexSource.backoff,
             usageInterval: nil,
-            hasProblem: lastCodexHealth?.worstProblem(of: .codex) != nil)
+            hasProblem: codexSource.health?.worstProblem(of: .codex) != nil)
     }
 
     /// Fetch Codex's status when its own cadence says it is due — two requests, and only the first is
@@ -1802,120 +1804,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// records which path was taken so Troubleshoot can say so.
     private func pollCodexIfDue() {
         let config = PersistedConfig.codexMonitoring
-        guard config.isMonitoringAnything else {
-            if lastCodexHealth != nil || !lastCodexIncidents.isEmpty {
-                lastCodexHealth = nil
-                lastCodexSuccess = nil
-                lastCodexIncidents = []
-                reRenderForCurrentTime()
-            }
-            return
-        }
-        guard StatusCadence.isDue(
-            lastSuccess: lastCodexSuccess, backoff: codexBackoff, usageInterval: nil,
-            hasProblem: lastCodexHealth?.worstProblem(of: .codex) != nil, now: Date()) else { return }
-
-        codexTask?.cancel()
         let transport = statusTransport
         let userAgent = "TokenPace/\(TokenPaceKit.version)"
-        codexTask = Task { [weak self] in
-            let health: StatusHealth
-            var succeeded = false
-            var rateLimited: TimeInterval??
-            var incidents: [VisibleIncident] = []
-            var fromProxy = false
-            var fetchedSummary: StatusSummary?
-            do {
-                let summary = try await StatusClient.fetch(
-                    transport: transport, endpoint: StatusHealth.codexEndpoint, userAgent: userAgent)
-                let names = CodexStatusMapping.componentNames(in: summary)
-
-                // The incident request, on its own. `try?` around it would swallow a 429 — the one
-                // failure the caller must act on — so it is caught by hand and re-surfaced below.
-                var feed: CodexIncidentFeed?
-                var incidentRateLimit: TimeInterval??
+        let now = currentDate()
+        let maxAge = PersistedConfig.incidentMaxAge
+        // Deferred, not read here: it re-reads the journal from disk, so it must not run before the
+        // request, nor on a poll whose components request fails.
+        let reconstructedAges: @Sendable () async -> [String: Date] = { [weak self] in
+            await MainActor.run { self?.reconstructedCodexAges() ?? [:] }
+        }
+        pollStatusSource(
+            \.codexSource,
+            isEnabled: config.isMonitoringAnything,
+            usageInterval: nil,
+            hasProblem: codexSource.health?.worstProblem(of: .codex) != nil,
+            logPrefix: "codex status",
+            clearedMessage: "codex status: 200 cleared the backoff hold",
+            fetch: {
                 do {
-                    feed = try await CodexIncidentClient.fetch(
-                        transport: transport, userAgent: userAgent)
-                    fromProxy = true
-                } catch StatusFetchError.rateLimited(let retryAfter) {
-                    incidentRateLimit = .some(retryAfter)
-                } catch {
-                    AppLogger.network.notice(
-                        "codex incidents unavailable — statuses stand, incident rows drop")
-                }
+                    let summary = try await StatusClient.fetch(
+                        transport: transport, endpoint: StatusHealth.codexEndpoint, userAgent: userAgent)
+                    let names = CodexStatusMapping.componentNames(in: summary)
 
-                let monitored = StatusHealth.monitoredCodexComponentNames(for: config)
-                let changedAt = feed.map {
-                    CodexStatusMapping.changedAt(in: $0, componentNames: names)
-                } ?? [:]
-                // Order of age sources: the incident feed's own `component_impacts.start_at`, then a
-                // reconstruction from the journal's `status` records, then nothing. `updated_at` is
-                // never one of them — on this page it is the same value on every component.
-                let reconstructed = self?.reconstructedCodexAges() ?? [:]
-                health = .fromCodex(summary, config: config) { name in
-                    changedAt[name] ?? reconstructed[name]
+                    // The incident request, on its own. `try?` around it would swallow a 429 — the one
+                    // failure the caller must act on — so it is caught by hand and re-surfaced below.
+                    var feed: CodexIncidentFeed?
+                    var incidentRateLimit: TimeInterval??
+                    var fromProxy = false
+                    do {
+                        feed = try await CodexIncidentClient.fetch(
+                            transport: transport, userAgent: userAgent)
+                        fromProxy = true
+                    } catch StatusFetchError.rateLimited(let retryAfter) {
+                        incidentRateLimit = .some(retryAfter)
+                    } catch {
+                        AppLogger.network.notice(
+                            "codex incidents unavailable — statuses stand, incident rows drop")
+                    }
+
+                    let monitored = StatusHealth.monitoredCodexComponentNames(for: config)
+                    let changedAt = feed.map {
+                        CodexStatusMapping.changedAt(in: $0, componentNames: names)
+                    } ?? [:]
+                    // Order of age sources: the incident feed's own `component_impacts.start_at`, then
+                    // a reconstruction from the journal's `status` records, then nothing. `updated_at`
+                    // is never one of them — on this page it is the same value on every component.
+                    let reconstructed = await reconstructedAges()
+                    var outcome = StatusFetchOutcome(
+                        health: .fromCodex(summary, config: config) { name in
+                            changedAt[name] ?? reconstructed[name]
+                        },
+                        succeeded: true,
+                        summary: summary)
+                    outcome.secondaryFetched = fromProxy
+                    if let feed {
+                        outcome.incidents = CodexStatusMapping.visibleIncidents(
+                            in: feed, componentNames: names, monitoredComponentNames: monitored,
+                            now: now, maxAge: maxAge)
+                    }
+                    // A 429 on the incident request holds the pair even though the components request
+                    // returned 200: the page asked, and one page means one limiter.
+                    if case let .some(retryAfter) = incidentRateLimit {
+                        outcome.rateLimited = .some(retryAfter)
+                    }
+                    return outcome
+                } catch StatusFetchError.rateLimited(let retryAfter) {
+                    return StatusFetchOutcome(
+                        health: .unknownCodex(for: config), rateLimited: .some(retryAfter))
+                } catch {
+                    return StatusFetchOutcome(health: .unknownCodex(for: config))
                 }
-                fetchedSummary = summary
-                if let feed {
-                    incidents = CodexStatusMapping.visibleIncidents(
-                        in: feed, componentNames: names, monitoredComponentNames: monitored,
-                        now: self?.currentDate() ?? Date(), maxAge: PersistedConfig.incidentMaxAge)
-                }
-                succeeded = true
-                // A 429 on the incident request holds the pair even though the components request
-                // returned 200: the page asked, and one page means one limiter.
-                if case let .some(retryAfter) = incidentRateLimit { rateLimited = .some(retryAfter) }
-            } catch StatusFetchError.rateLimited(let retryAfter) {
-                health = .unknownCodex(for: config)
-                rateLimited = .some(retryAfter)
-            } catch {
-                health = .unknownCodex(for: config)
-            }
-            guard let self, !Task.isCancelled else { return }
-            self.lastCodexHealth = health
-            if succeeded {
-                self.lastCodexIncidents = incidents
+            },
+            onSuccess: { app, outcome in
                 // Which path the incidents came from, logged on every change. A success on the
                 // undocumented endpoint must never be silent about being undocumented, and the
                 // degraded run must be distinguishable from "there were no incidents".
-                if self.codexIncidentsFromProxy != fromProxy || self.lastCodexSuccess == nil {
+                let fromProxy = outcome.secondaryFetched
+                if app.codexIncidentsFromProxy != fromProxy || app.codexSource.lastSuccess == nil {
                     AppLogger.network.notice(
                         "codex incidents source=\(fromProxy ? "proxy" : "unavailable", privacy: .public)")
                 }
-                self.codexIncidentsFromProxy = fromProxy
-                self.lastCodexSuccess = self.currentDate()
-                self.advanceEpisodeSubscription()
-                if self.codexBackoff.isHolding, rateLimited == nil {
-                    AppLogger.network.notice("codex status: 200 cleared the backoff hold")
-                    self.codexBackoff = self.codexBackoff.reset()
-                }
+                app.codexIncidentsFromProxy = fromProxy
                 // Journal the poll, same live-only / enabled gates as Claude's. Not merely
-                // bookkeeping here: these lines **are** the fallback age source, so a Codex row's
-                // age exists only because this ran. The incident body is never written — half a
-                // megabyte per poll of history nobody reads back.
-                if let summary = fetchedSummary,
-                   PersistedConfig.journalEnabled, self.currentScenario == .realNetwork {
+                // bookkeeping here: these lines **are** the fallback age source, so a Codex row's age
+                // exists only because this ran. The incident body is never written — half a megabyte
+                // per poll of history nobody reads back.
+                if let summary = outcome.summary,
+                   PersistedConfig.journalEnabled, app.currentScenario == .realNetwork {
                     let record = JournalRecord.status(
-                        from: summary, health: health, now: self.currentDate(), provider: .codex)
-                    let at = self.currentDate()
-                    Task { [usageJournal = self.usageJournal] in
+                        from: summary, health: outcome.health, now: app.currentDate(), provider: .codex)
+                    let at = app.currentDate()
+                    Task { [usageJournal = app.usageJournal] in
                         await usageJournal.appendStatus(record, at: at)
                     }
                 }
-            }
-            if case let .some(retryAfter) = rateLimited {
-                // Both requests feed one hold; the longer `Retry-After` wins, since honouring the
-                // shorter would go back to a page that asked for more.
-                let candidate = self.codexBackoff.honoring(retryAfter: retryAfter)
-                if candidate.interval > self.codexBackoff.interval || !self.codexBackoff.isHolding {
-                    self.codexBackoff = candidate
-                }
-                AppLogger.network.notice(
-                    "codex status backoff holding for \(self.codexBackoff.interval, privacy: .public)s")
-            }
-            self.reRenderForCurrentTime()
-        }
+            })
     }
 
     // MARK: Codex quota source (#504)
@@ -2076,107 +2059,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// usage cadence to settle with, so the floor stands on its own.
     private func statusPollInterval() -> TimeInterval {
         StatusCadence.nextInterval(
-            backoff: statusBackoff,
+            backoff: claudeSource.backoff,
             usageInterval: providerMonitoring.usageApiEnabled ? lastOutput?.interval : nil,
-            hasProblem: lastStatusHealth?.worstProblem != nil)
+            hasProblem: claudeSource.health?.worstProblem != nil)
     }
 
     /// Fetch the Claude status page when `StatusCadence` says it is due. Called from the status loop's
-    /// own heartbeat and from each usage tick; the `isDue` gate below is what makes calling it from
-    /// both harmless.
+    /// own heartbeat and from each usage tick; the `isDue` gate is what makes calling it from both
+    /// harmless.
+    ///
+    /// The one source with no enabled/disabled teardown of its own: `Claude API` rides along whenever
+    /// anything at all is monitored, so this passes `isEnabled: true` and lets
+    /// `providerMonitoringChanged` clear the health when the services change.
     ///
     /// - Parameter usageInterval: The usage cadence to settle with when one is running, or `nil` to
     ///   stand on the politeness floor alone.
     private func pollStatusIfDue(usageInterval: TimeInterval? = nil) {
-        // While a service problem is in progress, poll faster (down to the 60-s problem floor) to
-        // catch escalation/recovery quickly; otherwise the polite 5-min floor applies. An active 429
-        // hold outranks both — the page named a number and we honour it.
-        let hasProblem = lastStatusHealth?.worstProblem != nil
-        guard StatusCadence.isDue(
-            lastSuccess: lastStatusSuccess, backoff: statusBackoff, usageInterval: usageInterval,
-            hasProblem: hasProblem, now: Date()) else { return }
-        // Cancel any slow in-flight fetch rather than overlap.
-        statusTask?.cancel()
         let transport = statusTransport
         // Snapshot the config for this fetch — which logical services to resolve, and which grey
         // `unknown` lines to show if it fails. `Claude API` rides along whenever anything at all is
         // monitored, which is why the usage flag travels with the service config.
         let config = monitoredServices
         let usageApiEnabled = providerMonitoring.usageApiEnabled
-        statusTask = Task { [weak self] in
-            let health: StatusHealth
-            let succeeded: Bool
-            var fetchedSummary: StatusSummary?
-            var fetchedBody: Data?
-            // The 429's `Retry-After` (or `nil` for "no usable hint"), when this attempt was rate
-            // limited. `nil` outer value = not rate limited at all — two different nils, hence the
-            // double optional rather than a bare `TimeInterval?`.
-            var rateLimitHint: TimeInterval??
-            do {
-                let (summary, body) = try await StatusClient.fetchRaw(transport: transport)
-                health = .from(summary, config: config, usageApiEnabled: usageApiEnabled)
-                fetchedSummary = summary
-                fetchedBody = body
-                succeeded = true
-            } catch {
-                // Any failure → honest "unknown" (grey), and don't advance lastStatusSuccess so the
-                // next tick retries. A 429 additionally arms this source's own hold, so "retries"
-                // means "no sooner than the page asked for".
-                if case StatusFetchError.rateLimited(let retryAfter) = error {
-                    rateLimitHint = .some(retryAfter)
+        let now = currentDate()
+        let maxAge = PersistedConfig.incidentMaxAge
+        pollStatusSource(
+            \.claudeSource,
+            isEnabled: true,
+            usageInterval: usageInterval,
+            // While a service problem is in progress, poll faster (down to the 60-s problem floor) to
+            // catch escalation/recovery quickly; otherwise the polite 5-min floor applies. An active
+            // 429 hold outranks both — the page named a number and we honour it.
+            hasProblem: claudeSource.health?.worstProblem != nil,
+            logPrefix: "status",
+            clearedMessage: "status backoff cleared by a successful poll",
+            fetch: {
+                do {
+                    let (summary, body) = try await StatusClient.fetchRaw(transport: transport)
+                    var outcome = StatusFetchOutcome(
+                        health: .from(summary, config: config, usageApiEnabled: usageApiEnabled),
+                        succeeded: true,
+                        incidents: IncidentVisibility.visible(
+                            in: summary, config: config, usageApiEnabled: usageApiEnabled,
+                            now: now, maxAge: maxAge),
+                        summary: summary)
+                    outcome.body = body
+                    return outcome
+                } catch {
+                    // Any failure → honest "unknown" (grey), and the driver does not advance the
+                    // success marker, so the next tick retries. A 429 additionally arms this source's
+                    // own hold, so "retries" means "no sooner than the page asked for".
+                    var outcome = StatusFetchOutcome(
+                        health: .unknown(for: config, usageApiEnabled: usageApiEnabled))
+                    if case StatusFetchError.rateLimited(let retryAfter) = error {
+                        outcome.rateLimited = .some(retryAfter)
+                    }
+                    return outcome
                 }
-                health = .unknown(for: config, usageApiEnabled: usageApiEnabled)
-                succeeded = false
-            }
-            guard let self, !Task.isCancelled else { return }
-            self.lastStatusHealth = health
-            if succeeded {
-                self.lastStatusSuccess = self.currentDate()
-                // The first 200 clears any hold — PollingBackoff's own rule (ADR-0008/0032), reused
-                // verbatim rather than re-decided here.
-                if self.statusBackoff.isHolding {
-                    AppLogger.network.notice("status backoff cleared by a successful poll")
-                    self.statusBackoff = self.statusBackoff.reset()
-                }
-            } else if let retryAfter = rateLimitHint {
-                // Re-set (never escalate) the hold at the server's number, or 180 s without one.
-                self.statusBackoff = self.statusBackoff.honoring(retryAfter: retryAfter)
-                AppLogger.network.notice(
-                    "status backoff holding for \(self.statusBackoff.interval, privacy: .public)s")
-            }
-            // Recompute which incidents are worth showing, then fold the poll into the episode
-            // subscription. A failed poll leaves the previous list in place — an unreachable status
-            // page is not evidence that an incident ended.
-            if succeeded, let summary = fetchedSummary {
-                self.lastClaudeIncidents = IncidentVisibility.visible(
-                    in: summary, config: config, usageApiEnabled: usageApiEnabled,
-                    now: self.currentDate(),
-                    maxAge: PersistedConfig.incidentMaxAge)
-                self.advanceEpisodeSubscription()
-            }
-            // Journal the successful status poll as its own data sample — same live-only / enabled
-            // gates as the usage seam. Status rides a separate cadence, so it does **not** run the
-            // usage gap detector; it is an independent sample in the shared file.
-            if succeeded, let summary = fetchedSummary,
-               PersistedConfig.journalEnabled, self.currentScenario == .realNetwork {
-                let record = JournalRecord.status(from: summary, health: health, now: self.currentDate())
-                let at = self.currentDate()
-                Task { [usageJournal = self.usageJournal] in await usageJournal.appendStatus(record, at: at) }
-            }
-            // Dev payload log (ADR-0071 §10): the raw body, written only when the material content
-            // changed. Same live-only gate as the journal.
-            if succeeded, let summary = fetchedSummary, let body = fetchedBody,
-               PersistedConfig.statusPayloadLogEnabled, self.currentScenario == .realNetwork {
-                let at = self.currentDate()
-                Task { [log = self.statusPayloadLog] in
-                    if await log.recordIfChanged(body: body, summary: summary, at: at) {
-                        AppLogger.journal.info("status-payload-log: recorded a material change")
+            },
+            onSuccess: { app, outcome in
+                guard let summary = outcome.summary else { return }
+                // Journal the successful status poll as its own data sample — same live-only /
+                // enabled gates as the usage seam. Status rides a separate cadence, so it does **not**
+                // run the usage gap detector; it is an independent sample in the shared file.
+                if PersistedConfig.journalEnabled, app.currentScenario == .realNetwork {
+                    let record = JournalRecord.status(
+                        from: summary, health: outcome.health, now: app.currentDate())
+                    let at = app.currentDate()
+                    Task { [usageJournal = app.usageJournal] in
+                        await usageJournal.appendStatus(record, at: at)
                     }
                 }
-            }
-            // Re-render with the new status against the retained usage output.
-            self.reRenderForCurrentTime()
-        }
+                // Dev payload log (ADR-0071 §10): the raw body, written only when the material content
+                // changed. Same live-only gate as the journal.
+                if let body = outcome.body,
+                   PersistedConfig.statusPayloadLogEnabled, app.currentScenario == .realNetwork {
+                    let at = app.currentDate()
+                    Task { [log = app.statusPayloadLog] in
+                        if await log.recordIfChanged(body: body, summary: summary, at: at) {
+                            AppLogger.journal.info("status-payload-log: recorded a material change")
+                        }
+                    }
+                }
+            })
     }
 
     // MARK: - Update check
@@ -2865,13 +2830,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .withAwaitingInput(awaitingInput)
             // In the services-only mode the age shown is the **status** poll's, since that is the only
             // thing being fetched. A no-op in every other mode.
-            .withStatusAge(lastStatusSuccess.map { max(0, now.timeIntervalSince($0)) })
+            .withStatusAge(claudeSource.lastSuccess.map { max(0, now.timeIntervalSince($0)) })
             // Each satellite provider's own poll age — separate cadences, so one age cannot stand for
             // another.
-            .withProviderStatusAge(.github, lastGitHubSuccess.map { max(0, now.timeIntervalSince($0)) })
-            .withProviderIncidents(.github, lastGitHubIncidents)
-            .withProviderStatusAge(.codex, lastCodexSuccess.map { max(0, now.timeIntervalSince($0)) })
-            .withProviderIncidents(.codex, lastCodexIncidents)
+            .withProviderStatusAge(.github, githubSource.lastSuccess.map { max(0, now.timeIntervalSince($0)) })
+            .withProviderIncidents(.github, githubSource.incidents)
+            .withProviderStatusAge(.codex, codexSource.lastSuccess.map { max(0, now.timeIntervalSince($0)) })
+            .withProviderIncidents(.codex, codexSource.incidents)
             // Codex's bars ride their own field to the view, never `rows` — appending them there
             // renumbers the indices `blockingReset` is keyed to and moves the red badge onto a row
             // that is not the blocker.
@@ -2880,7 +2845,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Claude's plate gets Claude's incidents only; the others ride the calls above. The
             // concatenated `lastVisibleIncidents` is for the episode subscription and its
             // notifications, where the provider does not change what the banner says.
-            .withIncidents(lastClaudeIncidents)
+            .withIncidents(claudeSource.incidents)
             .withSubscription(currentSubscriptionState())
             // Graft the brand-coloured plan label ("Max (5x)") from the Keychain rate-limit tier — a
             // plan mark, not a secret. `nil` (no tier / unreadable creds) draws just "Claude".
