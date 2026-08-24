@@ -30,6 +30,11 @@ public struct BarView: Sendable, Equatable {
     /// "waiting for a limit to reset" rather than "ready to start". Only ever `true` alongside
     /// ``idle``; `false` on every normal bar and on a non-blocked idle bar.
     public let blocked: Bool
+    /// Animation identity for this bar when ``window`` cannot name it — a Codex window whose length is
+    /// neither 5 h nor 7 d (`CodexQuotaNormalizer.title`, e.g. `"3-hour"`). `nil` on every Claude bar,
+    /// where `window.id` already is the identity. The pair `(provider, rowID)` is what keeps two
+    /// providers' colour transitions apart (``TweenKey``).
+    public let rowID: String?
     // No `weeklyHeadroom` here since #381: the idle "ready to start" fill is **green** whatever the week
     // is doing, so the fill no longer needs the weekly verdict carried alongside an inert layout. The
     // gate itself is untouched — `PacingModel.weeklyHasHeadroom` still decides `blueAllowed` for the
@@ -37,14 +42,19 @@ public struct BarView: Sendable, Equatable {
 
     public init(
         layout: BarLayout, indicator: LimitIndicator, window: LimitWindow,
-        idle: Bool = false, blocked: Bool = false
+        idle: Bool = false, blocked: Bool = false, rowID: String? = nil
     ) {
         self.layout = layout
         self.indicator = indicator
         self.window = window
         self.idle = idle
         self.blocked = blocked
+        self.rowID = rowID
     }
+
+    /// The row half of this bar's ``TweenKey`` — ``rowID`` when it names the window, `window.id`
+    /// otherwise.
+    public var tweenRow: String { rowID ?? window.id }
 
     /// The bar's pacing **severity** for reset-countdown selection (#103, ADR-0028/0029). Delegates to
     /// `BarLayout.severity`, except an **idle** 5-hour bar is always ``PacingSeverity/calm``: it carries
@@ -60,46 +70,58 @@ public struct BarView: Sendable, Equatable {
     public var isCalm: Bool { severity == .calm || severity == .farBehind }
 }
 
+// MARK: - ProviderBlock
+
+/// One provider's share of the widget: its pacing bars, stacked in the order given, plus the
+/// per-provider decorations that used to belong to the whole item.
+///
+/// **`bars` comes from the data, never from a fixed pair.** Claude reports two windows and Codex one;
+/// a provider that grows a third gets a third bar with no change here. The count is what
+/// `StatusItemView.drawBlock` lays out, so `n = 2` keeps the geometry the two-bar stack has always
+/// had (ADR-0128).
+///
+/// Never empty — a provider with nothing to draw is left out of ``MenuBarMode/expanded(blocks:)``
+/// instead of contributing a blank column.
+public struct ProviderBlock: Sendable, Equatable {
+    /// Whose bars these are. Blocks are ordered by ``ProviderID/displayIndex``, the same order the
+    /// Settings list and the popup plates use, and it is the **only** cue to identity in the widget —
+    /// nothing is drawn to name the provider (ADR-0128).
+    public let provider: ProviderID
+    /// The bars, top to bottom. Non-empty.
+    public let bars: [BarView]
+    /// This provider's pause glyph, drawn leading its own bars: `true` when it has no path to work.
+    public let blockedPause: Bool
+    /// This provider's money-credits marker, drawn leading its own bars, or `nil` for no icon.
+    public let credits: CreditsMarker?
+
+    public init(provider: ProviderID, bars: [BarView], blockedPause: Bool = false,
+                credits: CreditsMarker? = nil) {
+        self.provider = provider
+        self.bars = bars
+        self.blockedPause = blockedPause
+        self.credits = credits
+    }
+}
+
 // MARK: - MenuBarMode
 
 /// What the menu-bar item should currently show — the discriminated result `StatusItemView`
 /// switches on when drawing.
-///
-/// Cases:
-/// - ``expanded(fiveHour:sevenDay:)``: the normal widget — two stacked bars (5h top, 7d bottom) and
-///   **no countdown**, ever (ADR-0091). Shown whenever work is running on the subscription, at any
-///   `utilization` below the cap — the widget never collapses to a compact glyph (ADR-0015).
-/// - ``error(fiveHour:sevenDay:reset:which:)``: there is no usable data to show — polling has been
-///   failing long enough to surface a ⚠️ glyph (issue #12), **or** it is a cold start before the
-///   first poll resolves (e.g. token expired, API unreachable). The bars are **optional**: present
-///   during the 30–60 min "stale" phase (⚠️ drawn alongside the last known bars), `nil` past 60 min
-///   or on a cold start (⚠️ alone).
 public enum MenuBarMode: Sendable, Equatable {
-    /// Full widget: 5h bar, 7d bar, and an optional reset countdown.
+    /// Full widget: one ``ProviderBlock`` per provider with usage to show, left to right in
+    /// ``ProviderID/displayOrder``, and **no countdown**, ever (ADR-0091). Shown whenever work is
+    /// running on a subscription, at any `utilization` below the cap — the widget never collapses to a
+    /// compact glyph (ADR-0015).
     ///
-    /// Either bar may be `nil` — whichever one the user chose to hide while it is calm
-    /// (``TopBarHiding``, ADR-0086; the boolean predecessor could only ever hide the 7-day one).
-    /// A `nil` here **never** means "no data": both windows always resolve on this path, so it means
-    /// "deliberately not drawn". That is the opposite of ``error``, where `nil` *is* absent data.
-    ///
-    /// **Invariant: at most one of the two is `nil`.** `TopBarHiding` names a single window, so it can
-    /// elide at most one bar whatever the severities are — the widget never renders empty, and the view's
-    /// "no bars at all" branch is unreachable. See `TopBarHiding`'s own note for the argument.
-    ///
-    /// - Parameters:
-    ///   - fiveHour: The 5-hour bar (drawn on top), or `nil` when it is **hidden** because it is calm
-    ///     and the user picked `TopBarHiding.untilItNeedsAttention`. An **idle** 5-hour bar counts as calm, so it is
-    ///     hidden too — between sessions the widget then shows the 7-day bar alone.
-    ///   - sevenDay: The 7-day bar (drawn below). Never elided since ADR-0090 — the calm-hiding choice
-    ///     names only the 5-hour bar — but kept optional so the shape still mirrors ``error``, whose
-    ///     `nil` means absent data.
+    /// **Invariant: `blocks` is non-empty and no block has empty bars.** A provider whose only bar was
+    /// elided — `TopBarHiding` while calm (ADR-0086), or a poll that returned nothing — is dropped
+    /// whole rather than left as a gap, so the widget never renders empty and the view's "no bars"
+    /// branch stays unreachable.
     ///
     /// **No countdown field, by construction** (ADR-0091). A countdown only ever accompanies the
-    /// bars-less answers below, so "bars *and* a number" is not representable — the invariant is
-    /// held by the type rather than by a rule someone has to remember. This replaced a
-    /// `resetToShow:` parameter fed by `selectReset`'s 5h×7d severity table (#103, ADR-0029),
-    /// which the countdown rule made permanently `nil`.
-    case expanded(fiveHour: BarView?, sevenDay: BarView?)
+    /// bars-less answers below, so "bars *and* a number" is not representable — the invariant is held
+    /// by the type rather than by a rule someone has to remember.
+    case expanded(blocks: [ProviderBlock])
     /// A subscription-quota state with **no bars** — just the reset countdown, behind a single leading
     /// icon (ADR-0090). The menu bar answers one question, *can we work?*, and this case covers both
     /// answers that are not "yes, on the subscription":
@@ -114,20 +136,16 @@ public enum MenuBarMode: Sendable, Equatable {
     /// and which icon is drawn is decided by the orthogonal ``MenuBarLayout/blockedPause`` /
     /// ``MenuBarLayout/credits`` fields — not by this case, which only says "no bars, one countdown".
     ///
-    /// In both, a red "100 %" bar carries no pacing information: the blocking window is what gates work,
-    /// and a 5h bar refilling underneath a blocking 7d window changes nothing (you keep paying until the
-    /// *blocking* window resets — which is exactly the countdown shown). The view draws the icon plus a
-    /// single label, no bar column, and `itemWidth` reserves the icon + label width.
-    ///
-    /// Entered from the active-exhausted, idle-blocked and paying paths of ``make(from:now:)``.
-    /// The error/stale path never produces it (see ``usageMode``).
+    /// A red "100 %" bar would carry no pacing information: the blocking window is what gates work, and
+    /// a 5h bar refilling underneath a blocking 7d window changes nothing — you keep paying until the
+    /// *blocking* window resets, which is exactly the countdown shown.
     ///
     /// - Parameters:
+    ///   - provider: Whose quota blocks the work. The widget draws nothing to name it — the popup does
+    ///     — but it is what a screen reader speaks (``MenuBarLayout/spokenDescription``), and with two
+    ///     providers "you are blocked" is unusable without it.
     ///   - reset: The formatted countdown to the reset that ends this state.
-    ///   - which: Which window drives it (`.fiveHour` for a 5h-cadence reset, `.sevenDay` for a
-    ///     7-day-cadence or credits/monthly reset). Informational since ADR-0074 made the label
-    ///     format identical on both surfaces.
-    case iconOnlyReset(reset: String, which: LimitWindow)
+    case iconOnlyReset(provider: ProviderID, reset: String)
     /// A main window is exhausted while its `resets_at` is missing or unparseable (#167, ADR-0091): the
     /// state is known but its end is not. Drawn as a **lone ⚠️** — no bars, and no pause or currency
     /// glyph beside it.
@@ -142,21 +160,14 @@ public enum MenuBarMode: Sendable, Equatable {
     /// absent, this one that a fresh snapshot contradicts itself. They differ in what the app should do
     /// next (retry vs. report), and `.error` uses a different symbol, so the two never collide visually.
     ///
-    /// - Parameter which: Which exhausted window the missing reset belongs to, or `nil` when several
-    ///   are exhausted and none has a usable date. Informational only — the view draws no label.
-    case exhaustedUnknownReset(which: LimitWindow?)
-    /// Error state: a ⚠️ glyph, optionally with the last known bars beside it.
+    /// - Parameter provider: Whose exhausted window has the missing reset. Spoken, never drawn.
+    case exhaustedUnknownReset(provider: ProviderID)
+    /// There is no usable data: polling has been failing long enough to surface the no-data glyph, or
+    /// it is a cold start before the first poll resolves (token expired, API unreachable).
     ///
-    /// All associated values are `nil` together (⚠️ only) or all non-`nil` together (⚠️ + bars) —
-    /// the view treats a `nil` `fiveHour` as "draw the glyph alone". The split mirrors
-    /// ``expanded`` so the view reuses the same bar/reset drawing.
-    ///
-    /// - Parameters:
-    ///   - fiveHour: The last known 5-hour bar, or `nil` to draw the glyph alone.
-    ///   - sevenDay: The last known 7-day bar, or `nil`.
-    ///   - reset: The last known nearest-reset countdown, or `nil`.
-    ///   - which: Which window drove `reset`, or `nil`.
-    case error(fiveHour: BarView?, sevenDay: BarView?, reset: String?, which: LimitWindow?)
+    /// **No payload.** Data stale enough to reach this state is not shown at all rather than shown
+    /// with a warning beside it (ADR-0091), so the glyph is the whole widget.
+    case error
     /// The usage poll is off but services are still watched (#341): a `zzz` glyph, no bars, no
     /// countdown. The status dot — drawn outside this switch — remains the item's only live signal,
     /// which is the point: the widget reports what it is actually collecting.
@@ -184,7 +195,9 @@ public enum MenuBarMode: Sendable, Equatable {
     /// Bars are withheld rather than drawn from what survives: the five-hour window is idle in this
     /// state too, and the per-model windows inherit the empty weekly reset, so there is nothing left
     /// whose position on a track would mean anything.
-    case weeklyResetUnknown
+    ///
+    /// - Parameter provider: Whose weekly window has no reset. Spoken, never drawn.
+    case weeklyResetUnknown(provider: ProviderID)
 }
 
 // MARK: - CreditsMarker
@@ -250,10 +263,10 @@ public struct CreditsMarker: Sendable, Equatable {
 /// - `PacingModel.limitIndicator(...)` → each `BarView.indicator`
 /// - `BlockingReset` + `ResetClock.timeToReset(...)` → the countdown of the bars-less modes
 ///
-/// On the healthy path the result is always ``MenuBarMode/expanded`` — there is no compact/idle
-/// collapse (ADR-0015 removed it). The only mode variation is the error state (issue #12). The
-/// session-idle state (#100, ADR-0027) stays ``MenuBarMode/expanded`` too: it only recolours the 5h
-/// bar (``BarView/idle``) and swaps the reset label to the 7-day one — the bars never disappear.
+/// On the healthy path the result is always ``MenuBarMode/expanded(blocks:)`` — there is no
+/// compact/idle collapse (ADR-0015 removed it). The only mode variation is the error state
+/// (issue #12). The session-idle state (#100, ADR-0027) stays `expanded` too: it only recolours the
+/// 5h bar (``BarView/idle``) — the bars never disappear.
 public struct MenuBarLayout: Sendable, Equatable {
     /// The mode `StatusItemView` switches on to draw.
     public let mode: MenuBarMode
@@ -268,20 +281,25 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// decided by `CreditsPacing.shouldShowIcon` (`enabled`/`spend_limit_reached` **and** a base limit
     /// exhausted); its ``CreditsMarker/bar`` carries the colour. Orthogonal to `mode`/`serviceProblem` —
     /// the credits state is independent of the usage bars and the service status. When `nil`, no icon and
-    /// no width is reserved for it. **Placement** is view-side (`StatusItemView`): in the bars modes
-    /// (`.expanded`/`.blockedReset`) it is a **leading** element between the pause icon and the bars/
-    /// countdown (#227); in the diagnostic `.error` state it stays **trailing** (before the service dot).
+    /// no width is reserved for it. **Placement** is view-side (`StatusItemView`): in `.iconOnlyReset`
+    /// it is a **leading** element between the pause icon and the countdown (#227); in the diagnostic
+    /// `.error` state it stays **trailing** (before the service dot).
+    ///
+    /// **`nil` in ``MenuBarMode/expanded(blocks:)``** — there the marker rides Claude's own
+    /// ``ProviderBlock/credits``, because with more than one block a widget-level ¤ would not say whose
+    /// money it is. ``moneyMarker`` reads whichever place holds it.
     public let credits: CreditsMarker?
 
     /// Whether to draw the red "pause" glyph as the **leading** element (#199, #227). Set `true`
     /// **whenever** the snapshot is `CreditsPacing.isBlocked` (every limit exhausted **and** paid credits
     /// can't cover — no path to work), always — the icon is not user-optional. The view draws it left of
-    /// the bars in ``MenuBarMode/expanded`` and left of the countdown in the bars-less
-    /// ``MenuBarMode/blockedReset`` (#194). Whether the bars are kept beside it or hidden is the separate
-    /// bars-less answer `make` already chose before this decoration. Never `true`
-    /// for the diagnostic ``MenuBarMode/error`` state. Orthogonal to `mode` — a leading decoration,
-    /// computed at the health-aware `make` seam like `credits`. When `false`, no glyph is drawn and no
-    /// width is reserved.
+    /// the countdown in ``MenuBarMode/iconOnlyReset(provider:reset:)`` (#194). Never `true` for the
+    /// diagnostic ``MenuBarMode/error`` state. Computed at the health-aware `make` seam like `credits`.
+    /// When `false`, no glyph is drawn and no width is reserved.
+    ///
+    /// **`false` in ``MenuBarMode/expanded(blocks:)``** — there the glyph rides its provider's own
+    /// ``ProviderBlock/blockedPause``, since a widget-level pause left of everything would claim every
+    /// provider is blocked.
     public let blockedPause: Bool
 
     /// The Claude Code sessions awaiting user input to advertise with the `hand.raised` indicator
@@ -308,14 +326,16 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///
     /// Steps, all delegating to tested pure logic:
     /// 1. Compute the 5h and 7d `BarLayout` + `LimitIndicator` via `PacingModel`.
-    /// 2. Return ``MenuBarMode/expanded`` — the healthy path always shows both bars (there is no
-    ///    idle/compact collapse; ADR-0015), and **never a countdown** (ADR-0091).
+    /// 2. Return ``MenuBarMode/expanded(blocks:)`` carrying **Claude's block** — the healthy path
+    ///    always shows its bars (there is no idle/compact collapse; ADR-0015) and **never a countdown**
+    ///    (ADR-0091). Other providers' blocks are merged onto the result by ``withProviderBlocks(_:)``,
+    ///    which is the shell's call: this function only ever sees a Claude snapshot.
     ///
     /// A past-boundary window is rolled forward before formatting (`optimisticReset`), so no
     /// "reset now" placeholder is ever needed.
     ///
     /// **Session-idle (#100, ADR-0027).** When `snapshot.sessionIdle` (the 5h window does not exist
-    /// server-side — no active session), the mode is still ``MenuBarMode/expanded`` with **both** bars
+    /// server-side — no active session), the mode is still ``MenuBarMode/expanded(blocks:)`` with both bars
     /// (ADR-0015's "bars never collapse" still holds), and the 5h bar is built ``BarView/idle`` `= true`
     /// (inert `usage 0 / time 0` layout; the view draws a knobless track — **no** synthesized
     /// `now + 5h` phantom reset, the bug this fixes).
@@ -332,10 +352,10 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///
     /// Both bars-less answers to "can we work?" are produced here: being blocked
     /// (`CreditsPacing.isBlocked`) or paying (`CreditsPacing.subscriptionExhaustedWhileCovered`) returns
-    /// ``MenuBarMode/iconOnlyReset(reset:which:)`` — the countdown to the reset that ends the state,
+    /// ``MenuBarMode/iconOnlyReset(provider:reset:)`` — the countdown to the reset that ends the state,
     /// since a red 100 % bar carries no pacing information either way (ADR-0090). When that reset cannot
     /// be resolved (every exhausted window has a broken `resets_at`) the answer is
-    /// ``MenuBarMode/exhaustedUnknownReset(which:)`` — the same glyph with a ⚠️ where the number goes.
+    /// ``MenuBarMode/exhaustedUnknownReset(provider:)`` — the same glyph with a ⚠️ where the number goes.
     /// It does **not** fall back to bars: an exhausted window is never drawn as a bar (ADR-0091).
     public static func make(
         from snapshot: UsageSnapshot, now: Date,
@@ -353,7 +373,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         // the widget does know. That case keeps its bars and simply has no countdown, exactly as it
         // did before this change.
         if snapshot.sevenDay.resetsAt.isEmpty, snapshot.sevenDay.utilization == 0 {
-            return MenuBarLayout(mode: .weeklyResetUnknown)
+            return MenuBarLayout(mode: .weeklyResetUnknown(provider: .claude))
         }
 
         // "Can we work?" — the two answers that are not "yes, on the subscription" produce the same
@@ -371,7 +391,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         // "an exhausted window is never a bar" forbids.
         if CreditsPacing.isBlocked(in: snapshot) {
             return MenuBarLayout(mode: blockedResetMode(for: snapshot, now: now)
-                ?? .exhaustedUnknownReset(which: exhaustedWindowWithoutReset(in: snapshot)))
+                ?? .exhaustedUnknownReset(provider: .claude))
         }
         // Paying: the subscription is spent but credits still cover, so work continues — on money. The
         // countdown is the moment the plan quota returns and credits stop being spent, which is the one
@@ -380,33 +400,15 @@ public struct MenuBarLayout: Sendable, Equatable {
         // not gate work at all — an exhausted Opus window must not hide the 5h/7d bars).
         if CreditsPacing.subscriptionExhaustedWhileCovered(in: snapshot) {
             return MenuBarLayout(mode: paidResetMode(for: snapshot, now: now)
-                ?? .exhaustedUnknownReset(which: exhaustedWindowWithoutReset(in: snapshot)))
+                ?? .exhaustedUnknownReset(provider: .claude))
         }
 
         return MenuBarLayout(mode: expandedBars(for: snapshot, now: now, hideTopBar: hideTopBar))
     }
 
-    /// Which **main** window is exhausted but has no usable `resets_at` — the `which` for
-    /// ``MenuBarMode/exhaustedUnknownReset(which:)``, and `nil` when both are (or when the caller
-    /// reached this state some other way). Informational only: the view draws no label for it.
-    ///
-    /// Mirrors `CreditsPacing.mainWindowExhausted`'s notion of "exhausted" (an idle 5h window is
-    /// "ready to start", not exhausted), so the answer never names a window that isn't gating work.
-    static func exhaustedWindowWithoutReset(in snapshot: UsageSnapshot) -> LimitWindow? {
-        let fiveStuck = !snapshot.sessionIdle && snapshot.fiveHour.utilization >= 100
-            && ResetClock.parse(snapshot.fiveHour.resetsAt) == nil
-        let sevenStuck = snapshot.sevenDay.utilization >= 100
-            && ResetClock.parse(snapshot.sevenDay.resetsAt) == nil
-        switch (fiveStuck, sevenStuck) {
-        case (true, false): return .fiveHour
-        case (false, true): return .sevenDay
-        default:            return nil          // both, or neither — no single window to name
-        }
-    }
-
     /// The **bars** half of ``make(from:now:hideTopBar:)`` — everything after the two bars-less answers
-    /// to "can we work?". Always returns ``MenuBarMode/expanded(fiveHour:sevenDay:)``, **never** a
-    /// bars-less shape.
+    /// to "can we work?". Returns ``MenuBarMode/expanded(blocks:)`` carrying Claude's one block, or
+    /// ``MenuBarMode/error`` when the payload contradicts itself; **never** a bars-less quota shape.
     ///
     /// Reached only when no main window is exhausted, so it never has to decide anything about a red
     /// bar: `make` has already answered that case above (ADR-0091).
@@ -445,11 +447,8 @@ public struct MenuBarLayout: Sendable, Equatable {
             // `hasBrokenActiveReset` already excludes the idle 5h, so it checks only the real 7-day here.
             // An *exhausted* 7-day never arrives here — `make` answered it before the bars were built —
             // so the bars kept beside the ⚠️ are always calm ones (ADR-0091).
-            if snapshot.hasBrokenActiveReset {
-                return .error(
-                    fiveHour: fiveToShow, sevenDay: sevenToShow, reset: nil, which: nil)
-            }
-            return .expanded(fiveHour: fiveToShow, sevenDay: sevenToShow)
+            if snapshot.hasBrokenActiveReset { return .error }
+            return claudeBlockMode(fiveHour: fiveToShow, sevenDay: sevenToShow)
         }
 
         let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now, blueAllowed: weeklyHeadroom)
@@ -467,11 +466,20 @@ public struct MenuBarLayout: Sendable, Equatable {
         // lands here and keeps its bars, while a broken date on a red one became
         // `.exhaustedUnknownReset` upstream. That split is the whole reason this path may still draw
         // bars beside a ⚠️.
-        if snapshot.hasBrokenActiveReset {
-            return .error(fiveHour: fiveToShow, sevenDay: sevenToShow, reset: nil, which: nil)
-        }
+        if snapshot.hasBrokenActiveReset { return .error }
 
-        return .expanded(fiveHour: fiveToShow, sevenDay: sevenToShow)
+        return claudeBlockMode(fiveHour: fiveToShow, sevenDay: sevenToShow)
+    }
+
+    /// Claude's block from its two optional bars, in the fixed 5h-above-7d order.
+    ///
+    /// A `nil` bar was elided while calm (``TopBarHiding``), never absent data. Both `nil` cannot
+    /// happen — `TopBarHiding` names one window — but it is answered anyway with ``MenuBarMode/error``
+    /// rather than an empty block, because `expanded` promises every block has bars.
+    public static func claudeBlockMode(fiveHour: BarView?, sevenDay: BarView?) -> MenuBarMode {
+        let bars = [fiveHour, sevenDay].compactMap { $0 }
+        guard !bars.isEmpty else { return .error }
+        return .expanded(blocks: [ProviderBlock(provider: .claude, bars: bars)])
     }
 
     // MARK: make (health-aware, issue #12)
@@ -604,7 +612,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.
         guard let age = health.failureAge(now: now) else {
             return snapshot.map { make(from: $0, now: now, hideTopBar: hideTopBar) }
-                ?? MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
+                ?? MenuBarLayout(mode: .error)
         }
         if let snapshot, age <= UsageHealth.glyphAfter(for: health) {
             return make(from: snapshot, now: now, hideTopBar: hideTopBar)
@@ -616,16 +624,31 @@ public struct MenuBarLayout: Sendable, Equatable {
         // may be a quarter of an hour old invite exactly the reading they cannot support ("this is
         // where I stand"), and the popup already explains the failure in words. Showing nothing is the
         // honest answer.
-        return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
+        return MenuBarLayout(mode: .error)
     }
 
-    /// A copy of this layout carrying `serviceProblem`, `credits`, and `blockedPause` (the `mode` is
-    /// unchanged) — the decorations grafted onto the usage `mode` computed by
+    /// A copy of this layout carrying `serviceProblem`, `credits`, and `blockedPause` — the
+    /// decorations grafted onto the usage `mode` computed by
     /// ``usageMode(from:health:now:hideTopBar:monitoringAnything:)``.
+    ///
+    /// In ``MenuBarMode/expanded(blocks:)`` the pause glyph and the money marker are folded **into
+    /// Claude's block** and cleared from the layout: with more than one block they are per-provider
+    /// facts, and a widget-level pause left of everything would claim both providers are blocked. Every
+    /// other mode draws one provider's answer, so they stay on the layout there.
     func with(serviceProblem: ServiceStatus?, credits: CreditsMarker?, blockedPause: Bool,
               awaitingInput: AwaitingSessions? = nil) -> MenuBarLayout {
-        MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits,
-                      blockedPause: blockedPause, awaitingInput: awaitingInput)
+        guard case let .expanded(blocks) = mode else {
+            return MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits,
+                                 blockedPause: blockedPause, awaitingInput: awaitingInput)
+        }
+        let decorated = blocks.map { block in
+            block.provider == .claude
+                ? ProviderBlock(provider: .claude, bars: block.bars,
+                                blockedPause: blockedPause, credits: credits)
+                : block
+        }
+        return MenuBarLayout(mode: .expanded(blocks: decorated), serviceProblem: serviceProblem,
+                             credits: nil, blockedPause: false, awaitingInput: awaitingInput)
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
@@ -634,6 +657,142 @@ public struct MenuBarLayout: Sendable, Equatable {
     public func withAwaitingInput(_ awaitingInput: AwaitingSessions?) -> MenuBarLayout {
         MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits,
                       blockedPause: blockedPause, awaitingInput: awaitingInput)
+    }
+
+    /// The money-credits marker actually drawn, wherever it lives: on Claude's block in
+    /// ``MenuBarMode/expanded(blocks:)``, on the layout in every bars-less mode. One reader for both,
+    /// so "is the ¤ on screen?" is never a question about which mode you are in.
+    public var moneyMarker: CreditsMarker? {
+        if case let .expanded(blocks) = mode {
+            return blocks.first { $0.provider == .claude }?.credits
+        }
+        return credits
+    }
+
+    // MARK: Satellite providers
+
+    /// A copy of this layout with `blocks` merged into ``MenuBarMode/expanded(blocks:)``, ordered by
+    /// ``ProviderID/displayIndex`` — the same order the Settings list and the popup plates use.
+    ///
+    /// A no-op unless the mode is already `expanded`: the bars-less answers are Claude's own, and
+    /// hanging another provider's bars off a pause glyph would put bars and a countdown on screen
+    /// together, which the type exists to forbid (ADR-0091).
+    ///
+    /// Blocks with no bars are dropped rather than merged, so `expanded`'s invariant holds however
+    /// empty the caller's data turns out to be.
+    public func withProviderBlocks(_ blocks: [ProviderBlock]) -> MenuBarLayout {
+        guard case let .expanded(existing) = mode else { return self }
+        let merged = (existing + blocks.filter { !$0.bars.isEmpty })
+            .sorted { $0.provider.displayIndex < $1.provider.displayIndex }
+        return MenuBarLayout(mode: .expanded(blocks: merged), serviceProblem: serviceProblem,
+                             credits: credits, blockedPause: blockedPause,
+                             awaitingInput: awaitingInput)
+    }
+
+    /// A copy of this layout without the blocks the user unchecked under Appearance → Menu bar
+    /// (ADR-0128).
+    ///
+    /// **Unchecking every provider leaves the last block standing**, rather than emptying the widget:
+    /// `expanded` promises at least one block, and an item that draws nothing is indistinguishable from
+    /// a crashed one. The checkboxes are a width control, not an off switch — usage collection has its
+    /// own, on the Providers page.
+    public func hidingMenuBarProviders(_ hidden: Set<ProviderID>) -> MenuBarLayout {
+        guard case let .expanded(blocks) = mode, !hidden.isEmpty else { return self }
+        let kept = blocks.filter { !hidden.contains($0.provider) }
+        let survivors = kept.isEmpty ? Array(blocks.prefix(1)) : kept
+        return MenuBarLayout(mode: .expanded(blocks: survivors), serviceProblem: serviceProblem,
+                             credits: credits, blockedPause: blockedPause,
+                             awaitingInput: awaitingInput)
+    }
+
+    /// One satellite provider's block from the popup rows its plate already draws, or `nil` when it has
+    /// none.
+    ///
+    /// Reading the rows rather than the raw quota keeps the two surfaces on one normalization: the
+    /// widget's bar and the plate's bar are the same `BarLayout`, computed once. `LimitRow.title`
+    /// becomes the bar's ``BarView/rowID`` so a window Claude has no name for still animates as itself.
+    ///
+    /// `window:` is `.sevenDay` on every row whose length is not five hours. It is the wrong question
+    /// for a provider whose windows are lengths rather than a fixed pair, and it decides nothing here —
+    /// the drawn geometry comes from `bar`, and the animation identity from `(provider, rowID)`.
+    public static func block(for provider: ProviderID, rows: [LimitRow]) -> ProviderBlock? {
+        guard !rows.isEmpty else { return nil }
+        let bars = rows.map { row in
+            BarView(layout: row.bar, indicator: row.indicator,
+                    window: row.title == "5-hour" ? .fiveHour : .sevenDay,
+                    idle: row.sessionIdle, blocked: row.sessionBlocked, rowID: row.title)
+        }
+        return ProviderBlock(provider: provider, bars: bars)
+    }
+
+    // MARK: Accessibility
+
+    /// What VoiceOver speaks for the status item — the one channel that can name a provider, since the
+    /// widget itself distinguishes them only by position and a screen reader conveys no position.
+    ///
+    /// Each block is spoken as `"<Provider>: <window> <n> percent, <pacing>; …"`, blocks separated by a
+    /// full stop, and the service dot named last when it is drawn. Pure, so the whole string is
+    /// testable without an accessibility client.
+    public var spokenDescription: String {
+        var parts: [String] = []
+        switch mode {
+        case let .expanded(blocks):
+            parts += blocks.map { block in
+                let bars = block.bars.map(Self.spokenBar).joined(separator: "; ")
+                let prefix = block.blockedPause ? "\(block.provider.displayName), all limits reached: "
+                                                : "\(block.provider.displayName): "
+                return prefix + bars
+            }
+        case let .iconOnlyReset(provider, reset):
+            parts.append("\(provider.displayName): limit reached, resets in \(reset)")
+        case let .exhaustedUnknownReset(provider):
+            parts.append("\(provider.displayName): limit reached, reset time unknown")
+        case .error:
+            parts.append("No usage data")
+        case .usagePollingOff:
+            parts.append("Usage monitoring off")
+        case .nothingMonitored:
+            parts.append("Monitoring off")
+        case let .weeklyResetUnknown(provider):
+            parts.append("\(provider.displayName): weekly reset time unknown")
+        }
+        if let serviceProblem, serviceProblem != .operational {
+            parts.append("Services \(Self.spokenStatus(serviceProblem))")
+        }
+        if awaitingInput != nil { parts.append("A session is waiting for input") }
+        return parts.joined(separator: ". ")
+    }
+
+    /// One bar as VoiceOver reads it: the window, its percentage, and the pacing verdict the colour
+    /// carries on screen — the verdict is the point of the bar, and colour is exactly what does not
+    /// survive into speech.
+    private static func spokenBar(_ bar: BarView) -> String {
+        let name = bar.rowID ?? (bar.window == .fiveHour ? "5-hour" : "7-day")
+        if bar.idle { return "\(name) \(bar.blocked ? "waiting for reset" : "ready to start")" }
+        let percent = Int((bar.layout.usageFraction * 100).rounded())
+        return "\(name) \(percent) percent, \(Self.spokenPacing(bar.severity))"
+    }
+
+    /// The pacing verdict in words — the same four tiers the bar's colour carries.
+    private static func spokenPacing(_ severity: PacingSeverity) -> String {
+        switch severity {
+        case .farBehind: return "well within pace"
+        case .calm:      return "on pace"
+        case .ahead:     return "ahead of pace"
+        case .exhausted: return "limit reached"
+        }
+    }
+
+    /// The service dot's state in words.
+    private static func spokenStatus(_ status: ServiceStatus) -> String {
+        switch status {
+        case .operational:      return "operational"
+        case .degraded:         return "degraded"
+        case .partialOutage:    return "partially down"
+        case .majorOutage:      return "down"
+        case .underMaintenance: return "under maintenance"
+        case .unknown:          return "status unknown"
+        }
     }
 
     // MARK: - Private
@@ -648,9 +807,6 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// single ``ResetClock/timeToReset(resetsAt:now:)`` format — one shape for every window since #284
     /// (ADR-0074), so no per-window branch is needed here any more.
     ///
-    /// `which` still distinguishes a **5h** reset (`.token(id: 0, …)` — index `0` is the 5h row) from
-    /// every longer window (7d, per-model, or credits/monthly): it no longer selects a label format,
-    /// but it tells the view which limit the countdown belongs to.
     private static func blockedResetMode(for snapshot: UsageSnapshot, now: Date) -> MenuBarMode? {
         guard let choice = BlockingReset.forBlocked(snapshot: snapshot, now: now) else { return nil }
         return iconOnlyMode(for: choice, now: now)
@@ -671,15 +827,12 @@ public struct MenuBarLayout: Sendable, Equatable {
         return iconOnlyMode(for: choice, now: now)
     }
 
-    /// Format a resolved ``BlockingReset/Choice`` into ``MenuBarMode/iconOnlyReset(reset:which:)`` —
-    /// shared by the blocked and paying paths so both label the countdown identically.
+    /// Format a resolved ``BlockingReset/Choice`` into ``MenuBarMode/iconOnlyReset(provider:reset:)``
+    /// — shared by the blocked and paying paths so both label the countdown identically. Claude is the
+    /// only provider that reaches either path: a `BlockingReset.Choice` is built from a Claude snapshot.
     private static func iconOnlyMode(for choice: BlockingReset.Choice, now: Date) -> MenuBarMode {
-        // Popup row index `0` is the 5h window; every other id (7d, per-model) and the credits case are
-        // longer-cadence. `.credits` cannot occur on the paying path (it passes `creditsReset: nil`).
-        let isFiveHour: Bool = { if case .token(0, _) = choice { return true } else { return false } }()
-        return .iconOnlyReset(
-            reset: ResetClock.timeToReset(resetsAt: choice.resetsAt, now: now),
-            which: isFiveHour ? .fiveHour : .sevenDay)
+        .iconOnlyReset(provider: .claude,
+                       reset: ResetClock.timeToReset(resetsAt: choice.resetsAt, now: now))
     }
 
     /// One `BarView` for a window, combining its bar geometry and its exhausted flag

@@ -76,6 +76,12 @@ enum StubScenario: String, CaseIterable {
     case codexCLIMissing = "codex-cli-missing"
     case codexCLIOld = "codex-cli-old"
     case allThreeProviders = "all-three-providers"
+    case menuBarClaudeOnly = "menubar-claude-only"
+    case menuBarClaudeCodex = "menubar-claude-codex"
+    case menuBarCodexOnly = "menubar-codex-only"
+    case menuBarCodexOneWindow = "menubar-codex-one-window"
+    case menuBarProviderFailing = "menubar-provider-failing"
+    case menuBarProvidersDeselected = "menubar-providers-deselected"
     case creditsActive = "credits-active"
     case creditsLimitReached = "credits-limit-reached"
     case creditsNoLimit = "credits-no-limit"
@@ -207,6 +213,12 @@ enum StubScenario: String, CaseIterable {
         case .codexCLIMissing:     return "Codex quota — codex not installed"
         case .codexCLIOld:         return "Codex quota — codex too old"
         case .allThreeProviders:   return "All three providers at once"
+        case .menuBarClaudeOnly:   return "Menu bar · Claude alone (regression guard)"
+        case .menuBarClaudeCodex:  return "Menu bar · Claude + Codex"
+        case .menuBarCodexOnly:    return "Menu bar · Codex alone"
+        case .menuBarCodexOneWindow: return "Menu bar · Codex, one window"
+        case .menuBarProviderFailing: return "Menu bar · Codex read failing"
+        case .menuBarProvidersDeselected: return "Menu bar · Codex unticked"
         case .creditsActive:       return "Credits · active (paced)"
         case .creditsLimitReached: return "Credits · limit reached (red)"
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
@@ -459,6 +471,28 @@ enum StubScenario: String, CaseIterable {
             return "A `codex` that predates `account/rateLimits/read` — the -32600 detection, which "
                  + "keys on the code AND the method name in the message, since -32600 alone is also "
                  + "what a malformed params struct returns."
+        case .menuBarClaudeOnly:
+            return "The REGRESSION GUARD for #505: Claude's two bars and nothing else, the frame every "
+                 + "existing user sees. Its geometry must be byte-identical to a `main` build — check "
+                 + "by pixel diff of the real menu bar, not by eye; a 0.5 pt drift is invisible in "
+                 + "review and obvious in a diff."
+        case .menuBarClaudeCodex:
+            return "Two blocks: Claude's 5h+7d pair, then Codex's single week, alphabetical, separated "
+                 + "by a gap. The bars carry NO brand tint — a bar's colour is the pacing verdict, and "
+                 + "provider identity in the widget is positional only."
+        case .menuBarCodexOnly:
+            return "Claude unticked, so Codex's block stands alone: one bar, vertically centred exactly "
+                 + "where a lone Claude bar sits. Proves the geometry follows the bar COUNT, not which "
+                 + "provider owns the bars."
+        case .menuBarCodexOneWindow:
+            return "Codex's week beside Claude's pair while a service is degraded — the block count "
+                 + "and the trailing dot at once. The dot is the LAST element, after every block."
+        case .menuBarProviderFailing:
+            return "Codex's quota read fails while Claude's is healthy: Codex's block disappears "
+                 + "entirely rather than freezing at its last percentage, and Claude's is untouched."
+        case .menuBarProvidersDeselected:
+            return "Codex collecting but unticked under Appearance → Menu bar (forced by the stub, so "
+                 + "your real setting is untouched): the widget is back to Claude's width."
         case .allThreeProviders:
             return "All three plates at once, each in its own state. Read the order top to bottom: "
                  + "Claude, then Codex, then GitHub (`displayName` order, Claude pinned first), with "
@@ -647,6 +681,14 @@ enum StubScenario: String, CaseIterable {
              .codexNotSignedIn, .codexCLIMissing, .codexCLIOld:
             return StubUsageTransport(mode: .codexGreen, now: now)
         case .allThreeProviders:   return StubUsageTransport(mode: .allThreeProviders, now: now)
+        // The menu-bar scenarios keep Claude calm: their subject is how many blocks there are and
+        // where they sit, and a busy Claude stack would compete for the eye.
+        case .menuBarClaudeOnly, .menuBarClaudeCodex, .menuBarCodexOnly, .menuBarProviderFailing,
+             .menuBarProvidersDeselected:
+            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
+        // Degraded, so the trailing dot is on screen at the same time as two blocks.
+        case .menuBarCodexOneWindow:
+            return StubUsageTransport(mode: .calmDegraded, now: now)
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)
@@ -704,6 +746,13 @@ enum StubScenario: String, CaseIterable {
         // the server's does — the defect is only visible when the value is recomputed per read.
         case .codexQuotaNotStarted:
             return StubCodexQuotaSource(.notStarted([604_800]), now: now)
+        // One week, the shape the server actually sends today.
+        case .menuBarClaudeCodex, .menuBarCodexOnly, .menuBarCodexOneWindow,
+             .menuBarProvidersDeselected:
+            return StubCodexQuotaSource(.windows([(41, 604_800)]), now: now)
+        // A failed read drops the rows, so Codex contributes no block at all.
+        case .menuBarProviderFailing:
+            return StubCodexQuotaSource(.failure(.notSignedIn), now: now)
         case .codexNotSignedIn:
             return StubCodexQuotaSource(.failure(.notSignedIn), now: now)
         case .codexCLIMissing:
@@ -713,6 +762,23 @@ enum StubScenario: String, CaseIterable {
                 .failure(.methodUnsupported(method: CodexAppServer.rateLimitsMethod)), now: now)
         default:
             return nil
+        }
+    }
+
+    /// Whether this scenario collects a Codex quota **regardless of the Settings switch**.
+    ///
+    /// The switch is off by default and writing it is the maintainer's alone, so without this a
+    /// menu-bar scenario would render as Claude-only on his machine and quietly pass. A stub asserts
+    /// its own preconditions; it does not ask him to set them up first.
+    var forcesCodexQuota: Bool { self != .realNetwork && codexQuotaSource() != nil }
+
+    /// Providers whose menu-bar block this scenario hides, standing in for the "Providers to display"
+    /// checkboxes without touching the stored setting.
+    var menuBarHiddenProviders: Set<ProviderID> {
+        switch self {
+        case .menuBarProvidersDeselected: return [.codex]
+        case .menuBarCodexOnly:           return [.claude]
+        default:                          return []
         }
     }
 

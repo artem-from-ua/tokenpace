@@ -107,7 +107,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0088](0088-settings-hosting-safe-area-and-manual-separator.md) | The Settings detail pane — safe area is cut at the hosting boundary, the toolbar rule is driven by the controller | accepted |
 | [0089](0089-gauge-centre-tick-calm-tone.md) | The Gauge center tick — in the calm-fill tone, 1 pt taller | accepted |
 | [0090](0090-menu-bar-answers-can-we-work.md) | The menu bar answers one question — can we work | partially superseded → [0091](0091-countdown-only-where-work-is-not-running.md) |
-| [0091](0091-countdown-only-where-work-is-not-running.md) | A countdown only where work isn't running | accepted |
+| [0091](0091-countdown-only-where-work-is-not-running.md) | A countdown only where work isn't running | partially superseded → [0128](0128-menu-bar-repeats-a-block-per-provider.md) |
 | [0092](0092-extra-usage-own-ruler.md) | The credits bar — its own scale, with labeled month boundaries | accepted |
 | ~~[0093](0093-bar-style-picked-by-picture.md)~~ | ~~The menu bar's bar style is picked by picture, not by word~~ | superseded → [0097](0097-bar-style-preview-rendered-at-runtime.md), [0100](0100-dropdown-style-tiles-and-retired-option-segment.md) |
 | [0094](0094-provider-row-brand-badge.md) | The provider row gets a brand badge, the Providers chip becomes a puzzle piece | accepted |
@@ -144,6 +144,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0125](0125-codex-as-a-status-provider.md) | Codex as a status provider — statuses from the component feed, incidents from the page's own backend, and an age that is never invented | accepted |
 | [0117](0117-dropdown-actions-behind-option.md) | Every dropdown action sits behind ⌥ Option, announced by a caption | partially superseded → [0126](0126-settings-and-quit-stay-visible-by-default.md) |
 | [0127](0127-codex-quota-from-the-app-server.md) | Codex quota from a short-lived `app-server` process, with window durations as data rather than enum cases | accepted |
+| [0128](0128-menu-bar-repeats-a-block-per-provider.md) | The menu bar repeats a block per provider, with the status dot pinned rightmost | accepted |
 
 ## Maintaining this index
 

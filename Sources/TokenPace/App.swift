@@ -715,6 +715,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // menu-bar layout from the last poll.
                 self?.reRenderForCurrentTime()
             }
+            wc.onMenuBarProvidersChange = { [weak self] _ in
+                // Adds or drops a whole block, so the item's width changes with it.
+                self?.reRenderForCurrentTime()
+            }
             wc.onModelLimitsVisibilityChange = { [weak self] mode in
                 // Popup-only: the VC owns the gate because it depends on the live ⌥ state. Its
                 // `didSet` rebuilds, which re-measures the hosted view.
@@ -1956,7 +1960,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// **Under a stub the source is the stub's**, so no process is spawned — a verification scenario
     /// must not depend on the maintainer's `codex` being installed and signed in to a given plan.
     private func pollCodexQuota() {
-        guard PersistedConfig.codexMonitoring.usageEnabled else { return }
+        guard collectsCodexQuota else { return }
         if codexQuotaSource == nil {
             // The scenario's own clock, the same one its transport gets, so a stub's reset instants
             // and the countdowns the layout renders stay in lock-step.
@@ -2806,6 +2810,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // With nothing monitored the widget reports that, rather than the last thing it saw.
             monitoringAnything: isMonitoringAnything)
             .withAwaitingInput(awaitingInput)
+            // One block per satellite provider with usage to show, ordered alphabetically alongside
+            // Claude's (ADR-0128). Claude's own block is hidden by dropping it, not by skipping the
+            // merge — `withProviderBlocks` is what puts them in order either way.
+            .withProviderBlocks(satelliteMenuBarBlocks())
+            .hidingMenuBarProviders(
+                PersistedConfig.menuBarHiddenProviders.union(currentScenario.menuBarHiddenProviders))
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: snapshot, health: output.health, now: now, interval: output.interval,
@@ -2864,6 +2874,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let image else { return }
         button.image = image
         statusItem?.length = image.size.width
+        // The widget is a flat bitmap: the `accessibilityDescription` strings handed to
+        // `NSImage(systemSymbolName:)` are baked into it and never reach VoiceOver, so the label on the
+        // button is the only thing spoken. It matters more with two providers than it did with one —
+        // identity in the widget is positional, and position is exactly what a screen reader cannot
+        // convey (ADR-0128).
+        button.setAccessibilityLabel(view.layout?.spokenDescription)
+    }
+
+    /// One menu-bar block per non-Claude provider that has usage bars to show right now.
+    ///
+    /// Reads the same rows the popup plate draws, so the widget's bar and the plate's bar are one
+    /// normalization rather than two. Empty while the Codex quota half is off or its last read failed —
+    /// a failed read drops the rows, so no block is built from a frozen percentage.
+    private func satelliteMenuBarBlocks() -> [ProviderBlock] {
+        guard collectsCodexQuota else { return [] }
+        return [MenuBarLayout.block(for: .codex, rows: lastCodexQuotaRows)].compactMap { $0 }
+    }
+
+    /// Whether the Codex quota half is being collected — the Settings switch, or a stub that carries a
+    /// quota source of its own. A stub sets up what it is a scenario *for*, rather than rendering as
+    /// Claude-only until the maintainer flips a switch first.
+    private var collectsCodexQuota: Bool {
+        PersistedConfig.codexMonitoring.usageEnabled || currentScenario.forcesCodexQuota
     }
 }
 

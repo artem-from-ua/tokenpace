@@ -337,7 +337,7 @@ struct UnknownWeeklyResetTests {
         sevenDayResetSource: .unknown)
 
     @Test func theMenuBarShowsTheUnknownResetState() {
-        #expect(MenuBarLayout.make(from: Self.coldStart, now: Self.now).mode == .weeklyResetUnknown)
+        #expect(MenuBarLayout.make(from: Self.coldStart, now: Self.now).mode == .weeklyResetUnknown(provider: .claude))
     }
 
     /// Specifically **not** the ⚠️ path: nothing contradicts itself here, so the state must not be
@@ -371,7 +371,7 @@ struct UnknownWeeklyResetTests {
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
             sevenDay: UsageWindow(utilization: 31, resetsAt: ""),
             sessionIdle: true)
-        #expect(MenuBarLayout.make(from: withUsage, now: Self.now).mode != .weeklyResetUnknown)
+        #expect(MenuBarLayout.make(from: withUsage, now: Self.now).mode != .weeklyResetUnknown(provider: .claude))
 
         let layout = PopupLayout.make(
             from: withUsage, health: .healthy(lastSuccess: Self.now), now: Self.now,
@@ -399,13 +399,13 @@ struct UnknownWeeklyResetTests {
         let reconstructed = try UsageClient.decode(
             from: Data(body.utf8), now: during, lastKnownSevenDayReset: anchor)
         #expect(reconstructed.sevenDayResetSource == .reconstructed)
-        #expect(MenuBarLayout.make(from: reconstructed, now: during).mode != .weeklyResetUnknown)
+        #expect(MenuBarLayout.make(from: reconstructed, now: during).mode != .weeklyResetUnknown(provider: .claude))
 
         // Without it — the cold-start stub — nothing is invented, and both surfaces say so.
         let cold = try UsageClient.decode(from: Data(body.utf8), now: during)
         #expect(cold.sevenDayResetSource == .unknown)
         #expect(cold.sevenDay.resetsAt.isEmpty)
-        #expect(MenuBarLayout.make(from: cold, now: during).mode == .weeklyResetUnknown)
+        #expect(MenuBarLayout.make(from: cold, now: during).mode == .weeklyResetUnknown(provider: .claude))
         let layout = PopupLayout.make(
             from: cold, health: .healthy(lastSuccess: during), now: during,
             interval: 180, serviceStatus: nil, monitoringAnything: true)
@@ -452,7 +452,7 @@ struct UnknownWeeklyResetTests {
         let healthy = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 20, resetsAt: "2026-06-21T05:30:00+00:00"),
             sevenDay: UsageWindow(utilization: 40, resetsAt: "2026-06-28T00:00:00+00:00"))
-        #expect(MenuBarLayout.make(from: healthy, now: Self.now).mode != .weeklyResetUnknown)
+        #expect(MenuBarLayout.make(from: healthy, now: Self.now).mode != .weeklyResetUnknown(provider: .claude))
         let layout = PopupLayout.make(
             from: healthy, health: .healthy(lastSuccess: Self.now), now: Self.now,
             interval: 180, serviceStatus: nil, monitoringAnything: true)

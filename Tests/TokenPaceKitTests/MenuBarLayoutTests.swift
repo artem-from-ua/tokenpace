@@ -42,6 +42,20 @@ private func idleSnapshot(
     )
 }
 
+/// Claude's two bars out of an ``MenuBarMode/expanded(blocks:)``, keyed by window rather than by
+/// position: with a bar elided while calm the block holds one bar, and which one it is is exactly
+/// what these suites pin.
+func claudeBars(_ mode: MenuBarMode) -> (five: BarView?, seven: BarView?)? {
+    guard case let .expanded(blocks) = mode,
+          let block = blocks.first(where: { $0.provider == .claude })
+    else {
+        Issue.record("expected .expanded with a Claude block, got \(mode)")
+        return nil
+    }
+    return (block.bars.first { $0.window == .fiveHour },
+            block.bars.first { $0.window == .sevenDay })
+}
+
 // MARK: - always expanded (no idle/compact mode — ADR-0014)
 
 @Suite("MenuBarLayout.make")
@@ -61,10 +75,7 @@ struct MenuBarLayoutMakeTests {
         // 0 % with a VALID resets_at is an active-but-empty window, NOT session-idle — both bars are
         // normal (the idle state is API-driven by a missing reset, not by a low utilisation; ADR-0027).
         let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 0, sevenDayUtil: 0), now: now)
-        guard case let .expanded(five, _) = layout.mode else {
-            Issue.record("expected .expanded at 0%, got \(layout.mode)")
-            return
-        }
+        guard let (five, _) = claudeBars(layout.mode) else { return }
         #expect(five?.idle == false)
     }
 
@@ -94,15 +105,12 @@ struct MenuBarLayoutExpandedTests {
     /// (ADR-0090/0091). Their **bars** are still built — by `expandedBars` — and that is what these
     /// tests pin.
     private func expanded(_ mode: MenuBarMode) -> (five: BarView, seven: BarView?)? {
-        guard case let .expanded(five, seven) = mode else {
-            Issue.record("expected .expanded, got \(mode)")
-            return nil
-        }
-        guard let five else {
+        guard let bars = claudeBars(mode) else { return nil }
+        guard let five = bars.five else {
             Issue.record("expected a 5h bar (no hideCalmBar was requested), got nil")
             return nil
         }
-        return (five, seven)
+        return (five, bars.seven)
     }
 
     @Test func barsCarryTheirWindows() {
@@ -158,25 +166,22 @@ struct MenuBarLayoutExpandedTests {
 
     @Test func activeWindowWithBrokenResetIsError() {
         // #167/ADR-0041 (case B): an **active** window (real usage) whose `resets_at` is unparseable is
-        // a malformed payload → the menu bar shows the ⚠️ error state (glyph + last bars), NOT a
-        // fabricated countdown. `make` checks the raw parse result (`hasBrokenReset`) *before*
-        // `bar(for:)` masks the nil date as `elapsedFraction == 1.0` / `.calm`.
+        // a malformed payload → the glyph-only error state, NOT a fabricated countdown. `make` checks
+        // the raw parse result (`hasBrokenReset`) *before* `bar(for:)` masks the nil date as
+        // `elapsedFraction == 1.0` / `.calm`.
         //
         // The 5h window sits at **99**, not 100, on purpose: an *exhausted* window with a broken date is
-        // a different answer since ADR-0091 (`.exhaustedUnknownReset`, covered below), and it would
-        // never reach this bars-keeping branch. 99 is the nearest state that still exercises the
-        // original rule — a window that is genuinely active, and genuinely still drawable as a bar.
+        // a different answer (`.exhaustedUnknownReset`, covered below) and never reaches this branch.
+        // 99 is the nearest state that still exercises the original rule.
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 99, resetsAt: "garbage"),
             sevenDay: UsageWindow(utilization: 30, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600))
         )
         let layout = MenuBarLayout.make(from: snap, now: now)
-        guard case let .error(five, _, reset, _) = layout.mode else {
+        guard case .error = layout.mode else {
             Issue.record("expected .error for an active window with a broken reset, got \(layout.mode)")
             return
         }
-        #expect(five != nil)     // the last bars are kept beside the ⚠️
-        #expect(reset == nil)    // no fabricated countdown
     }
 
     @Test func brokenResetOn7dActiveWindowIsError() {
@@ -223,15 +228,12 @@ struct MenuBarLayoutIdleTests {
     /// (ADR-0090/0091). Their **bars** are still built — by `expandedBars` — and that is what these
     /// tests pin.
     private func expanded(_ mode: MenuBarMode) -> (five: BarView, seven: BarView?)? {
-        guard case let .expanded(five, seven) = mode else {
-            Issue.record("expected .expanded, got \(mode)")
-            return nil
-        }
-        guard let five else {
+        guard let bars = claudeBars(mode) else { return nil }
+        guard let five = bars.five else {
             Issue.record("expected a 5h bar (no hideCalmBar was requested), got nil")
             return nil
         }
-        return (five, seven)
+        return (five, bars.seven)
     }
 
     @Test func idleKeepsBothBarsExpanded() {
@@ -306,7 +308,7 @@ struct MenuBarLayoutIdleTests {
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
             sevenDay: UsageWindow(utilization: 0, resetsAt: ""),
             sessionIdle: true)
-        #expect(MenuBarLayout.make(from: snap, now: now).mode == .weeklyResetUnknown)
+        #expect(MenuBarLayout.make(from: snap, now: now).mode == .weeklyResetUnknown(provider: .claude))
     }
 
     // MARK: idle-blocked (#158)
@@ -421,7 +423,7 @@ struct MenuBarLayoutHealthTests {
         // cannot support, and the popup already explains the failure in words.
         let age = UsageHealth.glyphAfter(for: failing(for: 0)) + 1
         let layout = MenuBarLayout.make(from: snap, health: failing(for: age), now: now)
-        #expect(layout.mode == .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
+        #expect(layout.mode == .error)
     }
 
     @Test func slowCadenceDelaysTheGlyph() {
@@ -442,18 +444,17 @@ struct MenuBarLayoutHealthTests {
         // No snapshot ever decoded → ⚠️ alone regardless of how short the failure has been.
         let health = UsageHealth(lastSuccess: nil, failingSince: now.addingTimeInterval(-60), reason: .notSignedIn)
         let layout = MenuBarLayout.make(from: nil, health: health, now: now)
-        guard case let .error(five, _, _, _) = layout.mode else {
+        guard case .error = layout.mode else {
             Issue.record("expected .error, got \(layout.mode)")
             return
         }
-        #expect(five == nil)
     }
 
     @Test func coldStartHealthyIsBareError() {
         // No snapshot and not failing (the instant before the first poll completes) → the bare ⚠️
         // error glyph (no data to draw), not a compact glyph. No crash.
         let layout = MenuBarLayout.make(from: nil, health: .healthy(lastSuccess: now), now: now)
-        #expect(layout.mode == .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
+        #expect(layout.mode == .error)
     }
 }
 
@@ -533,15 +534,12 @@ struct MenuBarLayoutCountdownExclusivityTests {
             switch MenuBarLayout.make(from: snap, now: now).mode {
             case .expanded:
                 break   // bars, and — by the case's shape — no countdown
-            case let .iconOnlyReset(reset, _):
+            case let .iconOnlyReset(_, reset):
                 #expect(!reset.isEmpty, "\(name): a bars-less mode must carry a countdown")
             case .exhaustedUnknownReset:
                 break   // bars-less too; the ⚠️ stands in for the number
-            case let .error(five, seven, reset, which):
-                // The bars-keeping error path (a broken date on a non-exhausted window) draws no
-                // countdown either — `make` never fabricates one.
-                #expect(five != nil || seven != nil, "\(name): error with no bars on the healthy path")
-                #expect(reset == nil && which == nil, "\(name): error must not fabricate a countdown")
+            case .error:
+                break   // the glyph alone; the case carries nothing to fabricate a countdown from
             case .usagePollingOff, .nothingMonitored:
                 Issue.record("\(name): unexpected user-choice mode on the healthy path")
             case .weeklyResetUnknown:
@@ -580,8 +578,7 @@ struct MenuBarLayoutCountdownExclusivityTests {
         // ≈ 0.571, usage 0.05 → surplus ≈ 0.52 > 0.2857. The weekly gate is open at 5 % (`blueAllowed`),
         // which is what lets the 5h bar go blue at all.
         let snap = snapshot(fiveHourUtil: 10, sevenDayUtil: 5, fiveHourResetsIn: 3600)
-        guard case let .expanded(five, seven) = MenuBarLayout.make(from: snap, now: now).mode else {
-            Issue.record("expected .expanded for two far-behind bars")
+        guard let (five, seven) = claudeBars(MenuBarLayout.make(from: snap, now: now).mode) else {
             return
         }
         #expect(five?.severity == .farBehind)
@@ -616,11 +613,7 @@ struct MenuBarLayoutHideCalmBarTests {
     /// snapshot with the bars-less ``MenuBarMode/iconOnlyReset``. The calm-hiding rule itself lives in
     /// the bar-building half, which is exactly what this suite exercises.
     private func expanded(_ mode: MenuBarMode) -> (five: BarView?, seven: BarView?)? {
-        guard case let .expanded(five, seven) = mode else {
-            Issue.record("expected .expanded, got \(mode)")
-            return nil
-        }
-        return (five, seven)
+        claudeBars(mode)
     }
 
     // MARK: .never
@@ -694,8 +687,8 @@ struct MenuBarLayoutHideCalmBarTests {
         for mode in TopBarHiding.allCases {
             for snap in snapshots {
                 let built = MenuBarLayout.expandedBars(for: snap, now: now, hideTopBar: mode)
-                guard case let .expanded(five, seven) = built else { continue }
-                #expect(five != nil || seven != nil, "both bars elided under \(mode)")
+                guard case let .expanded(blocks) = built else { continue }
+                #expect(blocks.allSatisfy { !$0.bars.isEmpty }, "a block was left empty under \(mode)")
             }
         }
     }
@@ -713,24 +706,15 @@ struct MenuBarLayoutHideCalmBarTests {
 
     // MARK: error state
 
-    @Test func hidingStillAppliesOnTheBarsCarryingErrorPath() {
-        // The **stale**-bars error phase this used to exercise is gone (ADR-0091 — past the threshold the
-        // widget shows the bare glyph, so there is nothing left to hide). The one error state that still
-        // carries bars is the broken-date data error on a non-exhausted window, and there the choice is
-        // honoured like anywhere else: the bars come from `expandedBars`, which applied it before the
-        // error was raised. Pinned so the two paths cannot drift into disagreeing about the same bar.
+    @Test func hidingCannotTurnTheDataErrorIntoBars() {
+        // A broken date on a non-exhausted window is a data error whatever the hiding choice is: the
+        // answer is the glyph alone, and no `TopBarHiding` value can turn it back into a drawable bar.
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 10, resetsAt: resetsAt(inSeconds: 4 * 3600)),
             sevenDay: UsageWindow(utilization: 30, resetsAt: "not-a-date"))
         for mode in TopBarHiding.allCases {
-            let layout = MenuBarLayout.make(from: snap, now: now, hideTopBar: mode)
-            guard case let .error(five, seven, _, _) = layout.mode else {
-                Issue.record("expected .error with bars under \(mode), got \(layout.mode)")
-                continue
-            }
-            // Both bars are calm here, so `.untilItNeedsAttention` elides the 5h one; at least one always survives.
-            #expect(five != nil || seven != nil, "both bars elided from the error state under \(mode)")
-            #expect((five == nil) == (mode == .untilItNeedsAttention), "hideTopBar ignored on the error path: \(mode)")
+            #expect(MenuBarLayout.make(from: snap, now: now, hideTopBar: mode).mode == .error,
+                    "expected .error under \(mode)")
         }
     }
 }
@@ -856,12 +840,12 @@ struct MenuBarLayoutCreditsTests {
 struct MenuBarLayoutCanWeWorkTests {
 
     /// Pull the associated values out of an `.iconOnlyReset` mode, or fail the test.
-    private func iconOnly(_ layout: MenuBarLayout) -> (reset: String, which: LimitWindow)? {
-        guard case let .iconOnlyReset(reset, which) = layout.mode else {
+    private func iconOnly(_ layout: MenuBarLayout) -> (provider: ProviderID, reset: String)? {
+        guard case let .iconOnlyReset(provider, reset) = layout.mode else {
             Issue.record("expected .iconOnlyReset, got \(layout.mode)")
             return nil
         }
-        return (reset, which)
+        return (provider, reset)
     }
 
     @Test func activeBlockedHidesBars() {
@@ -871,7 +855,7 @@ struct MenuBarLayoutCanWeWorkTests {
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
         let layout = MenuBarLayout.make(from: snap, now: now)
         guard let b = iconOnly(layout) else { return }
-        #expect(b.which == .sevenDay)
+        #expect(b.provider == .claude)
         #expect(b.reset == "3d")   // 7d reset 3 days out, compact-days
     }
 
@@ -881,7 +865,7 @@ struct MenuBarLayoutCanWeWorkTests {
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 40, fiveHourResetsIn: 2 * 3600)
         let layout = MenuBarLayout.make(from: snap, now: now)
         guard let b = iconOnly(layout) else { return }
-        #expect(b.which == .fiveHour)
+        #expect(b.provider == .claude)
         #expect(b.reset == "2h")
     }
 
@@ -890,7 +874,7 @@ struct MenuBarLayoutCanWeWorkTests {
         let snap = snapshot(fiveHourUtil: 30, sevenDayUtil: 100, sevenDayResetsIn: 2 * 24 * 3600)
         let layout = MenuBarLayout.make(from: snap, now: now)
         guard let b = iconOnly(layout) else { return }
-        #expect(b.which == .sevenDay)
+        #expect(b.provider == .claude)
         #expect(b.reset == "2d")
     }
 
@@ -928,7 +912,7 @@ struct MenuBarLayoutCanWeWorkTests {
         guard let b = iconOnly(layout) else { return }
         // The countdown is the moment the plan quota returns and credits stop being spent — the 7d
         // reset, never the credits' own month-end (`forSubscriptionExhausted` passes `creditsReset: nil`).
-        #expect(b.which == .sevenDay)
+        #expect(b.provider == .claude)
         #expect(b.reset == "3d")
     }
 
@@ -964,7 +948,7 @@ struct MenuBarLayoutCanWeWorkTests {
             Issue.record("expected .expanded (per-model does not gate work), got \(layout.mode)")
             return
         }
-        #expect(layout.credits != nil)   // the icon still shows — it just no longer hides the bars
+        #expect(layout.moneyMarker != nil)   // the icon still shows — it just no longer hides the bars
     }
 
     // MARK: Idle and fallbacks
@@ -975,7 +959,7 @@ struct MenuBarLayoutCanWeWorkTests {
         let snap = idleSnapshot(sevenDayUtil: 100)
         let layout = MenuBarLayout.make(from: snap, now: now)
         guard let b = iconOnly(layout) else { return }
-        #expect(b.which == .sevenDay)
+        #expect(b.provider == .claude)
         #expect(b.reset == "4d")   // idle 7d reset 4 days out
     }
 
@@ -990,7 +974,7 @@ struct MenuBarLayoutCanWeWorkTests {
             fiveHour: UsageWindow(utilization: 30, resetsAt: resetsAt(inSeconds: 4 * 3600)),
             sevenDay: UsageWindow(utilization: 100, resetsAt: "not-a-date"))
         let layout = MenuBarLayout.make(from: snap, health: .healthy(lastSuccess: now), now: now)
-        #expect(layout.mode == .exhaustedUnknownReset(which: .sevenDay))
+        #expect(layout.mode == .exhaustedUnknownReset(provider: .claude))
         // **No pause glyph**, even though `isBlocked` is true and we could justify one from the model's
         // side. On screen a pause asserting "you are blocked" beside a ⚠️ asserting "don't trust me"
         // reads as a broken widget — nothing there says the distrust covers only the *time*. So the
@@ -1005,7 +989,7 @@ struct MenuBarLayoutCanWeWorkTests {
             fiveHour: UsageWindow(utilization: 100, resetsAt: "garbage"),
             sevenDay: UsageWindow(utilization: 40, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)))
         #expect(MenuBarLayout.make(from: snap, now: now).mode
-                == .exhaustedUnknownReset(which: .fiveHour))
+                == .exhaustedUnknownReset(provider: .claude))
     }
 
     @Test func bothExhaustedWithBrokenResetsNamesNeitherWindow() {
@@ -1015,7 +999,7 @@ struct MenuBarLayoutCanWeWorkTests {
             fiveHour: UsageWindow(utilization: 100, resetsAt: "garbage"),
             sevenDay: UsageWindow(utilization: 100, resetsAt: "not-a-date"))
         #expect(MenuBarLayout.make(from: snap, now: now).mode
-                == .exhaustedUnknownReset(which: nil))
+                == .exhaustedUnknownReset(provider: .claude))
     }
 
     @Test func payingWithBrokenResetDrawsNeitherGlyph() {
@@ -1031,7 +1015,7 @@ struct MenuBarLayoutCanWeWorkTests {
             spend: SpendInfo(enabled: true, spendLimitReached: false))
         let layout = MenuBarLayout.make(
             from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
-        #expect(layout.mode == .exhaustedUnknownReset(which: .sevenDay))
+        #expect(layout.mode == .exhaustedUnknownReset(provider: .claude))
         #expect(layout.blockedPause == false)
         #expect(layout.credits == nil)
     }
@@ -1117,7 +1101,7 @@ struct MenuBarLayoutBlockedPauseTests {
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
         let age = UsageHealth.glyphAfter(for: failing(for: 0)) + 1
         let layout = MenuBarLayout.make(from: snap, health: failing(for: age), now: now)
-        #expect(layout.mode == .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
+        #expect(layout.mode == .error)
         #expect(layout.blockedPause == false)
     }
 

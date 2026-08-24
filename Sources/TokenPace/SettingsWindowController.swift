@@ -184,6 +184,9 @@ final class SettingsWindowController: NSWindowController {
     var onServiceDotChange: ((Bool) -> Void)? {
         get { model.onServiceDotChange } set { model.onServiceDotChange = newValue }
     }
+    var onMenuBarProvidersChange: ((Set<ProviderID>) -> Void)? {
+        get { model.onMenuBarProvidersChange } set { model.onMenuBarProvidersChange = newValue }
+    }
 
     /// Called when the user changes when "Show model & service limits" appears (#211), with the new mode.
     var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)? {

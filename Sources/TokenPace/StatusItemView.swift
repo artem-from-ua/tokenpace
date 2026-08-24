@@ -139,6 +139,10 @@ final class StatusItemView: NSView {
         /// 7d bar. A fractional gap would leave the lower bar off-grid and blurred again. At 5 pt the
         /// block is 15 pt tall, leaving symmetric 3.5 pt margins inside the 22 pt item.
         static let barGap: CGFloat = 5
+        /// Horizontal gap between two providers' bar columns. Deliberately wider than ``barGap`` (5 pt)
+        /// so the grouping reads as "bars inside a block, blocks apart" — the gap is the **only**
+        /// separation between providers: no rule, no tint (ADR-0128).
+        static let blockGap: CGFloat = 8
         /// Horizontal padding inside the item. Kept tight (2 pt) so the item hugs its neighbours
         /// the way native status items do — the menu bar adds its own inter-item spacing on top,
         /// so a wide internal pad reads as an oversized gap to the clock/battery beside us.
@@ -407,9 +411,9 @@ final class StatusItemView: NSView {
             contentRect = NSRect(x: contentRect.minX, y: contentRect.minY,
                                  width: contentRect.width - inset, height: contentRect.height)
         }
-        // The money-credits icon: in the bars modes it is a **leading** element between the pause glyph
-        // and the bars (drawn inside `drawExpanded`/`drawBlockedReset`). In the diagnostic `.error`
-        // state there is no leading pause sequence, so it stays trailing (just left of the dot).
+        // The money-credits icon: a **leading** element in `.expanded` (inside its provider's block)
+        // and in `.iconOnlyReset` (between the pause glyph and the countdown). In the diagnostic
+        // `.error` state there is no leading sequence, so it stays trailing (just left of the dot).
         if case .error = layout.mode, let credits = layout.credits {
             drawCreditsIconTrailing(credits, in: contentRect)
             let inset = creditsIconWidth(for: credits.currency) + Metrics.creditsIconGap
@@ -418,16 +422,16 @@ final class StatusItemView: NSView {
         }
 
         switch layout.mode {
-        case let .expanded(fiveHour, sevenDay):
-            drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, in: contentRect)
-        case let .iconOnlyReset(reset, _):
+        case let .expanded(blocks):
+            drawExpanded(blocks: blocks, in: contentRect)
+        case let .iconOnlyReset(_, reset):
             drawBlockedReset(reset, in: contentRect)
         case .exhaustedUnknownReset:
             // Same shape as `.iconOnlyReset` — leading glyph, then the label slot — but the slot holds a
             // ⚠️ instead of a countdown: the state is known, only its end is not (ADR-0091).
             drawUnknownReset(in: contentRect)
-        case let .error(fiveHour, sevenDay, reset, _):
-            drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
+        case .error:
+            drawError(in: contentRect)
         case .usagePollingOff:
             // `zzz` alone. The status dot above is deliberately still drawn — in this mode it is the
             // item's only live signal, so suppressing it would leave a widget saying nothing.
@@ -445,31 +449,37 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// The leading-decoration origin for the bars modes (`.expanded`/`.blockedReset`): draw the pause
-    /// glyph (when blocked) then the credits icon (when present), each advancing the origin, and return
-    /// the x where the bars/countdown should start. Keeps the left-to-right order **pause → credits →
-    /// content** consistent across both modes.
+    /// The leading-decoration origin for the countdown mode: the awaiting hand, then the pause glyph
+    /// (when blocked), then the credits icon (when present), each advancing the origin, and return the
+    /// x the countdown starts at. `.expanded` uses `drawBlock` instead, where the pause and the money
+    /// marker sit inside their own provider's block.
     private func drawLeadingDecorations(in rect: NSRect) -> CGFloat {
-        var originX = rect.minX + Metrics.hPadding
-        // The awaiting-input hand is the **first** leading element (left of pause/credits/bars).
-        //
-        // The origin advances whenever the **slot** is reserved, not whenever the glyph is drawn — the
-        // two conditions differ while nothing is waiting. Advancing only when the glyph is present
-        // would put the reserved width to the *right* of everything instead of to the left of it, so
-        // the bars would still shift on every change and the reservation would buy nothing.
-        //
-        // The step is the measured reserve (`awaitingIconWidth()`), the same number `itemWidth(for:)`
-        // adds — never the drawn symbol's own width, so slot and glyph cannot drift apart by a
-        // sub-pixel.
-        if reservesAwaitingSlot {
-            drawAwaitingIcon(atX: originX, in: rect)
-            originX += awaitingIconWidth() + Metrics.awaitingIconGap
-        }
+        var originX = drawAwaitingSlot(in: rect)
         if layout?.blockedPause == true {
             originX = drawPauseGlyph(atX: originX, in: rect) + Metrics.pauseGlyphGap
         }
         if let credits = layout?.credits {
             originX = drawCreditsIcon(credits, atX: originX, in: rect) + Metrics.creditsIconGap
+        }
+        return originX
+    }
+
+    /// Draw the awaiting-input hand in its reserved slot at the leading edge and return the x the next
+    /// element starts at. The **first** element of the widget in every mode that has one, ahead of any
+    /// provider block.
+    ///
+    /// The origin advances whenever the **slot** is reserved, not whenever the glyph is drawn — the two
+    /// conditions differ while nothing is waiting. Advancing only when the glyph is present would put
+    /// the reserved width to the *right* of everything instead of to the left of it, so the bars would
+    /// still shift on every change and the reservation would buy nothing.
+    ///
+    /// The step is the measured reserve (`awaitingIconWidth()`), the same number `itemWidth(for:)`
+    /// adds — never the drawn symbol's own width, so slot and glyph cannot drift apart by a sub-pixel.
+    private func drawAwaitingSlot(in rect: NSRect) -> CGFloat {
+        var originX = rect.minX + Metrics.hPadding
+        if reservesAwaitingSlot {
+            drawAwaitingIcon(atX: originX, in: rect)
+            originX += awaitingIconWidth() + Metrics.awaitingIconGap
         }
         return originX
     }
@@ -718,11 +728,48 @@ final class StatusItemView: NSView {
 
     // MARK: Expanded
 
-    private func drawExpanded(fiveHour: BarView?, sevenDay: BarView?, in rect: NSRect) {
-        // Leading decorations first: the red pause glyph (when blocked) then the credits icon (when
-        // present), each shifting the bars right past it. Order: pause → credits → bars.
-        let originX = drawLeadingDecorations(in: rect)
-        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: nil, originX: originX, in: rect)
+    /// Draw one block per provider, left to right, separated by ``Metrics/blockGap``.
+    ///
+    /// The awaiting-input hand is drawn once, leading everything — it is a fact about Claude Code
+    /// sessions, not about a quota, so it does not belong inside any block.
+    private func drawExpanded(blocks: [ProviderBlock], in rect: NSRect) {
+        var originX = drawAwaitingSlot(in: rect)
+        for block in blocks {
+            originX = drawBlock(block, atX: originX, in: rect) + Metrics.blockGap
+        }
+    }
+
+    /// Draw one provider's block starting at `x` — its own pause glyph, then its money marker, then its
+    /// bars — and return the block's right edge.
+    ///
+    /// **The bar column's geometry depends on the bar *count*, never on which provider owns it**, so
+    /// two bars land exactly where the 5h/7d pair has always landed and one bar where a lone bar has.
+    ///
+    /// `NSStatusBarButton` sits at a **half-point** y inside its window: its 22 pt frame is centred in
+    /// a 33 pt status window, giving `(33 - 22) / 2 = 5.5` (measured, macOS 15). Every point in this
+    /// image therefore lands on screen at `y + 5.5`, so a bar edge is only pixel-aligned when its y
+    /// *inside the image* is itself a half-point — hence ``halfPointAligned`` on the centred top edge.
+    /// A whole-point y inside the image lands halfway between two screen points, which the compositor
+    /// antialiases into blur; the snap costs at most 0.25 pt of centring.
+    @discardableResult
+    private func drawBlock(_ block: ProviderBlock, atX x: CGFloat, in rect: NSRect) -> CGFloat {
+        var originX = x
+        if block.blockedPause {
+            originX = drawPauseGlyph(atX: originX, in: rect) + Metrics.pauseGlyphGap
+        }
+        if let credits = block.credits {
+            originX = drawCreditsIcon(credits, atX: originX, in: rect) + Metrics.creditsIconGap
+        }
+        let count = block.bars.count
+        let blockHeight = Metrics.barHeight * CGFloat(count) + Metrics.barGap * CGFloat(count - 1)
+        let topY = halfPointAligned(rect.minY + (rect.height - blockHeight) / 2)
+        for (index, bar) in block.bars.enumerated() {
+            drawBar(bar, provider: block.provider, in: NSRect(
+                x: originX,
+                y: topY + CGFloat(index) * (Metrics.barHeight + Metrics.barGap),
+                width: Metrics.barWidth, height: Metrics.barHeight))
+        }
+        return originX + Metrics.barWidth
     }
 
     /// The "a window is exhausted but its reset instant is broken" draw (ADR-0091): a **lone ⚠️**.
@@ -769,69 +816,11 @@ final class StatusItemView: NSView {
         (y - 0.5).rounded() + 0.5
     }
 
-    /// Draw the pacing bars starting at `originX`; the reset label is drawn to their right only when
-    /// `reset != nil`. Two layouts by **how many** bars are present:
-    /// - **both**: 5h on top, 7d below, the pair vertically centred as one block.
-    /// - **one** (the other was hidden while calm — ``TopBarHiding``, ADR-0086): that bar **alone**,
-    ///   vertically centred on the item — so a single bar sits mid-height, not clinging to the top row.
-    ///   The geometry depends on the *count*, not on which window survived, so a lone 7-day bar lands
-    ///   exactly where a lone 5-hour bar used to.
-    ///
-    /// Shared by ``drawExpanded(fiveHour:sevenDay:reset:in:)`` and the bars-beside-⚠️ error phase so
-    /// the geometry is identical; only the left origin differs (the error glyph shifts it right).
-    private func drawBars(fiveHour: BarView?, sevenDay: BarView?, reset: String?,
-                          originX: CGFloat, in rect: NSRect) {
-        // Right edge of the bar column (same `barWidth` for one or two bars) — where the reset label
-        // starts. The item width does not change when the 7-day bar is hidden (only the vertical
-        // layout does), so this stays aligned with `barsBlockWidth`/`itemWidth`.
-        let barsMaxX = originX + Metrics.barWidth
-
-        switch (fiveHour, sevenDay) {
-        case let (.some(five), .some(seven)):
-            // Two bars stacked, vertically centred as a block, then nudged onto the pixel grid.
-            //
-            // `NSStatusBarButton` sits at a **half-point** y inside its window — its 22 pt frame is
-            // centred in a 33 pt status window, giving `(33 - 22) / 2 = 5.5` (measured, macOS 15). Every
-            // point in this image therefore lands on screen at `y + 5.5`, so a bar edge is only pixel-
-            // aligned when its y *inside the image* is itself a half-point. Two 5 pt bars with a 4 pt gap
-            // centre at a whole 4.0, which becomes a blurred 9.5 on screen; the single-bar branch happens
-            // to sit at 8.5 → a sharp 14.0, which is why only the stacked pair looked fuzzy.
-            let blockHeight = Metrics.barHeight * 2 + Metrics.barGap
-            let topY = halfPointAligned(rect.minY + (rect.height - blockHeight) / 2)
-            drawBar(five, in: NSRect(
-                x: originX, y: topY,
-                width: Metrics.barWidth, height: Metrics.barHeight
-            ))
-            drawBar(seven, in: NSRect(
-                x: originX, y: topY + Metrics.barHeight + Metrics.barGap,
-                width: Metrics.barWidth, height: Metrics.barHeight
-            ))
-        case let (.some(only), nil), let (nil, .some(only)):
-            // One bar (the other was hidden while calm): vertically centred on the item. Same y for
-            // either window — a lone 7-day bar sits exactly where a lone 5-hour bar did before ADR-0086.
-            drawBar(only, in: NSRect(
-                x: originX, y: rect.midY - Metrics.barHeight / 2,
-                width: Metrics.barWidth, height: Metrics.barHeight
-            ))
-        case (nil, nil):
-            // Unreachable: `TopBarHiding` elides at most one bar, so `.expanded` always carries one
-            // (see `MenuBarMode.expanded`'s invariant), and the error phase passes both or neither —
-            // and the neither case never reaches here (`drawError` draws the glyph alone instead).
-            // A silent no-op rather than an assertion: the view stays a thin shell (ADR-0009).
-            break
-        }
-
-        if let reset {
-            drawResetLabel(reset, slotAt: barsMaxX + Metrics.labelGap, in: rect)
-        }
-    }
-
     // MARK: Error
 
-    /// Draw the error state: the "no data" glyph alone. Since ADR-0091 it never carries bars — data
-    /// stale enough to reach this state is not shown at all — so `fiveHour`/`sevenDay`/`reset` are
-    /// always `nil` here and the parameters are kept only so the case pattern stays honest.
-    private func drawError(fiveHour: BarView?, sevenDay: BarView?, reset: String?, in rect: NSRect) {
+    /// Draw the error state: the "no data" glyph alone. Data stale enough to reach this state is not
+    /// shown at all, so there is never a bar beside it (ADR-0091).
+    private func drawError(in rect: NSRect) {
         drawNoDataGlyph(in: rect)
     }
 
@@ -906,7 +895,7 @@ final class StatusItemView: NSView {
     /// Geometry comes straight from `BarView.layout` — fractions are just multiplied by width. The two
     /// base zones (used + future/unused) share the solid ``PopupBarView/monochromeGrey`` with the popup,
     /// so the menu-bar bars read identically; only the pacing gap and dot carry colour.
-    private func drawBar(_ bar: BarView, in rect: NSRect) {
+    private func drawBar(_ bar: BarView, provider: ProviderID = .claude, in rect: NSRect) {
         // Idle 5h bar (ADR-0027): no pacing zones — "no active session". The bar's `layout`/`indicator`
         // are inert here.
         //
@@ -939,7 +928,7 @@ final class StatusItemView: NSView {
                 : (idleMuted ? bright(Palette.calmWhite) : accent(Palette.gapGreen))
             // Animated like any other bar colour, so idle→active (green→pacing colour) and the blocked grey
             // swap fade rather than snap.
-            let fill = animated(idleTarget, window: bar.window, part: .fill)
+            let fill = animated(idleTarget, bar: bar, provider: provider, part: .fill)
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
             // Balance's zero is the centre, so its idle pill sits there rather than at the left edge —
             // the same "grey track + zero pill" shape ADR-0078 fixes for every style, drawn on this
@@ -1002,7 +991,7 @@ final class StatusItemView: NSView {
             let offset = frozenStrip(for: bar).map { $0 * 2 - 1 } ?? l.balanceOffset
             let far = 0.5 + offset / 2
             fillZone(from: min(0.5, far), to: max(0.5, far), in: rect, width: w,
-                     color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true,
+                     color: calmedGapColor(l, bar: bar, provider: provider), floorEmptyToPill: true,
                      anchoredAt: 0.5)
             NSGraphicsContext.restoreGraphicsState()
             return
@@ -1017,7 +1006,7 @@ final class StatusItemView: NSView {
             // the marker already carries the position.
             let ribbon = frozenStrip(for: bar) ?? l.pressureLength
             fillZone(from: 0, to: ribbon, in: rect, width: w,
-                     color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true)
+                     color: calmedGapColor(l, bar: bar, provider: provider), floorEmptyToPill: true)
             NSGraphicsContext.restoreGraphicsState()
             return
         }
@@ -1026,7 +1015,7 @@ final class StatusItemView: NSView {
         // (`PopupBarView.aheadColor`: amber → orange → red by how far ahead), so the menu-bar bar and
         // the popup row agree — e.g. a yellow 7-day here reads yellow in the dropdown too. On pace →
         // `.systemGreen`.
-        let gapColor = calmedGapColor(l, window: bar.window)
+        let gapColor = calmedGapColor(l, bar: bar, provider: provider)
         // Under the stub the gap is pinned to `0…frozen` (and the marker parks at its end), so the
         // Pace & Time anatomy stays intact while nothing but the colour moves.
         let frozen = frozenStrip(for: bar)
@@ -1043,7 +1032,7 @@ final class StatusItemView: NSView {
         // The marker takes the EXACT colour of this state's pacing gap (`calmedGapColor`) — one tone
         // per pacing status, so the "you are here" tick reads as the same colour as the zone it marks.
         drawTimeMarker(at: frozen ?? l.timeFraction,
-                       colour: calmedGapColor(l, window: bar.window, part: .marker),
+                       colour: calmedGapColor(l, bar: bar, provider: provider, part: .marker),
                        in: rect)
     }
 
@@ -1132,13 +1121,14 @@ final class StatusItemView: NSView {
     /// states (`BarLayout.isCalm`: on-pace green + mild-ahead yellow) mute to white; the strong warnings
     /// (orange/red) stay coloured.
     ///
-    /// `window` identifies which bar this is, so the transition registry can keep the 5-hour and
-    /// 7-day fades apart; `part` separates the strip from the time marker (they share a colour but
-    /// are resolved at different points in the draw). The animator wraps the **final** tone — after
-    /// `bright()`/`accent()` and after the calm decision — so the "coloured → calm neutral" switch
-    /// fades too, and the ADR-0059 alpha/desaturation rules stay untouched.
-    private func calmedGapColor(_ l: BarLayout, window: LimitWindow, part: BarPart = .fill) -> NSColor {
-        animated(gapColorTarget(l), window: window, part: part)
+    /// `bar`/`provider` identify which bar this is, so the transition registry keeps every bar's fade
+    /// apart; `part` separates the strip from the time marker (they share a colour but are resolved at
+    /// different points in the draw). The animator wraps the **final** tone — after `bright()`/
+    /// `accent()` and after the calm decision — so the "coloured → calm neutral" switch fades too, and
+    /// the ADR-0059 alpha/desaturation rules stay untouched.
+    private func calmedGapColor(_ l: BarLayout, bar: BarView, provider: ProviderID,
+                               part: BarPart = .fill) -> NSColor {
+        animated(gapColorTarget(l), bar: bar, provider: provider, part: part)
     }
 
     /// The bar's pacing colour for the current state, **before** the transition layer.
@@ -1173,10 +1163,15 @@ final class StatusItemView: NSView {
 
     /// Route a bar colour through the transition layer (ADR-0070), or return it unchanged when no
     /// animator is attached (the dev-tools preview renders without one).
-    private func animated(_ target: NSColor, window: LimitWindow, part: BarPart) -> NSColor {
+    ///
+    /// **Keyed by `(provider, row)`, not by row alone.** Claude's week and Codex's week are both
+    /// `"7-day"`, and both are on the widget at once — keyed by the row name they would be one
+    /// animation, and one provider's colour slide would play out on the other's bar.
+    private func animated(_ target: NSColor, bar: BarView, provider: ProviderID,
+                          part: BarPart) -> NSColor {
         guard let colorAnimator else { return target }
         return colorAnimator.resolve(
-            .bar(surface: .menuBar, row: window.id, part: part), target: target)
+            .bar(surface: .menuBar, row: bar.tweenRow, part: part, provider: provider), target: target)
     }
 
     /// Whether this strip is rendering the **yellow** (mild-lead) pacing colour, and so wants the
@@ -1270,13 +1265,13 @@ final class StatusItemView: NSView {
     /// Draw the blocked-state countdown **alone** — no bars, just the reset label at the left inset,
     /// vertically centred. Reuses the same monospaced-digit font and foreground colour as
     /// ``drawResetLabel(_:slotAt:in:)`` so the countdown looks identical whether or not the bars are
-    /// hidden; `itemWidth` reserves the same fixed slot (via ``resetLabelWidth(_:)``) the bars mode does,
-    /// so the item keeps its width as the digit count changes. The blocked mode carries no pacing
+    /// hidden; `itemWidth` reserves the same fixed slot (via ``resetLabelWidth(_:)``), so the item keeps
+    /// its width as the digit count changes. The blocked mode carries no pacing
     /// colour to mute, so `colorsTell` is irrelevant here — the label is always the neutral foreground.
     ///
     /// When `layout.blockedPause` is set (fully blocked), the red pause glyph is drawn first, then the
-    /// credits icon (when present), and the countdown shifts right past them — the same leading pattern
-    /// the bars use in ``drawExpanded``. Order: pause → credits → countdown.
+    /// credits icon (when present), and the countdown shifts right past them. Order: pause → credits →
+    /// countdown.
     private func drawBlockedReset(_ reset: String, in rect: NSRect) {
         let originX = drawLeadingDecorations(in: rect)
         drawResetLabel(reset, slotAt: originX, in: rect)
@@ -1289,29 +1284,35 @@ final class StatusItemView: NSView {
     /// dynamically so the item hugs exactly the content currently drawn.
     private func itemWidth(for layout: MenuBarLayout?) -> CGFloat {
         // The service dot is always a **trailing** inset (dot + gap). The money-credits icon is a
-        // **leading** inset in the bars modes (between the pause glyph and the bars) but a **trailing**
-        // inset in the diagnostic `.error`/cold-start states (no leading sequence there).
+        // **trailing** inset in the diagnostic `.error`/cold-start states (no leading sequence there);
+        // in `.expanded` it is inside a block and counted by `blockWidth`.
         let dotInset = layout?.serviceProblem != nil ? Metrics.statusDotDiameter + Metrics.statusDotGap : 0
         let creditsInset = layout?.credits.map { creditsIconWidth(for: $0.currency) + Metrics.creditsIconGap } ?? 0
-        // Leading red pause glyph reserves its width + gap in both bars modes, mirroring the origin
-        // shift in `drawLeadingDecorations`; zero when not fully blocked.
+        // Leading red pause glyph reserves its width + gap, mirroring the origin shift in
+        // `drawLeadingDecorations`; zero when not fully blocked.
         let pauseInset = (layout?.blockedPause == true) ? pauseGlyphWidth() + Metrics.pauseGlyphGap : 0
-        // Awaiting-input hand is the first leading element in the bars modes. Reserved from the
-        // **option alone**, not from the live count, so the widget keeps its width as sessions start
-        // and stop waiting. Mirrors the origin advance in `drawLeadingDecorations`.
+        // Awaiting-input hand is the first leading element in every mode that has bars or a countdown.
+        // Reserved from the **option alone**, not from the live count, so the widget keeps its width as
+        // sessions start and stop waiting. Mirrors the origin advance in `drawAwaitingSlot`.
         let awaitingInset = reservesAwaitingSlot ? awaitingIconWidth() + Metrics.awaitingIconGap : 0
-        // Leading decorations in the bars modes: awaiting hand → pause glyph → credits icon.
+        // The countdown mode's leading sequence: awaiting hand → pause glyph → credits icon.
         let leadingInset = awaitingInset + pauseInset + creditsInset
         switch layout?.mode {
         case .none:
             // No layout at all — the very first draw, before the first poll resolves. Credits is
             // trailing here, as in every glyph-only state.
             return Metrics.height + dotInset + creditsInset
-        case .expanded:
-            // Bars, never a countdown (ADR-0091) — and one bar is exactly as wide as two, since both
-            // draw into the same `barWidth` column.
-            return dotInset + Metrics.hPadding + leadingInset + Metrics.barWidth + Metrics.hPadding
-        case let .iconOnlyReset(reset, _):
+        case let .expanded(blocks):
+            // Bars, never a countdown (ADR-0091). Every block is one `barWidth` column whatever its bar
+            // count, plus its own pause/credits glyphs; blocks are separated by `blockGap`.
+            //
+            // **No ceiling.** The width is the sum of what the user asked to see — the "Providers to
+            // display" checkboxes are the control, not a hidden heuristic that drops a block once the
+            // item gets wide (ADR-0128).
+            let blocksWidth = blocks.map(blockWidth).reduce(0, +)
+                + Metrics.blockGap * CGFloat(max(0, blocks.count - 1))
+            return dotInset + Metrics.hPadding + awaitingInset + blocksWidth + Metrics.hPadding
+        case let .iconOnlyReset(_, reset):
             // No bars: the item hugs the leading decorations (pause + credits) plus the countdown.
             return dotInset + Metrics.hPadding + leadingInset + resetLabelWidth(reset) + Metrics.hPadding
         case .exhaustedUnknownReset:
@@ -1328,6 +1329,17 @@ final class StatusItemView: NSView {
             // but it is kept in the sum so this branch cannot drift from the others.
             return Metrics.height + dotInset + creditsInset
         }
+    }
+
+    /// The reserved width of one provider's block — its own pause glyph and money marker, then the bar
+    /// column. Mirrors `drawBlock`'s origin advances exactly, so the item reserves what it paints.
+    private func blockWidth(_ block: ProviderBlock) -> CGFloat {
+        var width: CGFloat = 0
+        if block.blockedPause { width += pauseGlyphWidth() + Metrics.pauseGlyphGap }
+        if let credits = block.credits {
+            width += creditsIconWidth(for: credits.currency) + Metrics.creditsIconGap
+        }
+        return width + Metrics.barWidth
     }
 
     /// The font the reset countdown is both **measured** and **drawn** in. One constant rather than a

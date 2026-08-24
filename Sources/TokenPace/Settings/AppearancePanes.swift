@@ -286,6 +286,26 @@ struct MenuBarPane: View {
                 }
             }
 
+            // Which providers get a block, and so how wide the item is (ADR-0128). Shown only once
+            // there is a choice to make — with one provider collecting usage the section would be a
+            // single checkbox that must stay ticked.
+            //
+            // The list is what is **collecting usage**, not every `ProviderID`: a status-only provider
+            // has no bars, so a row for it would be a checkbox over nothing.
+            if model.menuBarProviderChoices.count > 1 {
+                Section("Providers to display:") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(model.menuBarProviderChoices, id: \.self) { provider in
+                            Toggle(provider.displayName, isOn: Binding(
+                                get: { !model.menuBarHiddenProviders.contains(provider) },
+                                set: { model.setShowsInMenuBar(provider, $0) }))
+                        }
+                        SettingsHint(text: "The widget grows with each provider it draws, and the menu "
+                            + "bar is shared with every other app. Untick the ones you do not watch.")
+                    }
+                }
+            }
+
             // The service dot gets its own card: the three rows above are about the **pacing bars** and
             // read `PacingModel`, while this one is about **external incidents** and reads
             // `ProviderMonitoring`. A single row needs no section header, like the polling-pause section

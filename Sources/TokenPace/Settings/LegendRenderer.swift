@@ -29,7 +29,7 @@ enum LegendRenderer {
         // Without this the widget reserves the awaiting-input slot from `PersistedConfig`, so the
         // specimen's width would depend on a setting the page is not talking about.
         view.isPreviewSpecimen = true
-        view.layout = MenuBarLayout(mode: .expanded(
+        view.layout = MenuBarLayout(mode: MenuBarLayout.claudeBlockMode(
             fiveHour: fiveHour.map { BarView(layout: $0, indicator: .neutral, window: .fiveHour) },
             sevenDay: sevenDay.map { BarView(layout: $0, indicator: .neutral, window: .sevenDay) }))
         // Balance: shows *direction* without a marker, which is what this section wants — how many

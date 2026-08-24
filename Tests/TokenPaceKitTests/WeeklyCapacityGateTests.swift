@@ -120,14 +120,10 @@ struct WeeklyGateFiveHourTests {
 
     /// The menu bar applies the identical gate, so the two surfaces cannot disagree.
     @Test func menuBarAppliesTheSameGate() {
-        guard case let .expanded(openFive, _) = MenuBarLayout.make(
-            from: snapshot(sevenDayUtil: 25), now: now).mode else {
-            Issue.record("expected expanded mode"); return
-        }
-        guard case let .expanded(closedFive, _) = MenuBarLayout.make(
-            from: snapshot(sevenDayUtil: 70), now: now).mode else {
-            Issue.record("expected expanded mode"); return
-        }
+        guard let (openFive, _) = claudeBars(
+            MenuBarLayout.make(from: snapshot(sevenDayUtil: 25), now: now).mode),
+              let (closedFive, _) = claudeBars(
+            MenuBarLayout.make(from: snapshot(sevenDayUtil: 70), now: now).mode) else { return }
         // Both bars are optional in `.expanded` since ADR-0086, but neither `make` call above asks for
         // any hiding (`hideCalmBar` defaults to `.never`), so the 5h bar is always there.
         #expect(openFive?.layout.severity == .farBehind)
@@ -230,8 +226,7 @@ struct WeeklyGateIdleTests {
     /// The surfaces used to carry the flag independently, which is exactly how they could have drifted.
     @Test func menuBarIdleBarMatchesThePopup() {
         func idleBar(_ snap: UsageSnapshot) -> BarView? {
-            guard case let .expanded(five, _) = MenuBarLayout.make(from: snap, now: now).mode else { return nil }
-            return five
+            claudeBars(MenuBarLayout.make(from: snap, now: now).mode)?.five
         }
         for util in [25.0, 70.0] {
             let snap = snapshot(sevenDayUtil: util, sessionIdle: true)
