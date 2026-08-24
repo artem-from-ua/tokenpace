@@ -139,11 +139,63 @@ must not reorder the screen. The two orders genuinely differ today.
 
 **Settings:** `Providers › Codex` (`ProvidersCodexPane`) generates one toggle per service from
 `StatusHealth.codexServices`, so a switch cannot name a service the poll does not monitor, and states
-the `Login` exclusion in a footer. `CodexMonitoring` declares `usageEnabled` at default **false**
-ahead of any collector, so the `Codable` shape does not change twice; the status flags are all
-default-on. The asymmetry is deliberate — a status poll is an HTTP GET against a public URL, while
-the quota spawns a process on the user's machine. No derived lock: Codex's quota comes from a local
-subprocess, not from `Codex API`.
+the `Login` exclusion in a footer. A second section carries `usageEnabled`, at default **false**
+while the status flags are all default-on. The asymmetry is deliberate — a status poll is an HTTP GET
+against a public URL, while the quota spawns a process on the user's machine. No derived lock:
+Codex's quota comes from a local subprocess, not from `Codex API`.
+
+## Codex quota — the collector (#504, ADR-0127)
+
+The usage half of the same provider, and the app's first subprocess run **for data**. `CodexAppServer`
+(app target, beside `ClaudeCLIRefresher` and `GHReleaseFetcher`, since there is no shell-IO module)
+runs `codex app-server` and speaks JSON-RPC over its stdio; the pure half — the wire model, the error
+taxonomy, the normalizer — is in the Kit, where the tests are.
+
+**One process per read, not one held open.** Measured on codex-cli 0.148.0: spawn through the
+`initialize` response is **0.03 s** while one `account/rateLimits/read` on a warm process is
+**0.44 s**, and a cold spawn through to a first answer is **0.45 s** — indistinguishable from the
+warm read, because the cost is the network round trip. A resident child would save ~6 % of one read
+every three minutes and buy an orphan to reap and a sleep/wake lifetime to manage
+([ADR-0127](../../adr/0127-codex-quota-from-the-app-server.md) §D1, which records the planned
+rationale it overturned).
+
+**Responses are matched by `id`.** `remoteControl/status/changed` was observed arriving before the
+`initialize` response it preceded, so "the next line" would return a notification as a result.
+Unmatched lines are dropped **without logging** — the server owns its stdout.
+
+**Two probes shape the error path.** An unknown method answers **`-32600`**, not `-32601`, so "this
+codex is too old" keys on that code **and** the method name appearing in the message; `-32600` alone
+is what a malformed `params` also returns. And **`account/read` is never called** — it returns the
+account email in the clear — so sign-in state is inferred from a missing `rateLimits` on the read
+already being made. `codexHome`, present in the handshake reply, is deliberately not decoded.
+
+**A 5-hour row is never synthesized.** The normalizer emits one row per **reported** window — one
+today, since `secondary` is `null`. Durations reach `PacingModel` through **raw-duration overloads**
+rather than new `LimitWindow` cases (the server chooses `windowDurationMins`), and `subdivisions` is a
+**lookup returning 0** for an unrecognised duration — a week over an hour would be 168 ticks.
+
+**Codex rows live in `PopupLayout.providerQuotaRows`, never in `rows`.** `blockingReset` keys its
+`.token(id:)` to an index into `rows`, so appending would move the red badge onto the wrong row.
+`TweenKey.bar` gains a `provider` for the same class of reason: both plates title a row `"7-day"`.
+
+**Concurrency.** The pipe reads block, and this app's actors are reached from `@MainActor`, so the
+exchange runs inside `Task.detached` and the poll task is detached too — a plain `Task { }` inside a
+`@MainActor` class inherits that isolation and freezes the UI for the round trip.
+
+**Failure spends one retry per tick, then a five-minute cooldown**, so a broken install cannot become
+a spawn every three minutes; a missing binary and an out-of-date Codex skip even the retry. The
+**quota is deliberately not journalled** — `UsageSample.h5`/`d7` are non-optional and fitting one
+7-day window there needs an invented 5-hour one ([#508](https://github.com/artem-from-ua/tokenpace/issues/508)).
+
+**The plate carries both halves**, and stands on either: the quota's bars above the status rows,
+matching Claude's order. The plan word is **⌥-gated** like Claude's — at rest the header is the bare
+`Codex` wordmark, and ⌥ restores `Codex ･ Plus`; it is recomputed on every rebuild, and a modifier
+change is one of the things that rebuilds the plate. The ⌥ stand-by line is gated on the window being
+a **week** rather than on a row index, which is the better test anyway.
+
+**Troubleshoot** gains a `Codex quota` section: the binary (or the candidates tried), the version
+parsed from `initialize`'s `userAgent`, the age and latency of the last successful read, and the last
+error — never an email, a `codexHome`, or a raw response.
 
 ## Incidents and episode subscription (#279, ADR-0071)
 

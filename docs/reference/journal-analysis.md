@@ -192,6 +192,66 @@ generation. If the journal holds samples with a lower `sevV` (or none at all), t
 **different** model, and mixing them with the rest is not allowed. What to do about it is item 16 of
 the [checklist](#checklist-before-showing-a-result).
 
+## The Codex quota log — a separate file, dev only
+
+`codex-quota-dev-YYYY-MM.jsonl`, beside the journal in the same directory and **not part of it**.
+One line per successful Codex quota poll, written only when the running build is a dev one and the
+Development-tools checkbox that also drives `status-payloads-dev-*` is on. There is no release
+counterpart and no plan to add one: `UsageSample` cannot hold a lone 7-day window without inventing
+a 5-hour one, and the archive the maintainer's history is built on takes no invented rows
+([#520](https://github.com/artem-from-ua/tokenpace/issues/520),
+[#504](https://github.com/artem-from-ua/tokenpace/issues/504)).
+
+The name is what keeps it out. `JournalMigration.belongsToBuild` keys on the `usage-journal-`
+prefix, which this name does not carry, so no build's migration ever opens the file — and the writer
+refuses a release build besides.
+
+| Field | Type | What it is |
+|---|---|---|
+| `v` | Int | the version of the **quota** line format (**1** is current). Its own counter, unrelated to every `v` above |
+| `observedAt` | ISO-8601 UTC | when we read the response |
+| `windows[]` | array | one entry per window the server reported, in its order. **One today**; the count is the server's |
+| `windows[].usedPercent` | Double 0…100 | the server's own number, clamped to the range and otherwise untouched |
+| `windows[].windowDurationMins` | Int | the window length in minutes — 10080 on the live Plus account |
+| `windows[].resetsAt` | Number | **epoch seconds** — the one field whose format differs from every reset in the usage journal, which are ISO strings. **Absent** when the server sent none, never `null`, so absence is unambiguous |
+| `windows[].notStarted` | Bool | our verdict at `observedAt`, from `CodexQuotaWindow.hasNotStarted(now:)`: `usedPercent` is 0 and `resetsAt` sits a whole duration ahead (±120 s on the near edge, up to twice the duration on the far) |
+| `spendControlReached` | Bool | the account-level flag, **absent** when the server sent `null` |
+| `rateLimitReachedType` | String | which limit the account is up against, in the server's words; **absent** when `null`. An open vocabulary — group with a fallback bucket |
+
+**Every poll is written, unchanged or not, and that is the difference from
+`status-payloads-dev-*`.** A window that has not started reports a `resetsAt` recomputed as `now`
+plus its own length on every request, so it differs in every response while meaning "nothing is
+happening"; a change gate would keep exactly those lines and drop the anchored ones. Two
+consequences for processing:
+
+- **The cadence is data.** A gap between consecutive `observedAt` values means the app stopped
+  observing — there is no `resume` marker in this file, so gaps are found by differencing
+  `observedAt` against the ~180 s poll interval. An unbroken run of identical readings means the
+  state held, and is not redundancy to deduplicate away.
+- **`notStarted: true` lines are the point, not noise.** They are the opposite of the release-side
+  admission rule: the usage journal records history and skips readings it cannot vouch for, this
+  file captures evidence and keeps them. Filtering them out is what makes a window anomaly
+  unreconstructable.
+
+**Two things never reach the file, and both are the normalizer's doing rather than the log's.** A
+window whose `windowDurationMins` is zero or negative is dropped before the record is built, and a
+read carrying no `rateLimits` at all throws as not-signed-in — so a failed poll writes nothing and is
+visible only as a gap. Neither has been observed on a live account; if a gap ever needs explaining,
+the `codex quota unavailable: <reason>` line in the app log is where the reason is.
+
+**Read `notStarted` as one poll's verdict, not as a fact about the window.** It is a pure function of
+one payload, so a degraded backend can flip it for a single reading. The sequence is what carries
+meaning: whether the anchor was lost in one tick or drifted, whether the horizon ever stabilised, and
+whether `usedPercent` stayed flat at 0 or wobbled. A live account has been observed reporting 3 %
+against a fixed reset, then ~14 hours of 0 % with a moving horizon, then 3 % again against a fresh
+anchor — the counter preserved behind the zero the whole time
+([#515](https://github.com/artem-from-ua/tokenpace/issues/515),
+[#519](https://github.com/artem-from-ua/tokenpace/issues/519)).
+
+**Nothing identifying is in the file** — no email, no `codexHome`, no auth path, no reset-credit id.
+`account/read` returns the email in the clear and is never called; the plan word is not recorded
+either.
+
 ## Granularity: what can be measured and what cannot
 
 **Polling happens no more than once every 3 minutes, and once every 15 while idle**

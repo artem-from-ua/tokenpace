@@ -41,6 +41,10 @@ final class SignalHub: @unchecked Sendable {
         case github
         /// The Codex status loop's scheduler (#503) — its own subscription, for the same reason.
         case codex
+        /// The Codex quota collector's scheduler — a fourth subscription, because it is a different
+        /// source from the status page it shares a provider with: it runs a local subprocess on its
+        /// own cadence and must receive sleep/wake without racing the status loop for a continuation.
+        case codexQuota
     }
 
     private let lock = NSLock()

@@ -10,9 +10,9 @@ import TokenPaceKit
 /// broke. Codex's are separate surfaces — someone in the terminal and someone in Codex Web hit
 /// different failures — so "CLI down, Web fine" is an action rather than noise.
 ///
-/// No `Token limits usage` section yet: the quota half is declared in ``CodexMonitoring`` but nothing
-/// reads it, and a switch over a collector that does not exist would be a promise the page cannot
-/// keep.
+/// The quota switch sits in its own section, off by default. Watching a status page is an HTTP GET
+/// against a public URL; reading the quota runs `codex` on this Mac, which is a different class of act
+/// and is asked for rather than assumed.
 ///
 /// The rows are generated from `StatusHealth.codexServices`, the same table that resolves the feed —
 /// a switch here cannot name a service the poll does not monitor.
@@ -49,6 +49,19 @@ struct ProvidersCodexPane: View {
                 SettingsHint(
                     text: "OpenAI's status page also lists a Login component twice, under two "
                         + "different ids — TokenPace cannot tell them apart, so it watches neither.")
+            }
+
+            Section {
+                Toggle("Collect subscription quota", isOn: Binding(
+                    get: { model.codexMonitoring.usageEnabled },
+                    set: { model.setCodexUsage($0) }))
+            } header: {
+                SectionHeaderWithHint(title: "Token limits usage",
+                                      hint: model.stubScenarioActive ? SettingsStubHint.text : nil)
+            } footer: {
+                SettingsHint(
+                    text: "TokenPace runs the installed codex command to read your plan's usage. "
+                        + "Nothing is sent anywhere, and your account email is never read.")
             }
         }
         .formStyle(.grouped)

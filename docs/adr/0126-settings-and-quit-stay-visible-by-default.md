@@ -4,7 +4,7 @@ date: 2026-08-24
 supersedes: [0117]
 ---
 
-# ADR-0126: `Settings…` and `Quit` are visible by default, behind a switch rather than a modifier
+# ADR-0127: `Settings…` and `Quit` are visible by default, behind a switch rather than a modifier
 
 > **Supersedes D1 of [ADR-0117](0117-dropdown-actions-behind-option.md) for two of its five items.**
 > `Settings…`, `Quit TokenPace` and Quit's separator now follow a default-on switch instead of ⌥.

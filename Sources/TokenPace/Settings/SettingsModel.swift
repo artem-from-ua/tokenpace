@@ -819,6 +819,17 @@ final class SettingsModel {
         onCodexMonitoringChange?(config)
     }
 
+    /// Turn the Codex quota collection on or off. Its own setter rather than a sixth `ServiceID`:
+    /// this switch governs a local subprocess, not a status-page component, and `isEnabled` answers
+    /// only for the latter.
+    func setCodexUsage(_ on: Bool) {
+        codexMonitoring.usageEnabled = on
+        let config = codexMonitoring
+        PersistedConfig.codexMonitoring = config
+        AppLogger.lifecycle.notice("codex: quota collection set \(on, privacy: .public)")
+        onCodexMonitoringChange?(config)
+    }
+
     func setBackToWork(_ on: Bool) {
         backToWorkEnabled = on
         PersistedConfig.backToWorkEnabled = on

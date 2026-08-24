@@ -93,7 +93,8 @@ final class DevToolsWindowController: NSWindowController {
         payloadLogCheckbox.state = PersistedConfig.statusPayloadLogEnabled ? .on : .off
         payloadLogCheckbox.toolTip =
             "Append each materially-changed status.claude.com response to a JSONL file "
-            + "(ADR-0071 §10). Live network only; unchanged payloads are not written."
+            + "(ADR-0071 §10). Live network only; unchanged payloads are not written. "
+            + "Also records every Codex quota poll to codex-quota-dev-YYYY-MM.jsonl (dev builds only)."
 
         revealPayloadLogButton.bezelStyle = .rounded
         revealPayloadLogButton.controlSize = .small

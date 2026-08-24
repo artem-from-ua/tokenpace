@@ -198,6 +198,16 @@ public struct PopupLayout: Sendable, Equatable {
     /// outage under the Claude header, and the incident rows deliberately do not name the services
     /// they affect (ADR-0071 §3), so they cannot self-correct that attribution.
     public let providerIncidents: [ProviderID: [VisibleIncident]]
+    /// A satellite provider's own quota bars, on its own plate.
+    ///
+    /// **A separate array, never appended to ``rows``.** ``blockingReset`` keys its `.token(id:)` pick
+    /// to an index into `rows`, and the view paints the red reset badge on the row whose index
+    /// matches. Appending another provider's rows renumbers that array, so the badge lands on a row
+    /// that is not the blocker — and on the wrong provider's plate. The same reason ``rows`` hides its
+    /// per-model group by skipping rather than by filtering.
+    public let providerQuotaRows: [ProviderID: [LimitRow]]
+    /// A satellite provider's plan word for its plate header (`"Plus"`), when it reports one.
+    public let providerPlanLabels: [ProviderID: String]
     /// The "Extra usage" money-credits section, or `nil` when credits are inactive for this
     /// snapshot (`snapshot.spend == nil` or `!CreditsPacing.isActive`). A **separate** field from
     /// ``rows`` — a credits section is not a limit window (see ``CreditsRow``).
@@ -328,7 +338,9 @@ public struct PopupLayout: Sendable, Equatable {
         monitoringMode: MonitoringMode = .usageAndServices,
         weeklyResetUnknown: Bool = false,
         providerStatusAges: [ProviderID: TimeInterval] = [:],
-        providerIncidents: [ProviderID: [VisibleIncident]] = [:]
+        providerIncidents: [ProviderID: [VisibleIncident]] = [:],
+        providerQuotaRows: [ProviderID: [LimitRow]] = [:],
+        providerPlanLabels: [ProviderID: String] = [:]
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -352,6 +364,8 @@ public struct PopupLayout: Sendable, Equatable {
         self.weeklyResetUnknown = weeklyResetUnknown
         self.providerStatusAges = providerStatusAges
         self.providerIncidents = providerIncidents
+        self.providerQuotaRows = providerQuotaRows
+        self.providerPlanLabels = providerPlanLabels
     }
 
     /// A copy of this layout with **one** field replaced, everything else carried over. Every `with*`
@@ -363,7 +377,9 @@ public struct PopupLayout: Sendable, Equatable {
         subscription: EpisodeSubscriptionState?? = nil,
         planLabel: String?? = nil,
         providerStatusAges: [ProviderID: TimeInterval]? = nil,
-        providerIncidents: [ProviderID: [VisibleIncident]]? = nil
+        providerIncidents: [ProviderID: [VisibleIncident]]? = nil,
+        providerQuotaRows: [ProviderID: [LimitRow]]? = nil,
+        providerPlanLabels: [ProviderID: String]? = nil
     ) -> PopupLayout {
         PopupLayout(
             lastUpdateAge: lastUpdateAge ?? self.lastUpdateAge,
@@ -380,7 +396,9 @@ public struct PopupLayout: Sendable, Equatable {
             monitoringMode: monitoringMode,
             weeklyResetUnknown: weeklyResetUnknown,
             providerStatusAges: providerStatusAges ?? self.providerStatusAges,
-            providerIncidents: providerIncidents ?? self.providerIncidents)
+            providerIncidents: providerIncidents ?? self.providerIncidents,
+            providerQuotaRows: providerQuotaRows ?? self.providerQuotaRows,
+            providerPlanLabels: providerPlanLabels ?? self.providerPlanLabels)
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged.
@@ -443,6 +461,26 @@ public struct PopupLayout: Sendable, Equatable {
     public func incidents(of provider: ProviderID) -> [VisibleIncident] {
         providerIncidents[provider] ?? []
     }
+
+    /// A copy carrying one satellite provider's quota bars and plan word. An empty `rows` clears the
+    /// entry — the provider has no bars to draw rather than a row of zeroes.
+    public func withProviderQuota(
+        _ provider: ProviderID, rows: [LimitRow], planLabel: String?
+    ) -> PopupLayout {
+        var allRows = providerQuotaRows
+        var labels = providerPlanLabels
+        allRows[provider] = rows.isEmpty ? nil : rows
+        labels[provider] = rows.isEmpty ? nil : planLabel
+        return copy(providerQuotaRows: allRows, providerPlanLabels: labels)
+    }
+
+    /// One satellite provider's quota bars, in the order the server reported its windows.
+    public func quotaRows(of provider: ProviderID) -> [LimitRow] {
+        providerQuotaRows[provider] ?? []
+    }
+
+    /// One satellite provider's plan word, or `nil` when it reported none.
+    public func planLabel(of provider: ProviderID) -> String? { providerPlanLabels[provider] }
 
     // MARK: make
 

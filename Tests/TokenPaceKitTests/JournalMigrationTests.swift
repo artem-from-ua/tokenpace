@@ -163,6 +163,10 @@ struct JournalMigrationTests {
         // Neither build touches the backups it just made, nor anything else in the directory.
         #expect(!JournalMigration.belongsToBuild(fileName: "usage-journal-2026-08.jsonl.v1.bak", isRelease: true))
         #expect(!JournalMigration.belongsToBuild(fileName: "status-payloads-2026-08.jsonl", isRelease: true))
+        // The dev Codex quota log (#520) sits in the same directory and is not a usage journal in
+        // either flavour — neither build may migrate it into the series.
+        #expect(!JournalMigration.belongsToBuild(fileName: "codex-quota-dev-2026-08.jsonl", isRelease: true))
+        #expect(!JournalMigration.belongsToBuild(fileName: "codex-quota-dev-2026-08.jsonl", isRelease: false))
         #expect(!JournalMigration.belongsToBuild(fileName: "usage-journal-2026-08.jsonl.migrating", isRelease: true))
     }
 

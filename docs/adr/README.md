@@ -133,7 +133,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0114](0114-extra-usage-is-one-name.md) | "Extra usage" — one name across every surface | accepted |
 | [0115](0115-no-blue-on-per-model-windows.md) | Blue never applies to per-model windows; `sev` is recomputed by migration | accepted |
 | [0116](0116-english-as-documentation-language.md) | English as the documentation language | accepted |
-| [0117](0117-dropdown-actions-behind-option.md) | Every dropdown action sits behind ⌥ Option, announced by a caption | partially superseded → [0126](0126-settings-and-quit-stay-visible-by-default.md) |
+| [0117](0117-dropdown-actions-behind-option.md) | Every dropdown action sits behind ⌥ Option, announced by a caption | accepted |
 | [0118](0118-activity-from-session-journals.md) | Claude Code activity is read from session journals, not the process table | accepted |
 | [0119](0119-status-polling-own-cadence-and-backoff.md) | Status polling gets its own heartbeat and a per-source 429 backoff | accepted |
 | [0120](0120-status-records-carry-their-provider.md) | `status` journal records carry their provider, and the archive is backfilled | accepted |
@@ -142,7 +142,8 @@ current design, because the reasoning is worth as much as the outcome.
 | [0123](0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md) | One line per error run, and a wall-clock floor on signal-driven polls | accepted |
 | [0124](0124-journal-records-carry-their-provider.md) | Every journal record carries its provider, and error runs never merge across providers | accepted |
 | [0125](0125-codex-as-a-status-provider.md) | Codex as a status provider — statuses from the component feed, incidents from the page's own backend, and an age that is never invented | accepted |
-| [0126](0126-settings-and-quit-stay-visible-by-default.md) | `Settings…` and `Quit` are visible by default, behind a switch rather than a modifier | accepted |
+| [0117](0117-dropdown-actions-behind-option.md) | Every dropdown action sits behind ⌥ Option, announced by a caption | partially superseded → [0126](0126-settings-and-quit-stay-visible-by-default.md) |
+| [0127](0127-codex-quota-from-the-app-server.md) | Codex quota from a short-lived `app-server` process, with window durations as data rather than enum cases | accepted |
 
 ## Maintaining this index
 

@@ -252,6 +252,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Troubleshoot: a success there must never quietly hide which path the data came from.
     private(set) var codexIncidentsFromProxy = false
 
+    // MARK: Codex quota source (#504)
+
+    /// Where the quota comes from — the real `codex app-server` collector, or a stub's canned
+    /// snapshot. `nil` while the feature is off, which is also what guarantees **no process is
+    /// spawned** until the user asks for one.
+    private var codexQuotaSource: (any CodexQuotaSource)?
+    private var codexQuotaLoopTask: Task<Void, Never>?
+    private var codexQuotaTask: Task<Void, Never>?
+    /// The bars themselves, in the order the server reported its windows, and the plan word beside
+    /// the plate's wordmark. Held apart from `PopupLayout.rows` all the way to the view — see
+    /// ``PopupLayout/providerQuotaRows``.
+    private var lastCodexQuotaRows: [LimitRow] = []
+    private var lastCodexPlanLabel: String?
+    /// The last quota failure, kept for Troubleshoot only. The popup shows no warning banner for it:
+    /// `PopupLayout.warning` is Claude's, and a Codex failure surfacing there would read as a problem
+    /// with the bars above it.
+    private(set) var lastCodexQuotaDiagnostics = CodexQuotaDiagnostics()
+
     // MARK: update check
 
     /// The single update menu item, sitting just above Quit behind its own separator. Hidden unless
@@ -665,7 +683,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let wc = SettingsWindowController()
             wc.onProviderMonitoringChange = { [weak self] config in self?.providerMonitoringChanged(config) }
             wc.onGitHubMonitoringChange = { [weak self] _ in self?.gitHubMonitoringChanged() }
-            wc.onCodexMonitoringChange = { [weak self] _ in self?.codexMonitoringChanged() }
+            wc.onCodexMonitoringChange = { [weak self] config in
+                self?.codexMonitoringChanged()
+                self?.codexQuotaMonitoringChanged(config)
+            }
             wc.onCheckForUpdatesNow = { [weak self] in self?.performUpdateCheck(userInitiated: true) }
             wc.onInstallUpdateNow = { [weak self] in self?.installUpdateNow() }
             wc.onColorAdviceChange = { [weak self] mode in
@@ -787,6 +808,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             troubleshootWC = wc
         }
         troubleshootWC?.show(lastOutput)
+        renderCodexTroubleshoot()
     }
 
     /// Open (or focus) the Development tools window: the live stub selector and the status-payload
@@ -1046,6 +1068,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         githubTask?.cancel()
         codexLoopTask?.cancel()
         codexTask?.cancel()
+        codexQuotaLoopTask?.cancel()
+        codexQuotaTask?.cancel()
         updateTask?.cancel()
         installTask?.cancel()
         archiveTask?.cancel()
@@ -1114,6 +1138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startStatusLoop()
         startGitHubLoop()
         startCodexLoop()
+        startCodexQuotaLoop()
         updateColorCycle(for: currentScenario)   // arm the colour walk when launched under that stub
         startAwaitingCycleIfRequested()          // and the awaiting-input walk (ADR-0073)
 
@@ -1263,6 +1288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Live-update an open Troubleshoot window: both sections (JSON, timestamps, next update,
         // token dates) refresh in place each poll (ADR-0020). No-op while the controller is nil.
         troubleshootWC?.render(output)
+        renderCodexTroubleshoot()
         journalPoll(output)
         pollStatusIfDue(usageInterval: output.interval)
         pollUpdateIfDue()
@@ -1882,6 +1908,118 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.reRenderForCurrentTime()
         }
+    }
+
+    // MARK: Codex quota source (#504)
+
+    /// The quota collector's heartbeat, on its own `SignalHub` subscription.
+    ///
+    /// Unlike the three status loops this one **parks on sleep and does not poll until woken**: a read
+    /// spawns a process, and a machine that just woke has no reason to run one before its network is
+    /// back. `waitWhileAsleep` is what holds it there.
+    private func startCodexQuotaLoop() {
+        let scheduler = LivePollScheduler(signals: signals.newStream(for: .codexQuota))
+        codexQuotaLoopTask = Task { [weak self] in
+            self?.pollCodexQuota()
+            while !Task.isCancelled {
+                guard let self else { return }
+                switch await scheduler.waitForNextPoll(interval: PollingEngine.baseInterval) {
+                case .interrupted(.sleep):
+                    await scheduler.waitWhileAsleep()
+                case .elapsed, .interrupted:
+                    break
+                }
+                guard !Task.isCancelled else { return }
+                self.pollCodexQuota()
+            }
+        }
+    }
+
+    /// The Codex switches changed in Settings: pick up the new state now rather than at the next tick.
+    private func codexQuotaMonitoringChanged(_ config: CodexMonitoring) {
+        if !config.usageEnabled {
+            // Tear the source down with the switch, so turning the feature off ends the possibility
+            // of a spawn rather than merely ignoring its result.
+            codexQuotaTask?.cancel()
+            codexQuotaSource = nil
+            lastCodexQuotaRows = []
+            lastCodexPlanLabel = nil
+            lastCodexQuotaDiagnostics = CodexQuotaDiagnostics()
+            reRenderForCurrentTime()
+            return
+        }
+        pollCodexQuota()
+    }
+
+    /// Read the Codex quota when the feature is on.
+    ///
+    /// **Under a stub the source is the stub's**, so no process is spawned — a verification scenario
+    /// must not depend on the maintainer's `codex` being installed and signed in to a given plan.
+    private func pollCodexQuota() {
+        guard PersistedConfig.codexMonitoring.usageEnabled else { return }
+        if codexQuotaSource == nil {
+            // The scenario's own clock, the same one its transport gets, so a stub's reset instants
+            // and the countdowns the layout renders stay in lock-step.
+            codexQuotaSource = currentScenario.codexQuotaSource(now: currentScenario.clock())
+        }
+        guard let source = codexQuotaSource else { return }
+
+        codexQuotaTask?.cancel()
+        // **Detached, unlike the status loops' tasks.** A `Task { }` here would inherit this class's
+        // `@MainActor` isolation, and the read it awaits ends in a blocking pipe exchange — the UI
+        // would wait out the round trip. Detached, the read runs on a background thread and only the
+        // hop back to store the result is main-isolated.
+        codexQuotaTask = Task.detached(priority: .utility) { [weak self] in
+            let result: Result<CodexQuotaSnapshot, any Error>
+            do {
+                result = .success(try await source.read())
+            } catch {
+                result = .failure(error)
+            }
+            let diagnostics = await source.diagnostics()
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.lastCodexQuotaDiagnostics = diagnostics
+                switch result {
+                case let .success(snapshot):
+                    self.lastCodexQuotaRows = CodexQuotaNormalizer.rows(
+                        from: snapshot, now: self.currentDate())
+                    self.lastCodexPlanLabel = snapshot.planLabel
+                    // The window count and nothing else — never a plan identifier, never a response
+                    // body, and no email is in reach because `account/read` is not called.
+                    AppLogger.network.notice(
+                        "codex quota: \(snapshot.windows.count, privacy: .public) window(s)")
+                    // Dev quota log: every successful poll, including the readings the rows drop as
+                    // not-started — those are the samples a window anomaly has to be reconstructed
+                    // from. Same two gates as the status payload log; the record itself refuses to
+                    // write from a release build.
+                    if PersistedConfig.statusPayloadLogEnabled, self.currentScenario == .realNetwork {
+                        let at = self.currentDate()
+                        Task { [log = self.statusPayloadLog] in
+                            await log.recordCodexQuota(snapshot, at: at)
+                        }
+                    }
+                case .failure:
+                    // The bars are dropped rather than frozen: a stale percentage under a
+                    // live-looking bar is worse than no bar, and Troubleshoot carries the reason.
+                    self.lastCodexQuotaRows = []
+                    self.lastCodexPlanLabel = nil
+                    AppLogger.network.notice(
+                        "codex quota unavailable: \(diagnostics.lastError ?? "unknown", privacy: .public)")
+                }
+                self.reRenderForCurrentTime()
+            }
+        }
+    }
+
+    /// Push the Codex collector's diagnostics into Troubleshoot. `nil` while the quota half is off,
+    /// which hides the section rather than showing four empty rows.
+    private func renderCodexTroubleshoot() {
+        troubleshootWC?.renderCodex(
+            PersistedConfig.codexMonitoring.usageEnabled ? lastCodexQuotaDiagnostics : nil,
+            candidates: CodexAppServer.binaryCandidates,
+            now: currentDate())
     }
 
     /// Codex component ages recovered from the journal — the fallback when the incident feed has no
@@ -2685,6 +2823,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .withProviderIncidents(.github, lastGitHubIncidents)
             .withProviderStatusAge(.codex, lastCodexSuccess.map { max(0, now.timeIntervalSince($0)) })
             .withProviderIncidents(.codex, lastCodexIncidents)
+            // Codex's bars ride their own field to the view, never `rows` — appending them there
+            // renumbers the indices `blockingReset` is keyed to and moves the red badge onto a row
+            // that is not the blocker.
+            .withProviderQuota(.codex, rows: lastCodexQuotaRows, planLabel: lastCodexPlanLabel)
             // Claude's plate gets Claude's incidents only; the others ride the calls above. The
             // concatenated `lastVisibleIncidents` is for the episode subscription and its
             // notifications, where the provider does not change what the banner says.

@@ -49,6 +49,11 @@ final class TroubleshootWindowController: NSWindowController {
     // Rows of the "Auth token" section.
     private var tokenStatusLabel: NSTextField!
     private var tokenExpiryLabel: NSTextField!
+    /// The Codex collector's four rows, and the header above them. Both are hidden together while
+    /// the quota half is off — an empty section reads as a broken one.
+    private var codexHeader: NSTextField!
+    private var codexLabels: [NSTextField] = []
+    private var codexStack: NSStackView!
     // The "copy JSON" button, held so its glyph can flip to a checkmark after a copy (#257), plus the
     // pending revert back to the copy glyph — cancelled and re-armed on each click.
     private weak var copyButton: NSButton?
@@ -119,6 +124,20 @@ final class TroubleshootWindowController: NSWindowController {
         intervalStack.setCustomSpacing(Metrics.sectionSpacing, after: nextUpdateLabel)
         intervalStack.translatesAutoresizingMaskIntoConstraints = false
 
+        // Codex — the quota collector's own source, which has no entry in Claude's `PollOutput`.
+        codexHeader = Self.sectionHeader("Codex quota")
+        // One per line `CodexQuotaTroubleshoot.lines` can emit. A line with no label to land in is
+        // dropped without a word, and the missing one would be the diagnostic somebody opened the
+        // window to read — `CodexQuotaTests` asserts the constant against a maximal call.
+        codexLabels = (0..<CodexQuotaTroubleshoot.maxLineCount).map { _ in Self.infoLabel() }
+        codexStack = NSStackView(views: [codexHeader] + codexLabels)
+        codexStack.orientation = .vertical
+        codexStack.alignment = .leading
+        codexStack.spacing = Metrics.rowSpacing
+        codexStack.setCustomSpacing(Metrics.headerSpacing, after: codexHeader)
+        codexStack.translatesAutoresizingMaskIntoConstraints = false
+        codexStack.isHidden = true
+
         let apiHeader = Self.sectionHeader("Usage API — last response")
         timestampLabel = Self.infoLabel()
         statusLabel = Self.infoLabel()
@@ -177,6 +196,7 @@ final class TroubleshootWindowController: NSWindowController {
         content.addSubview(tokenStack)
         content.addSubview(intervalStack)
         content.addSubview(headerRow)
+        content.addSubview(codexStack)
         content.addSubview(apiStack)
         content.addSubview(scroll)
 
@@ -191,8 +211,12 @@ final class TroubleshootWindowController: NSWindowController {
             tokenStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
             content.trailingAnchor.constraint(equalTo: tokenStack.trailingAnchor, constant: pad),
 
+            codexStack.topAnchor.constraint(equalTo: tokenStack.bottomAnchor, constant: Metrics.interSectionSpacing),
+            codexStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
+            content.trailingAnchor.constraint(equalTo: codexStack.trailingAnchor, constant: pad),
+
             // Full-width header row (title + right-aligned copy button), then the info rows below it.
-            headerRow.topAnchor.constraint(equalTo: tokenStack.bottomAnchor, constant: Metrics.interSectionSpacing),
+            headerRow.topAnchor.constraint(equalTo: codexStack.bottomAnchor, constant: Metrics.interSectionSpacing),
             headerRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
             content.trailingAnchor.constraint(equalTo: headerRow.trailingAnchor, constant: pad),
 
@@ -260,6 +284,26 @@ final class TroubleshootWindowController: NSWindowController {
 
     /// Called from `show(_:)` and — for live updates — from `AppDelegate.apply(_:)` on every poll
     /// (ADR-0020).
+    /// Fill the Codex section, or hide it whole when the quota half is off. Called beside
+    /// ``render(_:)`` because its source is the collector, not Claude's poll.
+    func renderCodex(_ diagnostics: CodexQuotaDiagnostics?, candidates: [String], now: Date) {
+        guard let diagnostics else {
+            codexStack.isHidden = true
+            return
+        }
+        codexStack.isHidden = false
+        let lines = CodexQuotaTroubleshoot.lines(
+            binaryPath: diagnostics.binaryPath, candidates: candidates,
+            version: diagnostics.version, lastSuccess: diagnostics.lastSuccess,
+            lastLatency: diagnostics.lastLatency, lastError: diagnostics.lastError,
+            lastResets: diagnostics.lastResets, now: now)
+        for (index, label) in codexLabels.enumerated() {
+            label.stringValue = index < lines.count ? lines[index] : ""
+            // A line the collector had nothing to say for leaves no blank row behind it.
+            label.isHidden = index >= lines.count
+        }
+    }
+
     func render(_ output: PollOutput?) {
         let layout = TroubleshootLayout.make(from: output)
         timestampLabel.stringValue = layout.timestampLine

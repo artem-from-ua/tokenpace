@@ -163,6 +163,9 @@ In the tables below, `<…>` marks an interpolated value.
 | — | `network` | `.error` | `codex incidents failed: HTTP <code>` | `CodexIncidentClient.fetch` — any other non-200 |
 | — | `network` | `.error` | `codex incidents decode failed` | `CodexIncidentClient.decode` — the body did not decode as a `CodexIncidentFeed`. **Expected eventually**: the endpoint is the status page's own frontend backend and may change shape without notice, which is exactly why this degrades instead of propagating |
 | — | `lifecycle` | `.notice` | `codex: service <ServiceID> set <true\|false>` | `SettingsModel.setCodexService` — one of the five Codex service switches changed; the poll runs immediately rather than waiting for the next tick |
+| — | `network` | `.notice` | `codex quota: <n> window(s)` | `pollCodexQuota` (App) — a successful `account/rateLimits/read` through `codex app-server` ([ADR-0127](../adr/0127-codex-quota-from-the-app-server.md)). **The window count and nothing else**: no percentage, no plan identifier, no reset, and no response body. `<n>` is `1` on every account seen so far — a second window would mean the server started reporting `secondary` |
+| — | `network` | `.notice` | `codex quota unavailable: <reason>` | `pollCodexQuota` (App) — the read failed; `<reason>` is the already-worded `CodexAppServer.describe` sentence (`codex not found`, `not signed in to codex`, `timed out after 20s`, `this codex has no account/rateLimits/read — update it`, …). `.notice`, not `.error`: a missing or signed-out `codex` is a state, not a fault. **Never carries the account email** — `account/read` is not called (ADR-0127 §D4) — and never a `codexHome` path or a raw response |
+| — | `lifecycle` | `.notice` | `codex: quota collection set <true\|false>` | `SettingsModel.setCodexUsage` — the quota switch changed. Turning it **off** tears the source down rather than merely ignoring its result, so no further process can be spawned |
 
 ## `Sources/TokenPace/LogArchiver.swift`
 
@@ -204,7 +207,7 @@ and the enable/disable line from `DevToolsWindowController.swift`.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| — | `journal` | `.error` | `status-payload-log: write failed <error>` | `writeLine` — the line could not be serialised or the directory could not be prepared; the sample is dropped, the poll continues |
+| — | `journal` | `.error` | `status-payload-log: write failed <error>` | `writeObject` — the line could not be serialised or the directory could not be prepared; the sample is dropped, the poll continues. Shared by the status payload log and the dev Codex quota log |
 | — | `journal` | `.error` | `status-payload-log: open failed errno=<errno>` | `appendLocked` — `open()` on the payload file failed |
 | — | `journal` | `.error` | `status-payload-log: lock failed errno=<errno>` | `appendLocked` — `flock(LOCK_EX)` failed; the line is dropped rather than risk an interleaved write |
 | — | `journal` | `.error` | `status-payload-log: write() failed errno=<errno>` | `appendLocked` — a `write()` returned ≤ 0 mid-line |
@@ -276,7 +279,7 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `archive: destination chosen` | user picked an archive folder via `NSOpenPanel`; the path itself is not logged |
 | — | `lifecycle` | `.notice` | `journal: enabled set <bool>` | user toggled the "Record usage history" checkbox in Settings → General → Usage history (ADR-0067) |
 | — | `lifecycle` | `.notice` | `dropdown: option hint set <bool>` | user toggled "Show the ⌥ Option hint" in Settings → Appearance › Dropdown. The menu re-reads the key on every open, so the line is the only record of *when* it changed |
-| — | `lifecycle` | `.notice` | `dropdown: always show actions set <bool>` | user toggled "Always show action items" in Settings → Appearance › Dropdown ([ADR-0126](../adr/0126-settings-and-quit-stay-visible-by-default.md)): whether `Settings…` and `Quit` stay in the menu with ⌥ up. Re-read on every open and once at menu-build time, so like the row above this line is the only record of *when* it changed |
+| — | `lifecycle` | `.notice` | `dropdown: always show actions set <bool>` | user toggled "Always show action items" in Settings → Appearance › Dropdown ([ADR-0127](../adr/0126-settings-and-quit-stay-visible-by-default.md)): whether `Settings…` and `Quit` stay in the menu with ⌥ up. Re-read on every open and once at menu-build time, so like the row above this line is the only record of *when* it changed |
 | — | `lifecycle` | `.notice` | `back-to-work: enabled set <bool>` | user toggled the "Back to work" notification switch (ADR-0039) |
 | — | `lifecycle` | `.notice` | `back-to-work: time window set <start>–<end>` | user changed the allowed-hours pickers; `<start>`/`<end>` are minute-of-day |
 | — | `lifecycle` | `.notice` | `back-to-work: suppress set <raw>` | user picked a "Suppress notifications on" radio; `<raw>` is the raw `SuppressDays` |
