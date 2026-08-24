@@ -319,11 +319,16 @@ final class SettingsModel {
     /// Whether the usage journal records each poll to an append-only JSONL file. Default-off (opt-in).
     var journalEnabled = false
 
-    // MARK: Dropdown — the ⌥ caption (#475)
+    // MARK: Dropdown — the ⌥ caption (#475) and the pinned action items (#521)
 
     /// Whether the dropdown draws "hold ⌥ Option for more". Default-**on**: the only thing announcing
-    /// the menu has actions at all.
+    /// that ⌥ has anything to show.
     var showOptionHint = true
+
+    /// Whether `Settings…` and `Quit` stay in the dropdown with ⌥ up. Default-**on**. Independent of
+    /// ``showOptionHint`` — the caption is about what ⌥ expands on the widgets, not about the menu's
+    /// actions, so both rows act on their own in every combination.
+    var alwaysShowActionItems = true
 
     // MARK: Awaiting-input indicator (#233, ADR-0066)
 
@@ -595,6 +600,7 @@ final class SettingsModel {
 
         journalEnabled = PersistedConfig.journalEnabled
         showOptionHint = PersistedConfig.showOptionHint
+        alwaysShowActionItems = PersistedConfig.alwaysShowActionItems
     }
 
     // MARK: Setters (persist first, then fire the callback — the ordering invariant)
@@ -624,6 +630,15 @@ final class SettingsModel {
         showOptionHint = on
         PersistedConfig.showOptionHint = on
         AppLogger.lifecycle.notice("dropdown: option hint set \(on, privacy: .public)")
+    }
+
+    /// No callback either, for the same reason: `menuWillOpen` re-reads the key on every open, and the
+    /// menu built at launch is seeded from it. No `dropPreviewBeforeEdit()` — that belongs to the
+    /// preset-backed setters, and this key is deliberately not one of them.
+    func setAlwaysShowActionItems(_ on: Bool) {
+        alwaysShowActionItems = on
+        PersistedConfig.alwaysShowActionItems = on
+        AppLogger.lifecycle.notice("dropdown: always show actions set \(on, privacy: .public)")
     }
 
     func setColorAdvice(_ mode: ColorAdvice) {

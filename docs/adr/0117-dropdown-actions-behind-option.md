@@ -2,10 +2,19 @@
 status: accepted
 date: 2026-08-22
 supersedes: []
-superseded_by: []
+superseded_by: [0126]
 ---
 
 # ADR-0117: Every dropdown action sits behind ⌥ Option, announced by a caption
+
+> **Partially superseded by
+> [ADR-0126](0126-settings-and-quit-stay-visible-by-default.md).** Only two of D1's five items are
+> replaced: `Settings…` and `Quit TokenPace` (with Quit's separator) now follow a default-on switch
+> instead of ⌥, which is the revisit this record asks for under "Alternatives considered".
+> **Everything else still stands**: `Troubleshoot…` and `Development tools…` stay ⌥-only, the update
+> line stays the always-visible exception (D2), the caption and its switch are untouched (D3, D4) —
+> including the reason they are, since what ⌥ mostly reveals is on the widgets, not in the menu —
+> and the mechanism is unchanged.
 
 > Supersedes the visibility half of **§3** of
 > [ADR-0020](0020-troubleshoot-window-and-diagnostics-pipeline.md), which made "Settings…" a

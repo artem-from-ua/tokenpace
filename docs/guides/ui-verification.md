@@ -940,46 +940,74 @@ not of a window — [the rule about the menu material/vibrancy](#testing-menu-ba
 
 ## Scenarios without a stub
 
-### The dropdown's ⌥ gate and its caption (#475)
+### The dropdown's ⌥ gate, its caption and the pinned action items (#475, #521)
 
-No stub: the behavior depends on the modifier and one defaults key, not on the data. Any scenario
+No stub: the behavior depends on the modifier and two defaults keys, not on the data. Any scenario
 works — `TOKENPACE_STUB=screenshot` gives a stable frame to compare margins against.
 
-Four states, and each is a separate check:
+**Two independent switches** sit in Settings → Appearance › Dropdown: "Show «hold ⌥ Option» hint"
+and "Always show action items" (default-on,
+[ADR-0126](../adr/0126-settings-and-quit-stay-visible-by-default.md)). Neither disables the other —
+all four combinations are reachable, and "both on" is a state worth looking at on its own.
 
-1. **⌥ up, caption on** (the default). The menu is the popup plus one dim italic line,
-   `hold ⌥ Option for more`, right-aligned under the status column. **No action items at all** — no
+Start with the switch **on** (the default):
+
+1. **⌥ up, caption on** — the shipping default. The menu is the popup, the caption
+   `hold ⌥ Option for more` right-aligned under the status column, then `Settings…`, a separator and
+   `Quit TokenPace`. Quit reads **plainly**: its build tag is still ⌥-only. **No `Troubleshoot…` and
+   no `Development tools…`** — those stay behind ⌥ whatever this switch says.
+2. **⌥ held.** The caption goes, `Troubleshoot…` (and `Development tools…` with `devToolsEnabled`)
+   appear, and Quit grows its tag. `Settings…` and `Quit` do **not** move or flicker — they were
+   already there.
+3. **⌥ up, caption off.** Same as state 1 without the caption line. Watch the **gap between the card
+   and `Settings…`**: it should look like every other menu item gap. This is where an over-generous
+   bottom margin shows up — the constant that applies when nothing follows the card must not apply
+   here ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md)).
+
+Then turn the switch **off** — this restores ADR-0117's behavior exactly, and states 4–6 are the
+regression check for it:
+
+4. **⌥ up, caption on.** The menu is the popup plus the caption. **No action items at all** — no
    `Settings…`, no `Quit`, no separator above where `Quit` would be. A stray separator is the
    failure this state is most likely to show.
-2. **⌥ held.** The caption disappears and the full column appears in one step. Watch the **gap
-   between the card and `Settings…`**: it should look like every other menu item gap. This is where
-   an over-generous bottom margin shows up — the constant that applies when nothing follows the card
-   must not apply here ([ADR-0118](../adr/0117-dropdown-actions-behind-option.md)).
-3. **⌥ up, caption off** (Settings → Appearance › Dropdown). The menu is the widget alone. Check the
-   **bottom margin against the sides** — they should read as equal. They are *not* equal as
-   constants: `NSMenu` pads below the hosted view, so the code carries 8.5 to render the sides' 14.
-   Judge the rendered gap, not the number.
-4. **The live preview** (Settings → Appearance › Dropdown, the window beside the panes). It must
-   show **no caption in any ⌥ state** — it has no menu items to offer — while ⌥ still reveals the
-   on-demand content it mirrors. Its own card margins must be unchanged by all of the above.
+5. **⌥ held.** The caption disappears and the full column appears in one step.
+6. **⌥ up, caption off.** The menu is the widget alone — the only state that reaches the lone-plate
+   margin. Check the **bottom margin against the sides**: they should read as equal. They are *not*
+   equal as constants: `NSMenu` pads below the hosted view, so the code carries 8.5 to render the
+   sides' 14. Judge the rendered gap, not the number.
 
-**Then run states 1–3 again with the update line showing** — add
+7. **The live preview** (Settings → Appearance › Dropdown, the window beside the panes). It must
+   show **no caption in any ⌥ state** — it has no menu items to offer — while ⌥ still reveals the
+   on-demand content it mirrors. Its own card margins must be unchanged by every state above,
+   including the switch: the preview has no action items to pin.
+
+**Then run the states again with the update line showing** — add
 `TOKENPACE_UPDATE_STATE=available` (or `failed`). That line is visible in *both* ⌥ states, which makes
 it a neighbour under the card, and it is the case the first pass missed:
 
-- with ⌥ up, the card must keep its **trimmed** margin (the even one belongs to a plate with nothing
-  under it), and there must be **no separator** between the card and the update line — that divider
-  belongs to the action items above it, which are hidden;
-- with ⌥ held, the separator comes back with the items, above the update line where it belongs;
-- with the caption on, it sits between the card and the update line, and the three must read as one
-  column rather than as three stacked blocks.
+- the card keeps its **trimmed** margin in every one of these states — the even one belongs to a
+  plate with nothing under it at all;
+- the separator above the update line follows the **action items**, not ⌥: with the switch on it is
+  there in both ⌥ states, because `Settings…` is above it; with the switch off it appears only under
+  ⌥, and with ⌥ up there must be **no separator** between the card and the update line;
+- **with the switch off and the menu closed**, let an update check run before opening the menu. That
+  is the path through `refreshUpdateMenuItem` rather than the ⌥ swap, and it is the one that regresses
+  if the two disagree about what "items above" means;
+- with the caption on, it sits between the card and what follows, and the whole must read as one
+  column rather than as stacked blocks.
 
 Measuring rather than eyeballing is worth it for the margins: capture the menu, then compare the
 plate's gap to the popup edge on all four sides in pixels (remember a 2× capture halves to points).
 
-The switch is read on **every menu open**, so toggling it in Settings takes effect on the next open
-with no restart — verify that directly, since a stale read would look identical to a working one
-until the app is relaunched.
+Both switches are read on **every menu open**, so toggling either in Settings takes effect on the next
+open with no restart — verify that directly, since a stale read would look identical to a working one
+until the app is relaunched. Toggling while the menu is *open* changes nothing until it is reopened,
+which is expected.
+
+"Always show action items" is read **once more at menu-build time**, so the built state matches what
+the first open will show. Check it on a **cold launch**: with the switch on, `Settings…` must be in
+the first drawn frame rather than appearing a beat later, and with it off the menu must open as the
+widget alone. A one-frame flicker either way means the build-time read was skipped.
 
 ### Forced delegated refresh (#183)
 

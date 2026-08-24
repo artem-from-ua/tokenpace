@@ -1825,13 +1825,31 @@ final class PopupViewController: NSViewController {
         }
     }
 
+    /// Whether the dropdown keeps `Settings…` and `Quit` on screen with ⌥ up (#521) — the Appearance ›
+    /// Dropdown switch, pushed in by `AppDelegate` on every menu open.
+    ///
+    /// It reaches the popup for one reason only: those items are a neighbour under the card, so the
+    /// bottom margin must stay trimmed. It does **not** touch the ⌥ caption — that line is about what
+    /// ⌥ expands on the widgets, not about the menu's actions, and stays true either way.
+    ///
+    /// Defaults to `false` because the Settings live preview hosts this same class and has no menu
+    /// items to pin; it never assigns this, and `hostedInMenu` short-circuits the margin before it.
+    var alwaysShowActionItems = false {
+        didSet {
+            guard isViewLoaded, alwaysShowActionItems != oldValue else { return }
+            applyOptionHintVisibility()
+        }
+    }
+
     /// The gap under the card when the card owns the popup's bottom edge.
     ///
     /// The trimmed ``Metrics/cardBottomInset`` is trimmed **because something follows** — a native menu
     /// item, with `NSMenu`'s own padding above it. So the full margin applies only when the plate
-    /// genuinely has no neighbour, which takes all three conditions: hosted in the menu, the caption
-    /// off, ⌥ up (the action items hidden, #475) — **and** no update line showing, since that one stays
-    /// visible in both ⌥ states and is a neighbour like any other (``hasVisibleMenuNeighbour``).
+    /// genuinely has no neighbour, which takes four conditions: hosted in the menu, the caption off,
+    /// ⌥ up (the action items hidden, #475), no update line showing — that one stays visible in both ⌥
+    /// states and is a neighbour like any other (``hasVisibleMenuNeighbour``) — and the action items
+    /// not pinned on screen by ``alwaysShowActionItems`` (#521), which puts `Settings…` under the card
+    /// in every ⌥ state.
     ///
     /// Getting this wrong is visible in both directions. Keeping the trim when nothing follows leaves the
     /// card almost flush with the popup's edge; taking the full margin while the items are showing adds
@@ -1840,7 +1858,9 @@ final class PopupViewController: NSViewController {
     /// The preview always keeps the trimmed value: its window tops that up to an even margin itself
     /// (`SettingsPreviewWindowController.Metrics.belowCard`), and doing it twice would double the gap.
     private var cardBottomConstant: CGFloat {
-        guard hostedInMenu, !optionHeld, !hasVisibleMenuNeighbour else { return Metrics.cardBottomInset }
+        guard hostedInMenu, !optionHeld, !hasVisibleMenuNeighbour, !alwaysShowActionItems else {
+            return Metrics.cardBottomInset
+        }
         return Metrics.cardBottomInsetAlone
     }
 
