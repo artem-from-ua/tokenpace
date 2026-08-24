@@ -300,10 +300,19 @@ struct MenuBarPane: View {
                     // column of boxes reads as one list rather than a stack of unrelated settings.
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(model.menuBarProviderChoices, id: \.self) { provider in
+                            // The last ticked box is disabled rather than refused on click: a checkbox
+                            // that can be clicked and does nothing reads as a bug, while a dimmed one
+                            // says the choice is unavailable before it is made.
                             Toggle(provider.displayName, isOn: Binding(
                                 get: { !model.menuBarHiddenProviders.contains(provider) },
                                 set: { model.setShowsInMenuBar(provider, $0) }))
                                 .toggleStyle(.checkbox)
+                                .disabled(model.isOnlyMenuBarProvider(provider))
+                        }
+                        if let only = model.menuBarProviderChoices
+                            .first(where: { model.isOnlyMenuBarProvider($0) }) {
+                            SettingsHint(text: "\(only.displayName) stays in the menu bar — the widget "
+                                + "always draws one provider.")
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

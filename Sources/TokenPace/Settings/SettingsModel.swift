@@ -701,7 +701,18 @@ final class SettingsModel {
 
     /// Check or uncheck one provider's menu-bar block (ADR-0128). Unchecking every provider is
     /// allowed here; the widget still draws the first block, since an empty item reads as a crash.
+    /// Whether `provider` is the only one still drawn — the checkbox that must stay ticked.
+    ///
+    /// Unticking every provider is not a state the widget can honour: `hidingMenuBarProviders` keeps
+    /// the first block rather than drawing an empty item, so an all-unticked list would show a widget
+    /// contradicting its own settings. Refusing the last tick makes that impossible instead of
+    /// silently overriding it.
+    func isOnlyMenuBarProvider(_ provider: ProviderID) -> Bool {
+        menuBarProviderChoices.filter { !menuBarHiddenProviders.contains($0) } == [provider]
+    }
+
     func setShowsInMenuBar(_ provider: ProviderID, _ shown: Bool) {
+        guard shown || !isOnlyMenuBarProvider(provider) else { return }
         dropPreviewBeforeEdit()
         if shown { menuBarHiddenProviders.remove(provider) }
         else     { menuBarHiddenProviders.insert(provider) }

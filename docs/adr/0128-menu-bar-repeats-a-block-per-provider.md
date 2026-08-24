@@ -99,8 +99,12 @@ no migration. The section appears only when there is more than one provider to c
 
 `itemWidth` has **no ceiling**, deliberately. A degradation ladder that drops a block once the item
 grows would decide for the user, silently, on the one surface where width is shared with every other
-app. Unticking every provider still leaves one block drawn: an item that draws nothing is
-indistinguishable from a crashed one, and collection has its own switch on the Providers page.
+app. **The last ticked box is disabled**, so the set cannot empty: an item that draws nothing is
+indistinguishable from a crashed one, and a widget that kept drawing a block the settings said was
+hidden would contradict its own screen. Disabling the box says the choice is unavailable before it is
+made, where refusing the click would read as a bug. The Kit still keeps one block if it ever receives
+an empty set — a backstop for a stored set written by another build, not the ordinary path — and
+collection itself has its own switch on the Providers page.
 
 ### D7. The status item gets an accessibility label
 

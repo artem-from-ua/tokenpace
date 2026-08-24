@@ -178,7 +178,8 @@ struct MenuBarProviderVisibilityTests {
 
     @Test func untickingEveryProviderStillDrawsOne() {
         // An item that draws nothing is indistinguishable from a crashed one, so the last block stands.
-        // The checkboxes are a width control; usage collection has its own switch elsewhere.
+        // Settings no longer lets the set empty — the last ticked box is disabled — so this is the
+        // backstop for a stored set written by another build, not the ordinary path.
         let layout = twoBlocks.hidingMenuBarProviders([.claude, .codex])
         #expect(blocks(layout)?.count == 1)
     }
