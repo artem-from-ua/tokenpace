@@ -169,7 +169,13 @@ public enum BarPart: Hashable, Sendable {
 /// stable and unique within a surface, so it survives the shuffle.
 public enum TweenKey: Hashable, Sendable {
     /// A limit-window bar: the popup passes `LimitRow.title`, the menu bar its `LimitWindow`'s id.
-    case bar(surface: TweenSurface, row: String, part: BarPart)
+    ///
+    /// **`provider` is what keeps two providers' identically-named rows apart.** Claude's week and
+    /// Codex's week are both titled `"7-day"`, and both plates are on the popup at once — keyed by
+    /// title alone they are one animation, so one provider's colour slide plays out on the other's
+    /// bar. Defaulted to `.claude` so the menu bar and the credits-adjacent callers, which have only
+    /// ever drawn one provider, read unchanged.
+    case bar(surface: TweenSurface, row: String, part: BarPart, provider: ProviderID = .claude)
     /// The "Extra usage" money-credits bar, which has no `LimitRow` and so no title to key on.
     case credits(surface: TweenSurface, part: BarPart)
     /// The service-status dot (menu-bar widget) or one status row's dot (popup, keyed by component).

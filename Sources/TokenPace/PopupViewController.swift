@@ -115,6 +115,10 @@ final class PopupBarView: NSView {
     /// otherwise hand a vanishing row's in-flight fade to its neighbour.
     var tweenRow: String?
 
+    /// Whose row ``tweenRow`` names. Two providers title their week `"7-day"` and both plates are on
+    /// screen together, so the title alone is not a unique identity.
+    var tweenProvider: ProviderID = .claude
+
     /// Pins the coloured strip to this fraction of the track for the `color-cycle` stub, so only the
     /// colour changes on screen. Mirrors `StatusItemView.frozenStripFraction`; `nil` everywhere else.
     var frozenStripFraction: Double?
@@ -934,8 +938,9 @@ final class PopupBarView: NSView {
     /// animator is attached (the dev-tools preview renders without one).
     private func animated(_ target: NSColor, part: BarPart) -> NSColor {
         guard let colorAnimator else { return target }
-        let key: TweenKey = tweenRow.map { .bar(surface: .popup, row: $0, part: part) }
-            ?? .credits(surface: .popup, part: part)
+        let key: TweenKey = tweenRow.map {
+            .bar(surface: .popup, row: $0, part: part, provider: tweenProvider)
+        } ?? .credits(surface: .popup, part: part)
         return colorAnimator.resolve(key, target: target)
     }
 
@@ -2252,7 +2257,11 @@ final class PopupViewController: NSViewController {
         guard let plate = providerPlates[provider] else { return }
         plate.stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        guard let status = layout.serviceStatus, status.monitors(provider) else {
+        let quotaRows = layout.quotaRows(of: provider)
+        // The plate stands on either half: a provider whose status services are all off but whose
+        // quota is collected still has bars to draw, and the reverse is the shipped status-only case.
+        let monitorsStatus = layout.serviceStatus?.monitors(provider) ?? false
+        guard monitorsStatus || !quotaRows.isEmpty else {
             // Both views, not just the card: the stack is a sibling subview pinned to the card, so
             // hiding the card alone leaves the stack holding the geometry open and the popup ends in
             // a blank band where the plate would be.
@@ -2271,7 +2280,13 @@ final class PopupViewController: NSViewController {
         let header = Self.brandTitleLabel(
             title: provider.displayName,
             color: Self.brandColor(for: provider),
-            plan: nil)
+            // The plan word rides the ⌥ layer, exactly as Claude's does: it names the subscription
+            // once and never changes between polls, so at rest the header is the bare wordmark and ⌥
+            // restores "Codex ･ Plus". A gate on the argument, not a second code path —
+            // `brandTitleLabel` already draws the mark alone for a nil plan. Recomputed here on every
+            // rebuild, and the modifier change is one of the things that rebuilds the plate, so the
+            // word appears and disappears with ⌥ rather than waiting for the next poll.
+            plan: optionHeld ? layout.planLabel(of: provider) : nil)
 
         // Under ⌥, the age of this provider's **own** last successful poll — each polls on its own
         // cadence, so Claude's "2m ago" says nothing about it. Same slot and same styling as Claude's,
@@ -2290,12 +2305,47 @@ final class PopupViewController: NSViewController {
         leading.alignment = .firstBaseline
         leading.spacing = 4
 
-        let dot = Self.headerDot(for: status.aggregate(of: provider))
+        let dot = layout.serviceStatus.flatMap { Self.headerDot(for: $0.aggregate(of: provider)) }
             .map { makeStatusDot(status: $0, animatorKey: "provider-\(provider.rawValue)") }
         let headerRow = addSplitRow(
             leadingView: Self.headerRow(dot: dot, title: leading), rightView: NSView(),
             to: plate.stack)
         plate.stack.setCustomSpacing(Metrics.sectionSpacing, after: headerRow)
+
+        // This provider's own quota bars, above its status rows — the same order Claude's plate uses,
+        // where the limits come first and the service lines sit under them.
+        //
+        // These are `layout.quotaRows(of:)`, a **separate** array from `layout.rows`. Appending them
+        // there would renumber the indices `blockingReset.token(id:)` is keyed to and paint the red
+        // reset badge on a row that is not the blocker.
+        for (index, row) in quotaRows.enumerated() {
+            addTitleStatusLine(title: row.title, status: Self.statusText(row),
+                               style: barStyleCaption(), to: plate.stack)
+            addDetailLine(
+                used: Self.usedText(row, verbose: optionHeld),
+                reset: Self.resetText(row, verbose: optionHeld),
+                // No blocking badge on a satellite plate: `blockingReset` answers "which reset
+                // unblocks *Claude* work", and it is picked from Claude's rows alone.
+                resetIsBlocking: false,
+                to: plate.stack)
+            // The ⌥ stand-by line, gated on the window being a **week** rather than on a row index.
+            // Claude's gate is `index == 1` because its layout fixes that order; here the single row
+            // sits at 0 and its window is the week — precisely the case the line exists for. The
+            // duration is the better test either way: pacing on a 5-hour window is not worth waiting
+            // out, and what makes that true is the length, not the position.
+            if optionHeld,
+               row.bar.windowDurationSeconds == LimitWindow.sevenDay.durationSeconds,
+               let text = Self.standByText(row) {
+                addStandByLine(text, to: plate.stack)
+            }
+            let bar = addBar(row, isLast: index == quotaRows.count - 1 && !monitorsStatus,
+                             to: plate.stack, provider: provider)
+            // The popup's quota bars carry no labels today, and a general pass over that is its own
+            // change — but a bar arriving now should not arrive worse than what is there. Names the
+            // provider because two plates hold a row called "7-day".
+            bar?.setAccessibilityLabel(
+                "\(provider.displayName) \(row.title): \(Self.usedText(row))")
+        }
 
         // ⌥ switches the dimension here exactly as it does on Claude's plate (ADR-0071 §2): the
         // service rows are replaced by **this provider's** incidents. Each plate shows its own —
@@ -2316,7 +2366,7 @@ final class PopupViewController: NSViewController {
             // Only what is broken, plus what just recovered — the same rule Claude's rows follow.
             // Walked per check rather than over a flattened list, so each row's link comes from its
             // own service rather than from an assumption about the provider's single page.
-            for check in status.checks(of: provider) {
+            for check in layout.serviceStatus?.checks(of: provider) ?? [] {
                 for component in check.components
                     .filter({ $0.status.isProblem || Self.isRecentlyRecovered($0, now: now) }) {
                     addServiceStatusRow(
@@ -2748,7 +2798,7 @@ final class PopupViewController: NSViewController {
     @discardableResult
     private func addTitleStatusLine(
         title: String, status: String, badge: NSView? = nil, style: String? = nil,
-        stateBadge: NSView? = nil
+        stateBadge: NSView? = nil, to target: NSStackView? = nil
     ) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let titleLabel = NSTextField(labelWithString: title)
@@ -2775,7 +2825,7 @@ final class PopupViewController: NSViewController {
         // exactly when the resting credits row loses its currency glyph while the ⌥ row keeps `active`
         // (the style word is what pushed the leading count past one).
         if leadingViews.count == 1, stateBadge == nil {
-            return addSplitRow(leftLabel: titleLabel, rightLabel: statusLabel)
+            return addSplitRow(leftLabel: titleLabel, rightLabel: statusLabel, to: target)
         }
         // The leading half is [title • style • badge]; the status stays flush right.
         let leading = NSStackView(views: leadingViews)
@@ -2798,7 +2848,7 @@ final class PopupViewController: NSViewController {
         leading.distribution = .fill
         titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         guard let stateBadge else {
-            return addSplitRow(leadingView: leading, rightLabel: statusLabel)
+            return addSplitRow(leadingView: leading, rightLabel: statusLabel, to: target)
         }
         // With a state badge the trailing half is [badge • status], the badge first: it qualifies the
         // word after it ("available … well ahead of pace" reads as one clause), and putting it after
@@ -2822,7 +2872,7 @@ final class PopupViewController: NSViewController {
         trailing.distribution = .fill
         trailing.setHuggingPriority(.defaultLow, for: .horizontal)
         statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        return addSplitRow(leadingView: leading, rightView: trailing)
+        return addSplitRow(leadingView: leading, rightView: trailing, to: target)
     }
 
     /// `font` slanted, via the font **descriptor's** italic trait rather than by naming a face.
@@ -3204,31 +3254,33 @@ final class PopupViewController: NSViewController {
     /// `reset` is `nil` for a row that has none to show — the unlimited credits line (#396), whose left
     /// half is the whole line. That takes the same path as a right half dropped by the fit gate below,
     /// so both shapes render identically rather than through two layouts.
-    private func addDetailLine(used: String, reset: String?, resetIsBlocking: Bool = false) -> NSView {
+    private func addDetailLine(used: String, reset: String?, resetIsBlocking: Bool = false,
+                               to target: NSStackView? = nil) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let usedLabel = NSTextField(labelWithString: used)
         usedLabel.font = font
         usedLabel.textColor = Self.dimmedLabelColor
         guard let reset else {
             usedLabel.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(usedLabel)
+            (target ?? stack).addArrangedSubview(usedLabel)
             return usedLabel
         }
         // When this reset is the one blocking work (#158), show it as a red **badge** so the eye lands on
         // the single reset that will actually unblock — every other reset stays the plain dimmed label,
         // even if its own limit is also exhausted.
         if resetIsBlocking {
-            return addSplitRow(leadingView: usedLabel, rightView: makeResetBadge(text: reset))
+            return addSplitRow(leadingView: usedLabel, rightView: makeResetBadge(text: reset),
+                               to: target)
         }
         guard Self.detailHalvesFit(left: used, right: reset, font: font) else {
             usedLabel.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(usedLabel)
+            (target ?? stack).addArrangedSubview(usedLabel)
             return usedLabel
         }
         let resetLabel = NSTextField(labelWithString: reset)
         resetLabel.font = font
         resetLabel.textColor = Self.dimmedLabelColor
-        return addSplitRow(leftLabel: usedLabel, rightLabel: resetLabel)
+        return addSplitRow(leftLabel: usedLabel, rightLabel: resetLabel, to: target)
     }
 
     /// The 7-day row's **stand-by** line: how long to pause for the bar to come back to green,
@@ -3243,14 +3295,14 @@ final class PopupViewController: NSViewController {
     /// recurring "raise the weight of the input" mistake the bar rules warn about. It stays
     /// ``dimmedLabelColor``, the same ink as the detail line it hangs off.
     @discardableResult
-    private func addStandByLine(_ text: String) -> NSView {
+    private func addStandByLine(_ text: String, to target: NSStackView? = nil) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: Metrics.textSize)
         label.textColor = Self.dimmedLabelColor
         label.alignment = .right
         label.translatesAutoresizingMaskIntoConstraints = false
         label.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
-        stack.addArrangedSubview(label)
+        (target ?? stack).addArrangedSubview(label)
         return label
     }
 
@@ -3276,14 +3328,16 @@ final class PopupViewController: NSViewController {
     /// plain (``addSplitLine``) or attributed (``addTitleStatusLine`` per-model heading) — this only
     /// arranges them.
     @discardableResult
-    private func addSplitRow(leftLabel: NSTextField, rightLabel: NSTextField) -> NSView {
-        addSplitRow(leadingView: leftLabel, rightLabel: rightLabel)
+    private func addSplitRow(leftLabel: NSTextField, rightLabel: NSTextField,
+                             to target: NSStackView? = nil) -> NSView {
+        addSplitRow(leadingView: leftLabel, rightLabel: rightLabel, to: target)
     }
 
     /// `addSplitRow` variant whose leading half is an arbitrary view (e.g. a `[title • badge]` stack),
     /// not just a label — the trailing label still pins flush right at the content width.
-    private func addSplitRow(leadingView: NSView, rightLabel: NSTextField) -> NSView {
-        addSplitRow(leadingView: leadingView, rightView: rightLabel)
+    private func addSplitRow(leadingView: NSView, rightLabel: NSTextField,
+                             to target: NSStackView? = nil) -> NSView {
+        addSplitRow(leadingView: leadingView, rightView: rightLabel, to: target)
     }
 
     /// `addSplitRow` variant whose **trailing** half is an arbitrary view (e.g. the blocking-reset
@@ -3405,10 +3459,12 @@ final class PopupViewController: NSViewController {
 
     /// Add a pacing bar for one ``LimitRow`` (token windows) — a thin wrapper over the raw
     /// ``addBar(bar:subdivisions:idle:isLast:)`` that unpacks the row's geometry.
-    private func addBar(_ row: LimitRow, isLast: Bool) {
+    @discardableResult
+    private func addBar(_ row: LimitRow, isLast: Bool, to target: NSStackView? = nil,
+                        provider: ProviderID = .claude) -> NSView? {
         addBar(bar: row.bar, subdivisions: row.subdivisions, idle: row.sessionIdle,
                blocked: row.sessionBlocked,
-               isLast: isLast, tweenRow: row.title)
+               isLast: isLast, tweenRow: row.title, to: target, provider: provider)
     }
 
     /// Add a pacing bar from raw geometry — shared by the token limit rows and the "Extra usage"
@@ -3420,9 +3476,12 @@ final class PopupViewController: NSViewController {
     /// `monthBounds` is the credits section's alone: it captions the bar's two ends with the money
     /// window's first and last day **and** puts the bar into its always-Progress presentation, since
     /// both follow from the same fact — this window is a calendar month.
+    @discardableResult
     private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, blocked: Bool = false,
                         isLast: Bool, tweenRow: String? = nil,
-                        monthBounds: (start: String, end: String)? = nil) {
+                        monthBounds: (start: String, end: String)? = nil,
+                        to target: NSStackView? = nil,
+                        provider: ProviderID = .claude) -> NSView? {
         let view = PopupBarView()
         view.bar = bar
         // Colour-transition wiring (ADR-0070). `tweenRow` is the row's title for a limit window and
@@ -3430,6 +3489,9 @@ final class PopupViewController: NSViewController {
         // app delegate, so the state survives this view being rebuilt on the next update.
         view.colorAnimator = colorAnimator
         view.tweenRow = tweenRow
+        // Two providers title their week `"7-day"` on one surface, so the title alone would key both
+        // plates' bars to a single animation and play one's colour slide on the other's bar.
+        view.tweenProvider = provider
         // The colour walk only drives the 5-hour row; every other bar keeps its real geometry so it
         // stays a still reference beside the animated one (ADR-0070).
         view.frozenStripFraction = tweenRow == frozenStripRow ? frozenStripFraction : nil
@@ -3446,9 +3508,11 @@ final class PopupViewController: NSViewController {
         // `Feb 1` captions, and reserving a text line for them would leave the section standing on a
         // gap no other row has.
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
-        stack.addArrangedSubview(view)
+        let host = target ?? stack
+        host.addArrangedSubview(view)
         // Between-section gap after every bar except the last (the last sits above the menu separator).
-        if !isLast { stack.setCustomSpacing(Metrics.limitSpacing, after: view) }
+        if !isLast { host.setCustomSpacing(Metrics.limitSpacing, after: view) }
+        return view
     }
 
     // MARK: Service status row (issue #31)

@@ -368,11 +368,45 @@ public enum PacingModel {
     /// - remaining ≥ window duration (clock skew / future reset) → `0.0`
     /// - otherwise: `elapsed / durationSeconds`, clamped to [0, 1]
     public static func elapsedFraction(resetsAt: Date, now: Date, window: LimitWindow) -> Double {
+        elapsedFraction(resetsAt: resetsAt, now: now,
+                        windowDurationSeconds: window.durationSeconds)
+    }
+
+    /// The same fraction for a window whose length is **data** rather than one of ``LimitWindow``'s
+    /// cases: Codex's `windowDurationMins` is a number in the payload, so the server picks it and an
+    /// enum can only list what existed when the enum was written.
+    ///
+    /// The case-taking overload above is expressed through this one, so the two cannot drift apart on
+    /// the boundary rules. A non-positive duration yields `1.0` — nothing can be pending in a window
+    /// of no length.
+    public static func elapsedFraction(
+        resetsAt: Date, now: Date, windowDurationSeconds: Int
+    ) -> Double {
         let remaining = resetsAt.timeIntervalSince(now) // seconds (Double)
         if remaining <= 0 { return 1.0 }
-        let duration = Double(window.durationSeconds)
+        let duration = Double(windowDurationSeconds)
+        guard duration > 0 else { return 1.0 }
         if remaining >= duration { return 0.0 }
         return (duration - remaining) / duration
+    }
+
+    // MARK: subdivisions
+
+    /// The bar's tick-ruler count for a window of the given length — **a lookup, never a formula**.
+    ///
+    /// 5 and 7 were chosen for what the marks *mean*: hour boundaries across five hours, day
+    /// boundaries across a week. No arithmetic recovers that. Dividing a week by an hour gives 168
+    /// ticks — a hatched smear rather than a ruler — so an unrecognised duration returns **0**, which
+    /// `addBar(subdivisions:)` already draws as no ruler at all.
+    ///
+    /// Codex's 10080 minutes is exactly 604 800 s, so it matches the seven-day case and gets 7 ticks:
+    /// the right answer, reached from the duration rather than from the provider.
+    public static func subdivisions(forWindowDurationSeconds duration: Int) -> Int {
+        switch duration {
+        case LimitWindow.fiveHour.durationSeconds: return LimitWindow.fiveHour.subdivisions
+        case LimitWindow.sevenDay.durationSeconds: return LimitWindow.sevenDay.subdivisions
+        default:                                   return 0
+        }
     }
 
     // MARK: limitIndicator
@@ -547,8 +581,8 @@ public enum PacingModel {
     /// The fixed green→blue crossover width in seconds for a window of the given length — 60 min for the
     /// 5-hour window, 24 h for the 7-day window (``LimitWindow/blueBehindWidthSeconds``). Resolved by
     /// duration so ``BarLayout`` (which carries only `windowDurationSeconds`, not the `LimitWindow`) can
-    /// compute the threshold. An unrecognised duration falls back to the 5-hour width proportionally
-    /// (`0.20 · duration`) — only reachable from synthetic/placeholder layouts, never the real windows.
+    /// compute the threshold. An unrecognised duration scales the 5-hour ratio (`0.20 · duration`),
+    /// which is what a provider reporting a window length of its own gets.
     static func blueBehindWidthSeconds(forWindowDurationSeconds duration: Int) -> Int {
         switch duration {
         case LimitWindow.fiveHour.durationSeconds: return LimitWindow.fiveHour.blueBehindWidthSeconds
@@ -584,13 +618,32 @@ public enum PacingModel {
         window: LimitWindow,
         blueAllowed: Bool = true
     ) -> BarLayout {
+        barLayout(utilization: utilization, resetsAt: resetsAt, now: now,
+                  windowDurationSeconds: window.durationSeconds, blueAllowed: blueAllowed)
+    }
+
+    /// The same layout for a window whose length is data rather than a ``LimitWindow`` case — the
+    /// counterpart of ``elapsedFraction(resetsAt:now:windowDurationSeconds:)``, and what a provider
+    /// that reports its own window lengths builds its rows through.
+    ///
+    /// Nothing downstream needs widening: ``BarLayout`` already stores `windowDurationSeconds` and
+    /// every consumer of it — `severity`, `pressureLength`, `balanceOffset`, `isCalm` — reads
+    /// fractions and seconds, never a case.
+    public static func barLayout(
+        utilization: Double,
+        resetsAt: Date,
+        now: Date,
+        windowDurationSeconds: Int,
+        blueAllowed: Bool = true
+    ) -> BarLayout {
         let usageFraction = min(1, max(0, utilization / 100))
         let remaining     = resetsAt.timeIntervalSince(now)   // seconds until reset (may be ≤ 0)
-        let timeFraction  = elapsedFraction(resetsAt: resetsAt, now: now, window: window)
+        let timeFraction  = elapsedFraction(resetsAt: resetsAt, now: now,
+                                            windowDurationSeconds: windowDurationSeconds)
         let pacing: PacingState = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead
         return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
                          pacing: pacing, remainingSeconds: remaining,
-                         windowDurationSeconds: window.durationSeconds,
+                         windowDurationSeconds: windowDurationSeconds,
                          blueAllowed: blueAllowed)
     }
 

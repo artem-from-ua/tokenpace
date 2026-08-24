@@ -273,3 +273,49 @@ public struct TroubleshootLayout: Sendable, Equatable {
         return "\(formatter.string(from: date)) (\(timeZone.identifier))"
     }
 }
+
+
+// MARK: - CodexQuotaTroubleshoot
+
+/// The Codex collector's four Troubleshoot lines, as pure text.
+///
+/// Its own type rather than four more fields on ``TroubleshootLayout``: that one is built from a
+/// ``PollOutput`` — Claude's poll — and the Codex collector is a different source with no entry in it.
+///
+/// **What can never appear here**: the account email (`account/read` is never called), `codexHome`
+/// (present in the handshake reply and deliberately not decoded), and any raw response body. Every
+/// string below is assembled from a path, a version, a duration or an already-worded error.
+public enum CodexQuotaTroubleshoot {
+
+    /// - Parameters:
+    ///   - binaryPath: The executable in use, or `nil` when none was found.
+    ///   - candidates: The paths that were tried — shown only when nothing was found, so "not found"
+    ///     names them rather than leaving the user to guess what was searched.
+    public static func lines(
+        binaryPath: String?,
+        candidates: [String],
+        version: String?,
+        lastSuccess: Date?,
+        lastLatency: TimeInterval?,
+        lastError: String?,
+        now: Date
+    ) -> [String] {
+        var lines: [String] = []
+        if let binaryPath {
+            lines.append("Binary: \(binaryPath)")
+        } else {
+            lines.append("Binary: not found (tried \(candidates.joined(separator: ", ")))")
+        }
+        lines.append("Version: \(version ?? "unknown")")
+        if let lastSuccess {
+            let age = ResetClock.rounded(duration: max(0, now.timeIntervalSince(lastSuccess)))
+                ?? "just now"
+            let latency = lastLatency.map { String(format: " in %.2fs", $0) } ?? ""
+            lines.append("Last read: \(age) ago\(latency)")
+        } else {
+            lines.append("Last read: never")
+        }
+        lines.append("Last error: \(lastError ?? "none")")
+        return lines
+    }
+}

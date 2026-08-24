@@ -530,6 +530,30 @@ it. The rest is alphabetical by `displayName`. This is deliberately **not** the 
 (`claude, github, codex`), which is archive identity: the raw values are journal-stable, so a case
 appended later must not reorder the screen. A popup reading Claude → GitHub → Codex is a bug.
 
+**The Codex plate carries both halves** (#504, [ADR-0127](../adr/0127-codex-quota-from-the-app-server.md)):
+the quota's bars *and* the status rows. It is the only satellite plate that does — GitHub is
+status-only — and it stands on **either** half, so a user with every Codex service off but the quota
+on still gets a plate.
+
+Its anatomy, top to bottom: the `Codex` wordmark (`#5871C0`) with its status dot, then one bar per
+**reported** quota window, then the status rows. The quota bars come first, matching Claude's plate,
+where the limits sit above the service lines.
+
+| | At rest | Holding ⌥ |
+|---|---|---|
+| Header | `Codex` — the bare wordmark, plus its dot when the provider is calm | `Codex ･ Plus` — the plan word, and the poll age after it |
+| Quota rows | title, status word, `n% used`, the reset line, the bar | the verbose forms, plus a **stand-by** line on a 7-day window when there is advice to give |
+| Status rows | only what is broken or just recovered | replaced by this provider's incidents |
+
+**The plan word is ⌥-gated, exactly as Claude's is.** It names the subscription once and never
+changes between polls, so it is an on-demand detail rather than something to watch. A resting
+screenshot showing a bare `Codex` is correct; a plan word visible at rest is the bug.
+
+**The ⌥ stand-by line is gated by the window's *duration*, not by a row index.** Claude's gate is
+`index == 1` because its layout fixes that order; Codex's single row sits at index 0 and its window is
+a week — exactly the case the line exists for. Pacing on a five-hour window is not worth waiting out
+because it resets twice a working day; what makes that true is the length, not the position.
+
 **A section header's dot is drawn only while that provider is `operational`.** This is the one dot in
 the app that appears on a calm state — and, symmetrically, the one that *disappears* when something is
 wrong. Both halves matter when you draw a state:
@@ -568,7 +592,10 @@ an incident — both when both do — and either one toggles the same app-wide s
 | **`No ongoing incidents` on a calm satellite plate under ⌥** | Claude's plate says that because its section is on screen *because* something is wrong, so a blank dimension there would read as a glitch. A satellite plate is on screen whenever its provider is monitored, so a calm one under ⌥ shows **nothing** — the header's green dot has already answered it |
 | A **subscribe row on a plate with no incident of its own** | The control sits beside its cause. On a healthy provider's plate it would read as an offer to follow that provider's silence |
 | A **GitHub plate carrying bars, a percentage, or a `Token limits usage` section** | GitHub is status-only and publishes no subscription limit the bars model. There is no usage half in the app, in the config, or on the Settings page |
-| A **Codex plate carrying bars or a percentage** | Codex has a quota, but nothing collects it yet: `CodexMonitoring.usageEnabled` is declared and unread. Until a collector exists, a Codex bar draws a number the app does not have |
+| A **5-hour row on the Codex plate** | The server reports one window — a week — and `secondary` is `null`. A 5-hour row would be a bar for a limit Codex does not report, under an invented reset ([ADR-0127](../adr/0127-codex-quota-from-the-app-server.md) §D5). The plate shows one row per **reported** window, so two rows are possible the day the server sends a `secondary`, but a *5-hour* one never appears alongside today's week |
+| A **red blocking-reset badge on a Codex row** | `blockingReset` answers "which reset unblocks **Claude** work" and is picked from Claude's rows alone. Codex resets render as plain text. This is also why Codex rows live in their own array — appending them to `rows` would renumber the indices that badge is keyed to (ADR-0127 §D7) |
+| A **plan word beside the `Codex` wordmark at rest** | The plan rides the ⌥ layer, exactly as Claude's does: at rest the header is the bare wordmark (plus its status dot), and ⌥ restores `Codex ･ Plus`. A screenshot without the plan is the resting state, not a missing label |
+| A **Codex plate with bars while `usageEnabled` is off** | The collector is torn down with the switch, not merely ignored, so no bars survive turning it off |
 | A **`Login` row on the Codex plate**, in any state | The feed lists `Login` **twice**, under two different ids, so an exact-name match resolves arbitrarily. TokenPace watches neither copy, so no configuration produces this row ([ADR-0125](../adr/0125-codex-as-a-status-provider.md) §D4) |
 | A **linked stage word on a Codex incident row** | The proxy incident feed carries no `shortlink`. Claude's and GitHub's stage words are links; Codex's is plain text, because a link there would be an invented URL |
 | A **Codex plate with incident rows but no service rows, under ⌥, while everything is `operational`** | Same rule as every plate: a calm provider under ⌥ shows nothing. And in the reverse case — the incident endpoint being unavailable — the rows stay and the incidents are the half that vanishes, never the other way round |
@@ -588,12 +615,12 @@ Check before you draw a state.
 | A `stand by …` line on the **5-hour** row | The gate is `index == PopupViewController.sevenDayRowIndex`: the signal exists **only** on 7d. A five-hour window resets at least twice a day and fixes itself, so the cost of a pause there changes no decision |
 | A `stand by …` line on a **non-orange** 7d | `standBySecondsForGreen` returns `nil` for every severity except `.ahead`. On green or blue there is nothing to wait for, on yellow the lead is within norms, and red (`usage >= 1`) is cured **only** by the reset: spending has hit the ceiling, and time will not catch up with it |
 | A `stand by …` line **without** ⌥ held | The line is built only under `optionHeld`. At rest the 7d section is two lines + a bar, like any other |
-| `Troubleshoot…` or `Development tools…` **without** ⌥ held | Those two are ⌥-gated in every state ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md) D1, kept by [ADR-0126](../adr/0126-settings-and-quit-stay-visible-by-default.md) D2) — specialist entrances, not part of the everyday menu. A mockup showing either of them is drawing the ⌥-**held** state and must show the rest of what ⌥ reveals too, on the widgets as well as in the column |
-| `Settings…` or `Quit TokenPace` shown as **⌥-only** | They follow the "Always show action items" switch, **default-on** ([ADR-0126](../adr/0126-settings-and-quit-stay-visible-by-default.md)), so the ordinary menu has both — with Quit's separator, and Quit reading plainly, since its build tag stays ⌥-revealed. Drawing them absent is drawing the non-default state and should say so |
+| `Troubleshoot…` or `Development tools…` **without** ⌥ held | Those two are ⌥-gated in every state ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md) D1, kept by [ADR-0127](../adr/0126-settings-and-quit-stay-visible-by-default.md) D2) — specialist entrances, not part of the everyday menu. A mockup showing either of them is drawing the ⌥-**held** state and must show the rest of what ⌥ reveals too, on the widgets as well as in the column |
+| `Settings…` or `Quit TokenPace` shown as **⌥-only** | They follow the "Always show action items" switch, **default-on** ([ADR-0127](../adr/0126-settings-and-quit-stay-visible-by-default.md)), so the ordinary menu has both — with Quit's separator, and Quit reading plainly, since its build tag stays ⌥-revealed. Drawing them absent is drawing the non-default state and should say so |
 | The `hold ⌥ Option for more` caption **while ⌥ is held** | It stands in for the items ⌥ reveals, so the two are mutually exclusive by construction (`optionHintEnabled && !optionHeld`). It is also absent whenever the Appearance › Dropdown switch is off, and **never** appears in the Settings live preview, which has no menu items to offer |
 | The update line hidden under ⌥, or the caption drawn as a menu item | The update row is a notice and stays visible in both ⌥ states ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md)); the caption is the reverse — not an `NSMenuItem` at all but an inert label inside the popup's view, so it never highlights on hover and cannot be drawn with a menu row's selection |
-| A **separator above the update line with no items above it** | That separator divides the update line from the action items above it, so it needs something above to divide from — otherwise it is a rule under nothing, sitting between the card and the notice. It is drawn whenever those items are on screen, by ⌥ or by the default-on switch ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md), [ADR-0126](../adr/0126-settings-and-quit-stay-visible-by-default.md)); with them gone the line stays and its divider does not — the two answer different questions |
-| The card's **even bottom margin while anything sits under it** | The full margin belongs to a plate with no neighbour at all, and there are three ways to have one: the ⌥ column, the update line, and the pinned `Settings…`/`Quit` ([ADR-0126](../adr/0126-settings-and-quit-stay-visible-by-default.md)). Any of them makes the trimmed inset apply — so on default settings the even margin is not reachable in the menu at all, only with the switch off, the caption off, ⌥ up and no update line |
+| A **separator above the update line with no items above it** | That separator divides the update line from the action items above it, so it needs something above to divide from — otherwise it is a rule under nothing, sitting between the card and the notice. It is drawn whenever those items are on screen, by ⌥ or by the default-on switch ([ADR-0117](../adr/0117-dropdown-actions-behind-option.md), [ADR-0127](../adr/0126-settings-and-quit-stay-visible-by-default.md)); with them gone the line stays and its divider does not — the two answer different questions |
+| The card's **even bottom margin while anything sits under it** | The full margin belongs to a plate with no neighbour at all, and there are three ways to have one: the ⌥ column, the update line, and the pinned `Settings…`/`Quit` ([ADR-0127](../adr/0126-settings-and-quit-stay-visible-by-default.md)). Any of them makes the trimmed inset apply — so on default settings the even margin is not reachable in the menu at all, only with the switch off, the caption off, ⌥ up and no update line |
 | `stand by` **shorter than 20 min** | Cut off by `PacingModel.standByFloorSeconds`. The state is almost unreachable: it exists only in the last ~2 hours of a window (remaining < 125 min) **and** within a spending band hundredths of a pp wide (at 120 min remaining — `u ∈ [99.0000%, 99.0079%]`). The minimum orange wait equals `0.16·(1−t)·D` itself, and mid-week that is already ≈13 hours. The threshold is a guard against "stand by 3m", not a working filter |
 | `stand by` that runs **right up to the reset** | Cut off even earlier — by the `remainingSeconds − standBy > pacingOrangeOverrideSeconds` check inside the calculation: a green that would arrive in the last 20 minutes of a window would be orange there anyway. There is **no separate "10-minute" rule and no need for one** — it is nested inside this one and would not have rejected a single case |
 | **A blue idle pill** — whatever the weekly state | There is no blue idle anywhere: the pill is green (or white under muting), and gray is left only for `isBlocked`. The weekly gate does not enter into it — the fields `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` do not exist |

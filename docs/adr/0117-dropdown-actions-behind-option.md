@@ -8,7 +8,7 @@ superseded_by: [0126]
 # ADR-0117: Every dropdown action sits behind ⌥ Option, announced by a caption
 
 > **Partially superseded by
-> [ADR-0126](0126-settings-and-quit-stay-visible-by-default.md).** Only two of D1's five items are
+> [ADR-0127](0126-settings-and-quit-stay-visible-by-default.md).** Only two of D1's five items are
 > replaced: `Settings…` and `Quit TokenPace` (with Quit's separator) now follow a default-on switch
 > instead of ⌥, which is the revisit this record asks for under "Alternatives considered".
 > **Everything else still stands**: `Troubleshoot…` and `Development tools…` stay ⌥-only, the update

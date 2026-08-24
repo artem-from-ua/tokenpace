@@ -129,6 +129,13 @@ stub name from the table below, and `summary` is its description.
 | `codex-incident` | An incident touching a monitored component, with `CLI` degraded so the plate also has a row. Hold **⌥**: the row is replaced by the incident. The one thing to check here that no other provider shows — the incident's **stage word is plain text, not a link**. The proxy feed carries no `shortlink`, so there is nothing to link to; a linked stage word here would mean a URL was invented. The subscribe control appears **at rest as well as under ⌥**, as on every plate with an incident of its own |
 | `codex-incidents-unavailable` | **The degradation frame**, and the only way to see a partial failure: the components request returns 200 while the incident request returns 500. The dots and the `CLI` row keep rendering — they come from the other endpoint — and under **⌥** the plate has **no incident rows at all**, even though something is visibly wrong. That is correct behaviour, not a bug: watch for `codex incidents source=unavailable` in a live stream (`--level debug`) to confirm which path ran. This is the state a user would report as "the dots are there but nothing explains them" |
 | `all-three-providers` | **Plate order and spacing**, each provider in a different state. Read the popup top to bottom: **Claude, then Codex, then GitHub** — `displayName` order with Claude pinned first, since it owns the bars. Check: (1) that order exactly, which is `ProviderID.displayOrder` and not the enum's case order (`claude, github, codex`) — the two deliberately differ, so a popup reading Claude/GitHub/Codex means an ordering site was missed; (2) the **gap between each pair of plates is equal**; (3) the three are visibly **separate glass**, three `CardBackdropView`s rather than one card with subheadings; (4) the same three names in the same order down **Settings → Providers**, whose rows are generated from the same list |
+| `codex-quota-green` | **The Codex plate with bars** ([ADR-0127](../adr/0127-codex-quota-from-the-app-server.md)): a 7-day bar under the wordmark. The header reads a bare **`Codex`** at rest and **`Codex ･ Plus`** only while **⌥** is held — the plan rides the ⌥ layer exactly as Claude's does, so a resting screenshot with no plan word is correct rather than a missing label. The thing to check is what is **not** there — **no 5-hour row**. Codex reports one window; a second would have to be invented, along with its reset. Also: the reset line is **plain**, never a red badge, on any Codex row — the blocking badge answers "which reset unblocks Claude work" and is picked from Claude's rows alone |
+| `codex-quota-orange` | The Codex week ahead of pace. With Claude's own `7-day` row on screen at the same time, this is the frame for the **tween-key collision**: the two rows share a title, and if the colour of one slides when the other changes, `TweenKey.bar` lost its `provider` |
+| `codex-quota-exhausted` | The Codex week at 100 %. Confirm the **red blocking badge does not appear** — not on this row, and not moved onto one of Claude's rows above. Codex rows live in their own array precisely so they cannot renumber the indices that badge is keyed to |
+| `codex-two-windows` | **Two Codex windows at once** — the only way to exercise the N>1 path, since the live server sends `secondary: null`. Both bars sit on the Codex plate, and Claude's rows above are unchanged in count and order |
+| `codex-not-signed-in` | `codex` installed but signed out: the plate keeps its status half and shows **no bars**. No warning banner appears in the popup — that banner is Claude's, and a Codex failure surfacing there would read as a problem with the bars above. The reason lives in **Troubleshoot → Codex quota** |
+| `codex-cli-missing` | No `codex` on this Mac. **Troubleshoot → Codex quota** lists the candidate paths that were tried rather than a bare "not found" — the app never consults `$PATH`, so naming what it looked at is the only way the user can tell why |
+| `codex-cli-old` | A `codex` predating `account/rateLimits/read`. Exercises the two-part detection: `-32600` **and** the method name in the message. `-32600` alone is also what a malformed request returns, so a one-part check would report our own bug as the user's out-of-date install |
 | `just-unblocked` | the "Back to work!" edge (#160): the first poll is blocked (7d=100 %, no credits), then workable (7d=40 %) → the notification fires once. This is the **regression** scenario. See its own section below |
 | `subscription-reset-on-credits` | the "Back to work!" edge **with credits active** (#161, [ADR-0113](../adr/0113-back-to-work-tracks-the-subscription-quota.md)): the first poll has 7d=100 % **with credits enabled** — work does not stop (`canWork` = `true`), but the subscription is exhausted — then 7d=40 % → the banner fires. This is the **main** check of the change. See its own section below |
 | `credits-onset` | the "Now using Extra usage credits" edge: the first poll is **not** on credits (7d=40 %, credits enabled but the base limit not exhausted → `isOnCredits=false`), then 7d=100 % with the same enabled `spend`/`extra_usage` → work spills over onto paid credit → the notification fires once (€10.77 / €15.00). See its own section below |
@@ -947,7 +954,7 @@ works — `TOKENPACE_STUB=screenshot` gives a stable frame to compare margins ag
 
 **Two independent switches** sit in Settings → Appearance › Dropdown: "Show the ⌥ Option hint"
 and "Always show action items" (default-on,
-[ADR-0126](../adr/0126-settings-and-quit-stay-visible-by-default.md)). Neither disables the other —
+[ADR-0127](../adr/0126-settings-and-quit-stay-visible-by-default.md)). Neither disables the other —
 all four combinations are reachable, and "both on" is a state worth looking at on its own.
 
 Start with the switch **on** (the default):
@@ -1159,6 +1166,39 @@ Check:
 - `=battery` → the ⚠ row "Backup will resume when you plug in.";
 - `=battery,space` → **only** the space row is visible: two hints would imply the cord helps, and it doesn't;
 - without the stub → no row at all; the height of the neighboring rows does not jump as the hint appears and disappears.
+
+### Codex quota, live (`TOKENPACE_STUB=real`)
+
+The collector runs `codex app-server` on this Mac, so it only exists on the live path — under any
+stub the source is a canned one and **no process is spawned at all** (which is what lets the seven
+stubs above run on a machine that has never installed `codex`).
+
+```sh
+TOKENPACE_JOURNAL_FILE=/tmp/tp-test.jsonl TOKENPACE_STUB=real swift run & echo $! > /tmp/tp-dev.pid
+```
+
+`TOKENPACE_STUB=real` is not optional here: a `swift run` with no stub resolves to the frozen
+screenshot frame, the collector is never built, and the plate simply has no bars — which looks
+exactly like a broken feature.
+
+What to check:
+
+- The **7-day bar renders and there is no 5-hour row**.
+- The header reads a bare **`Codex`** at rest and **`Codex ･ Plus`** while **⌥** is held, and it
+  flips both ways with the modifier rather than waiting for the next poll. The plate below must not
+  visibly reflow as the header grows — Claude's header has no special width handling and neither
+  does this one, so any jump is a real finding.
+- **Process hygiene, by observation only — never `kill` by name.** `pgrep -fl "codex app-server"`
+  shows at most **one** child, and **none between reads**: the process is started for a read and gone
+  before it returns, so a slow sampler will legitimately see zero. Validate a sampler against a child
+  you started yourself before trusting a zero from it — an unvalidated negative is the
+  "quiet answer read as a pass" trap.
+- **Privacy.** A full poll cycle under `/usr/bin/log stream --level debug` and a `grep` of the temp
+  journal must show **no email, no `codexHome`, no raw response**. The journal carries no quota record
+  at all ([ADR-0127](../adr/0127-codex-quota-from-the-app-server.md) §D11) — `usage` and `status`
+  lines only.
+- **Troubleshoot → Codex quota** names the binary, the version, the age and latency of the last
+  successful read, and the last error.
 
 **Live** (no stub needed): unplug the power and wait until the sync becomes due (24 h from
 `lastArchiveSync`, or reset the marker) → the logs show `archive: deferred reason=on-battery`, the "Last

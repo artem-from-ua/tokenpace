@@ -65,6 +65,15 @@ enum StubScenario: String, CaseIterable {
     case codexCLIOutage = "codex-cli-outage"
     case codexIncident = "codex-incident"
     case codexIncidentsUnavailable = "codex-incidents-unavailable"
+    // The quota half (#504). All of them serve their snapshot from a canned source — **no `codex`
+    // process is spawned under any stub**, so none depends on the machine having it installed.
+    case codexQuotaGreen = "codex-quota-green"
+    case codexQuotaOrange = "codex-quota-orange"
+    case codexQuotaExhausted = "codex-quota-exhausted"
+    case codexTwoWindows = "codex-two-windows"
+    case codexNotSignedIn = "codex-not-signed-in"
+    case codexCLIMissing = "codex-cli-missing"
+    case codexCLIOld = "codex-cli-old"
     case allThreeProviders = "all-three-providers"
     case creditsActive = "credits-active"
     case creditsLimitReached = "credits-limit-reached"
@@ -188,6 +197,13 @@ enum StubScenario: String, CaseIterable {
         case .codexCLIOutage:      return "Codex — CLI down"
         case .codexIncident:       return "Codex — incident without components"
         case .codexIncidentsUnavailable: return "Codex — incidents endpoint down"
+        case .codexQuotaGreen:     return "Codex quota — on pace"
+        case .codexQuotaOrange:    return "Codex quota — ahead of pace"
+        case .codexQuotaExhausted: return "Codex quota — limit reached"
+        case .codexTwoWindows:     return "Codex quota — two windows"
+        case .codexNotSignedIn:    return "Codex quota — not signed in"
+        case .codexCLIMissing:     return "Codex quota — codex not installed"
+        case .codexCLIOld:         return "Codex quota — codex too old"
         case .allThreeProviders:   return "All three providers at once"
         case .creditsActive:       return "Credits · active (paced)"
         case .creditsLimitReached: return "Credits · limit reached (red)"
@@ -408,6 +424,32 @@ enum StubScenario: String, CaseIterable {
                  + "keep rendering (they come from the other endpoint) and the incident rows are "
                  + "simply absent under ⌥. `CLI` is degraded, so there IS something the missing "
                  + "incident would have explained."
+        case .codexQuotaGreen:
+            return "The Codex plate with its quota half on: a 7-day bar under the wordmark, the plan "
+                 + "word beside it. Check there is NO 5-hour row — the server reports one window and "
+                 + "a second would be invented."
+        case .codexQuotaOrange:
+            return "Codex quota ahead of pace — the bar orange, its own colour transition running "
+                 + "independently of Claude's identically-titled `7-day` row above it."
+        case .codexQuotaExhausted:
+            return "Codex quota at 100 %. The reset line stays PLAIN — the red blocking badge is "
+                 + "Claude's alone (it answers which reset unblocks Claude work), so an exhausted "
+                 + "Codex window must not paint one here or on any Claude row."
+        case .codexTwoWindows:
+            return "Two Codex windows at once — the only way to see the N>1 path before the server "
+                 + "ever sends a `secondary`. Both bars sit on the Codex plate; neither renumbers "
+                 + "Claude's rows above."
+        case .codexNotSignedIn:
+            return "Codex installed but signed out: the plate keeps its status half and shows no "
+                 + "bars. Troubleshoot carries the reason; the popup shows no warning banner, since "
+                 + "that banner is Claude's."
+        case .codexCLIMissing:
+            return "No `codex` on this Mac. Troubleshoot lists the candidate paths that were tried "
+                 + "rather than a bare not-found."
+        case .codexCLIOld:
+            return "A `codex` that predates `account/rateLimits/read` — the -32600 detection, which "
+                 + "keys on the code AND the method name in the message, since -32600 alone is also "
+                 + "what a malformed params struct returns."
         case .allThreeProviders:
             return "All three plates at once, each in its own state. Read the order top to bottom: "
                  + "Claude, then Codex, then GitHub (`displayName` order, Claude pinned first), with "
@@ -589,6 +631,11 @@ enum StubScenario: String, CaseIterable {
         case .codexIncident:       return StubUsageTransport(mode: .codexIncident, now: now)
         case .codexIncidentsUnavailable:
             return StubUsageTransport(mode: .codexIncidentsUnavailable, now: now)
+        // The quota scenarios keep the network side calm — their subject is the Codex plate's bars,
+        // and a busy Claude stack above would compete for the eye.
+        case .codexQuotaGreen, .codexQuotaOrange, .codexQuotaExhausted, .codexTwoWindows,
+             .codexNotSignedIn, .codexCLIMissing, .codexCLIOld:
+            return StubUsageTransport(mode: .codexGreen, now: now)
         case .allThreeProviders:   return StubUsageTransport(mode: .allThreeProviders, now: now)
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
@@ -622,6 +669,38 @@ enum StubScenario: String, CaseIterable {
 
     /// Only ``realNetwork`` reads the real Keychain / spawns the live refresher.
     var usesStubToken: Bool { self != .realNetwork }
+
+    /// The quota source for this scenario. **`nil` for every stub except the quota ones, and a canned
+    /// source — never `CodexAppServer` — for those**: no scenario may spawn `codex`, since a stub must
+    /// render the same on a machine that has never installed it.
+    ///
+    /// `.realNetwork` is the only case that returns the real collector.
+    func codexQuotaSource(now: @escaping @Sendable () -> Date = { Date() })
+        -> (any CodexQuotaSource)? {
+        switch self {
+        case .realNetwork:
+            return CodexAppServer(now: now)
+        case .codexQuotaGreen:
+            return StubCodexQuotaSource(.windows([(4, 604_800)]), now: now)
+        case .codexQuotaOrange:
+            return StubCodexQuotaSource(.windows([(62, 604_800)]), now: now)
+        case .codexQuotaExhausted:
+            return StubCodexQuotaSource(.windows([(100, 604_800)]), now: now)
+        // A 5-hour window beside the week — the shape the server does not send today. The only way to
+        // exercise the N>1 path before it does.
+        case .codexTwoWindows:
+            return StubCodexQuotaSource(.windows([(37, 604_800), (12, 18_000)]), now: now)
+        case .codexNotSignedIn:
+            return StubCodexQuotaSource(.failure(.notSignedIn), now: now)
+        case .codexCLIMissing:
+            return StubCodexQuotaSource(.failure(.cliNotFound), now: now)
+        case .codexCLIOld:
+            return StubCodexQuotaSource(
+                .failure(.methodUnsupported(method: CodexAppServer.rateLimitsMethod)), now: now)
+        default:
+            return nil
+        }
+    }
 
     // MARK: - Clock
 
