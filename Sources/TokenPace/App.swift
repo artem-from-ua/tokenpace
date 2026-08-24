@@ -265,6 +265,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ``PopupLayout/providerQuotaRows``.
     private var lastCodexQuotaRows: [LimitRow] = []
     private var lastCodexPlanLabel: String?
+    /// Whether the last successful read contradicted itself — flagged reached while a window still
+    /// reported nothing spent. The plate shows the warning block for it; the rows it would have drawn
+    /// are already absent from `lastCodexQuotaRows`.
+    private var lastCodexQuotaFault = false
     /// The last quota failure, kept for Troubleshoot only. The popup shows no warning banner for it:
     /// `PopupLayout.warning` is Claude's, and a Codex failure surfacing there would read as a problem
     /// with the bars above it.
@@ -1948,6 +1952,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             codexQuotaSource = nil
             lastCodexQuotaRows = []
             lastCodexPlanLabel = nil
+            lastCodexQuotaFault = false
             lastCodexQuotaDiagnostics = CodexQuotaDiagnostics()
             reRenderForCurrentTime()
             return
@@ -1987,9 +1992,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.lastCodexQuotaDiagnostics = diagnostics
                 switch result {
                 case let .success(snapshot):
+                    let readAt = self.currentDate()
                     self.lastCodexQuotaRows = CodexQuotaNormalizer.rows(
-                        from: snapshot, now: self.currentDate())
+                        from: snapshot, now: readAt)
                     self.lastCodexPlanLabel = snapshot.planLabel
+                    // Computed against the same instant the rows were: the two must agree about
+                    // which windows have not started, or the plate warns about a row it also drew.
+                    self.lastCodexQuotaFault =
+                        snapshot.hasContradictoryReachedFlag(now: readAt)
+                    if self.lastCodexQuotaFault {
+                        // No values, only the shape of the fault — the flag word is the server's and
+                        // the percentages are the ones we have just decided not to believe.
+                        AppLogger.network.notice("codex quota: reached flag contradicts a spotless window")
+                    }
                     // The window count and nothing else — never a plan identifier, never a response
                     // body, and no email is in reach because `account/read` is not called.
                     AppLogger.network.notice(
@@ -2009,6 +2024,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // live-looking bar is worse than no bar, and Troubleshoot carries the reason.
                     self.lastCodexQuotaRows = []
                     self.lastCodexPlanLabel = nil
+                    // A failed read reports itself in Troubleshoot, not as the contradiction warning:
+                    // that block asserts the server answered and answered inconsistently.
+                    self.lastCodexQuotaFault = false
                     AppLogger.network.notice(
                         "codex quota unavailable: \(diagnostics.lastError ?? "unknown", privacy: .public)")
                 }
@@ -2814,6 +2832,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Claude's (ADR-0128). Claude's own block is hidden by dropping it, not by skipping the
             // merge — `withProviderBlocks` is what puts them in order either way.
             .withProviderBlocks(satelliteMenuBarBlocks())
+            // Spoken, not drawn: the contradicted read contributes no block, and without this a
+            // screen reader cannot tell that from Codex being switched off.
+            .withQuotaFaults(lastCodexQuotaFault && collectsCodexQuota ? [.codex] : [])
             .hidingMenuBarProviders(
                 PersistedConfig.menuBarHiddenProviders.union(currentScenario.menuBarHiddenProviders))
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
@@ -2836,7 +2857,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Codex's bars ride their own field to the view, never `rows` — appending them there
             // renumbers the indices `blockingReset` is keyed to and moves the red badge onto a row
             // that is not the blocker.
-            .withProviderQuota(.codex, rows: lastCodexQuotaRows, planLabel: lastCodexPlanLabel)
+            .withProviderQuota(.codex, rows: lastCodexQuotaRows, planLabel: lastCodexPlanLabel,
+                               fault: lastCodexQuotaFault)
             // Claude's plate gets Claude's incidents only; the others ride the calls above. The
             // concatenated `lastVisibleIncidents` is for the episode subscription and its
             // notifications, where the provider does not change what the banner says.

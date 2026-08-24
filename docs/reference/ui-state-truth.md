@@ -546,6 +546,7 @@ where the limits sit above the service lines.
 | Header | `Codex` — the bare wordmark, plus its dot when the provider is calm | `Codex ･ Plus` — the plan word, and the poll age after it |
 | Quota rows | title, status word, `n% used`, the reset line, the bar | the verbose forms, plus a **stand-by** line on a 7-day window when there is advice to give |
 | Quota row — window not started | title, `ready to start`, a green knobless bar, and **no second line** | unchanged: there is no detail to expand |
+| Quota row — not started, account flagged reached | **no row**: a red ⚠️ `Codex reset time bug` block stands where the bar would be | unchanged: the block is not a detail that expands |
 | Status rows | only what is broken or just recovered | replaced by this provider's incidents |
 
 **A Codex window that has not started renders like Claude's idle 5-hour row, and for the same
@@ -561,6 +562,34 @@ which would claim a reset is happening this second.
 The raw value stays observable: Troubleshoot's `Reported resets` line prints the epoch seconds the
 server sent, so the backend's behaviour can still be read off a surface even though no countdown
 draws it.
+
+**A reached flag beside a spotless window is broken data, and it draws no bar at all.**
+`rateLimits` carries two account-level flags — `spendControlReached` and `rateLimitReachedType` —
+and upstream reports accounts showing 100 % left while actually rate-limited
+([openai/codex#34360](https://github.com/openai/codex/issues/34360),
+[#36528](https://github.com/openai/codex/issues/36528)). When either is raised while a window still
+reports nothing spent, the server has asserted "the limit is reached" and "nothing has been used" in
+one answer, and the two cannot both be true. **Neither number can be believed**, so the row is
+withheld entirely — a bar would be a scale built from values the read has just disqualified — and a
+red ⚠️ block stands in its place: `Codex reset time bug`, over a line saying Codex reported the limit
+reached and zero usage at once and its quota numbers cannot be trusted right now. The menu bar draws
+no Codex bar either, and speaks the same fault
+([#518](https://github.com/artem-from-ua/tokenpace/issues/518),
+[ADR-0129](../adr/0129-ready-to-start-is-gated-on-the-account-reached-flags.md)).
+
+**It is the ⚠️ error treatment, not the dimmed one.** The nearby `weeklyResetUnknown` block has the
+same two-line no-bar shape and is deliberately dimmed, because nothing is broken there — the API
+answered correctly and simply has not opened a window yet. This one is a provider-side defect, so it
+takes the failure vocabulary. Also **not** Claude's grey `waiting for limit reset`: that shape is a
+5-hour row that is genuinely empty, blocked by a *separate* exhausted 7-day window, so its grey bar
+is truthful. Codex has one window, and here that window's own number is the one in dispute.
+
+**An absent flag is "unavailable", never "false".** Both arrive `null` on the live Plus account, so
+only an explicit `spendControlReached: true` counts, and **any** non-empty `rateLimitReachedType`
+does — the vocabulary is the server's and will grow, so a word we have not met must not read as
+silence. The contradiction needs **both** halves: a raised flag beside a window at 100 % is an
+ordinary reading of a real limit and stays fully drawn, and a multi-window read loses only the
+contradicted rows.
 
 **The plan word is ⌥-gated, exactly as Claude's is.** It names the subscription once and never
 changes between polls, so it is an on-demand detail rather than something to watch. A resting
@@ -610,6 +639,7 @@ an incident — both when both do — and either one toggles the same app-wide s
 | A **subscribe row on a plate with no incident of its own** | The control sits beside its cause. On a healthy provider's plate it would read as an offer to follow that provider's silence |
 | A **GitHub plate carrying bars, a percentage, or a `Token limits usage` section** | GitHub is status-only and publishes no subscription limit the bars model. There is no usage half in the app, in the config, or on the Settings page |
 | A **5-hour row on the Codex plate** | The server reports one window — a week — and `secondary` is `null`. A 5-hour row would be a bar for a limit Codex does not report, under an invented reset ([ADR-0127](../adr/0127-codex-quota-from-the-app-server.md) §D5). The plate shows one row per **reported** window, so two rows are possible the day the server sends a `secondary`, but a *5-hour* one never appears alongside today's week |
+| A **Codex row with a bar of any colour beside a raised reached flag on a spotless window** | That pairing is a self-contradicting payload, and the row is withheld rather than drawn — no green one, no grey one, no zeroed one. A red ⚠️ `Codex reset time bug` block stands in its place, and the menu bar shows no Codex bar either. The reverse pair is ordinary: a flag absent or `null` leaves the row green and encouraging, because `null` means unavailable rather than reached. A flag beside a window at 100 % is ordinary too — that is what a real limit looks like ([#518](https://github.com/artem-from-ua/tokenpace/issues/518), [ADR-0129](../adr/0129-ready-to-start-is-gated-on-the-account-reached-flags.md)) |
 | A **Codex row reading `0%` beside a reset a full week out** | That pair is the window-not-started state, and it draws no second line at all — the title, `ready to start` and a knobless bar. A `0%` with a `7d` countdown next to it is the sliding value the state exists to suppress |
 | A **`resetting…` on a Codex row that has not started** | `resetting…` is what a `nil` reset line renders, and it claims a reset is in progress this second. A window that has not started drops the whole detail line instead, so the fallback is never reached |
 | A **red blocking-reset badge on a Codex row** | `blockingReset` answers "which reset unblocks **Claude** work" and is picked from Claude's rows alone. Codex resets render as plain text. This is also why Codex rows live in their own array — appending them to `rows` would renumber the indices that badge is keyed to (ADR-0127 §D7) |

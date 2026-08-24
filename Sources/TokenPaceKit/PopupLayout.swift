@@ -208,6 +208,11 @@ public struct PopupLayout: Sendable, Equatable {
     public let providerQuotaRows: [ProviderID: [LimitRow]]
     /// A satellite provider's plan word for its plate header (`"Plus"`), when it reports one.
     public let providerPlanLabels: [ProviderID: String]
+    /// Providers whose latest quota read **contradicted itself** and whose plate therefore shows the
+    /// warning block in place of the rows the read would otherwise have produced
+    /// (``CodexQuotaSnapshot/hasContradictoryReachedFlag(now:)``). Carried as a set rather than a
+    /// per-provider reason because there is one such fault to report; a second would need naming.
+    public let providerQuotaFaults: Set<ProviderID>
     /// The "Extra usage" money-credits section, or `nil` when credits are inactive for this
     /// snapshot (`snapshot.spend == nil` or `!CreditsPacing.isActive`). A **separate** field from
     /// ``rows`` — a credits section is not a limit window (see ``CreditsRow``).
@@ -340,7 +345,8 @@ public struct PopupLayout: Sendable, Equatable {
         providerStatusAges: [ProviderID: TimeInterval] = [:],
         providerIncidents: [ProviderID: [VisibleIncident]] = [:],
         providerQuotaRows: [ProviderID: [LimitRow]] = [:],
-        providerPlanLabels: [ProviderID: String] = [:]
+        providerPlanLabels: [ProviderID: String] = [:],
+        providerQuotaFaults: Set<ProviderID> = []
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -366,6 +372,7 @@ public struct PopupLayout: Sendable, Equatable {
         self.providerIncidents = providerIncidents
         self.providerQuotaRows = providerQuotaRows
         self.providerPlanLabels = providerPlanLabels
+        self.providerQuotaFaults = providerQuotaFaults
     }
 
     /// A copy of this layout with **one** field replaced, everything else carried over. Every `with*`
@@ -379,7 +386,8 @@ public struct PopupLayout: Sendable, Equatable {
         providerStatusAges: [ProviderID: TimeInterval]? = nil,
         providerIncidents: [ProviderID: [VisibleIncident]]? = nil,
         providerQuotaRows: [ProviderID: [LimitRow]]? = nil,
-        providerPlanLabels: [ProviderID: String]? = nil
+        providerPlanLabels: [ProviderID: String]? = nil,
+        providerQuotaFaults: Set<ProviderID>? = nil
     ) -> PopupLayout {
         PopupLayout(
             lastUpdateAge: lastUpdateAge ?? self.lastUpdateAge,
@@ -398,7 +406,8 @@ public struct PopupLayout: Sendable, Equatable {
             providerStatusAges: providerStatusAges ?? self.providerStatusAges,
             providerIncidents: providerIncidents ?? self.providerIncidents,
             providerQuotaRows: providerQuotaRows ?? self.providerQuotaRows,
-            providerPlanLabels: providerPlanLabels ?? self.providerPlanLabels)
+            providerPlanLabels: providerPlanLabels ?? self.providerPlanLabels,
+            providerQuotaFaults: providerQuotaFaults ?? self.providerQuotaFaults)
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged.
@@ -464,14 +473,30 @@ public struct PopupLayout: Sendable, Equatable {
 
     /// A copy carrying one satellite provider's quota bars and plan word. An empty `rows` clears the
     /// entry — the provider has no bars to draw rather than a row of zeroes.
+    ///
+    /// `fault` marks a read that contradicted itself: the plate then shows the warning block instead
+    /// of the rows. It is kept **independent of `rows`** because the two can coexist — a read with a
+    /// second, anchored window drops only the contradicted one and still has a bar to draw beside the
+    /// warning.
     public func withProviderQuota(
-        _ provider: ProviderID, rows: [LimitRow], planLabel: String?
+        _ provider: ProviderID, rows: [LimitRow], planLabel: String?, fault: Bool = false
     ) -> PopupLayout {
         var allRows = providerQuotaRows
         var labels = providerPlanLabels
+        var faults = providerQuotaFaults
         allRows[provider] = rows.isEmpty ? nil : rows
-        labels[provider] = rows.isEmpty ? nil : planLabel
-        return copy(providerQuotaRows: allRows, providerPlanLabels: labels)
+        // The plan word survives a fault with no rows: it names the subscription, which the faulty
+        // read still reported correctly, and the plate is on screen to carry it.
+        labels[provider] = rows.isEmpty && !fault ? nil : planLabel
+        if fault { faults.insert(provider) } else { faults.remove(provider) }
+        return copy(providerQuotaRows: allRows, providerPlanLabels: labels,
+                    providerQuotaFaults: faults)
+    }
+
+    /// Whether this provider's latest quota read contradicted itself, so its plate shows the warning
+    /// block in place of the withheld rows.
+    public func hasQuotaFault(of provider: ProviderID) -> Bool {
+        providerQuotaFaults.contains(provider)
     }
 
     /// One satellite provider's quota bars, in the order the server reported its windows.

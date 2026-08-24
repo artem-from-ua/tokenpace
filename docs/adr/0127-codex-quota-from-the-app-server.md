@@ -1,9 +1,18 @@
 ---
 status: accepted
 date: 2026-08-24
+superseded_by: [0129]
 ---
 
 # ADR-0127: Codex quota from a short-lived `app-server` process, with window durations as data rather than enum cases
+
+> **Partially superseded by [ADR-0129](0129-ready-to-start-is-gated-on-the-account-reached-flags.md).**
+> Only the last clause of §D13 is superseded — "the row is Claude's idle shape", which assumed the
+> detection always yields a drawable row. A window that has not started renders that way **only**
+> while the account's `spendControlReached`/`rateLimitReachedType` are clear; when either is raised
+> the payload contradicts itself, and **no row is drawn at all** — a warning block stands in its
+> place. **Everything else still stands in full**, D13 included: the ±120 s detection, the
+> one-sample rule, why no anchor is reconstructed, and why the raw epoch stays in Troubleshoot.
 
 > The usage half of the provider [ADR-0125](0125-codex-as-a-status-provider.md) introduced, and the
 > first subprocess TokenPace runs for *data* rather than for a side effect — the `claude` spawn of
