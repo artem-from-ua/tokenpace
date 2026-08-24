@@ -10,9 +10,10 @@ import TokenPaceKit
 /// broke. Codex's are separate surfaces — someone in the terminal and someone in Codex Web hit
 /// different failures — so "CLI down, Web fine" is an action rather than noise.
 ///
-/// The quota switch sits in its own section, off by default. Watching a status page is an HTTP GET
-/// against a public URL; reading the quota runs `codex` on this Mac, which is a different class of act
-/// and is asked for rather than assumed.
+/// The quota switch leads, as it does on Claude's page — it is what the bars are drawn from, and the
+/// services below it explain an outage rather than fill a bar. It stays off by default all the same:
+/// watching a status page is an HTTP GET against a public URL, while reading the quota runs `codex` on
+/// this Mac, which is a different class of act and is asked for rather than assumed.
 ///
 /// The rows are generated from `StatusHealth.codexServices`, the same table that resolves the feed —
 /// a switch here cannot name a service the poll does not monitor.
@@ -21,6 +22,28 @@ struct ProvidersCodexPane: View {
 
     var body: some View {
         Form {
+            Section {
+                Toggle("Collect subscription quota", isOn: Binding(
+                    get: { model.codexMonitoring.usageEnabled },
+                    set: { model.setCodexUsage($0) }))
+                // ⚠️-class, and it names the condition rather than the feature: the collector works,
+                // the endpoint it reads does not yet behave. A weekly window has been observed
+                // reporting 0 % with a reset that advances on every request, and returning to its
+                // previous figure hours later — so a reading here can be wrong until OpenAI settles it.
+                SettingsHint(
+                    text: "Experimental. OpenAI's usage endpoint currently reports a weekly window "
+                        + "that can read as empty and then return to its previous figure, so these "
+                        + "numbers may be wrong until they fix it.",
+                    warning: true)
+            } header: {
+                SectionHeaderWithHint(title: "Token limits usage",
+                                      hint: model.stubScenarioActive ? SettingsStubHint.text : nil)
+            } footer: {
+                SettingsHint(
+                    text: "TokenPace runs the installed codex command to read your plan's usage. "
+                        + "Nothing is sent anywhere, and your account email is never read.")
+            }
+
             Section {
                 ForEach(StatusHealth.codexServices, id: \.id) { service in
                     Toggle(Self.title(service.component), isOn: Binding(
@@ -51,18 +74,6 @@ struct ProvidersCodexPane: View {
                         + "different ids — TokenPace cannot tell them apart, so it watches neither.")
             }
 
-            Section {
-                Toggle("Collect subscription quota", isOn: Binding(
-                    get: { model.codexMonitoring.usageEnabled },
-                    set: { model.setCodexUsage($0) }))
-            } header: {
-                SectionHeaderWithHint(title: "Token limits usage",
-                                      hint: model.stubScenarioActive ? SettingsStubHint.text : nil)
-            } footer: {
-                SettingsHint(
-                    text: "TokenPace runs the installed codex command to read your plan's usage. "
-                        + "Nothing is sent anywhere, and your account email is never read.")
-            }
         }
         .formStyle(.grouped)
         .animation(SettingsRowReveal.animation, value: model.codexMonitoring.isMonitoringAnything)
