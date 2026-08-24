@@ -60,6 +60,12 @@ enum StubScenario: String, CaseIterable {
     case githubDegraded = "github-degraded"
     case githubOutage = "github-outage"
     case githubClaudeDown = "github-claude-down"
+    case codexGreen = "codex-green"
+    case codexDegraded = "codex-degraded"
+    case codexCLIOutage = "codex-cli-outage"
+    case codexIncident = "codex-incident"
+    case codexIncidentsUnavailable = "codex-incidents-unavailable"
+    case allThreeProviders = "all-three-providers"
     case creditsActive = "credits-active"
     case creditsLimitReached = "credits-limit-reached"
     case creditsNoLimit = "credits-no-limit"
@@ -177,6 +183,12 @@ enum StubScenario: String, CaseIterable {
         case .githubDegraded:      return "GitHub — Actions degraded"
         case .githubOutage:        return "GitHub — Git operations down"
         case .githubClaudeDown:    return "GitHub green, Claude down"
+        case .codexGreen:          return "Codex — all green"
+        case .codexDegraded:       return "Codex — Web degraded"
+        case .codexCLIOutage:      return "Codex — CLI down"
+        case .codexIncident:       return "Codex — incident without components"
+        case .codexIncidentsUnavailable: return "Codex — incidents endpoint down"
+        case .allThreeProviders:   return "All three providers at once"
         case .creditsActive:       return "Credits · active (paced)"
         case .creditsLimitReached: return "Credits · limit reached (red)"
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
@@ -374,6 +386,32 @@ enum StubScenario: String, CaseIterable {
         case .githubClaudeDown:
             return "Both providers at once, in opposite states — GitHub green while Claude Code is "
                  + "down. Proves the sections and their dots are independent (#454)."
+        case .codexGreen:
+            return "Codex monitored and healthy: the plate shows its header dot and no rows — the "
+                 + "state that would otherwise be an empty plate. Check the wordmark colour with "
+                 + "Digital Color Meter in sRGB (#5871C0) on BOTH themes; no screenshot is a source "
+                 + "of colour."
+        case .codexDegraded:
+            return "Codex with `Codex Web` degraded: one row under the Codex header, the header dot "
+                 + "yellow, the other providers untouched."
+        case .codexCLIOutage:
+            return "Codex with `CLI` down — the component that decides the feed choice. `CLI` sits "
+                 + "at position 29 of `components.json` and is absent from `summary.json` entirely, "
+                 + "so a row here is proof the poll reads the right endpoint."
+        case .codexIncident:
+            return "A Codex incident whose affected component is monitored, with `CLI` degraded so "
+                 + "the plate has rows too. Hold ⌥ to swap the rows for the incident: it carries no "
+                 + "shortlink (the proxy feed has none), so the row's stage word is NOT a link — "
+                 + "that is correct, not a bug."
+        case .codexIncidentsUnavailable:
+            return "The degradation path: components 200, incidents 500. Statuses and their dots "
+                 + "keep rendering (they come from the other endpoint) and the incident rows are "
+                 + "simply absent under ⌥. `CLI` is degraded, so there IS something the missing "
+                 + "incident would have explained."
+        case .allThreeProviders:
+            return "All three plates at once, each in its own state. Read the order top to bottom: "
+                 + "Claude, then Codex, then GitHub (`displayName` order, Claude pinned first), with "
+                 + "an equal gap between each pair."
         case .creditsActive:
             return "Credits ¤ icon (#144): enabled €15 limit, €10.77 spent (~72 %) → paced icon "
                  + "colour. 7-day pinned at 100 % so the icon shows — and since credits cover the "
@@ -545,6 +583,13 @@ enum StubScenario: String, CaseIterable {
         case .githubDegraded:      return StubUsageTransport(mode: .githubDegraded, now: now)
         case .githubOutage:        return StubUsageTransport(mode: .githubOutage, now: now)
         case .githubClaudeDown:    return StubUsageTransport(mode: .githubClaudeDown, now: now)
+        case .codexGreen:          return StubUsageTransport(mode: .codexGreen, now: now)
+        case .codexDegraded:       return StubUsageTransport(mode: .codexDegraded, now: now)
+        case .codexCLIOutage:      return StubUsageTransport(mode: .codexCLIOutage, now: now)
+        case .codexIncident:       return StubUsageTransport(mode: .codexIncident, now: now)
+        case .codexIncidentsUnavailable:
+            return StubUsageTransport(mode: .codexIncidentsUnavailable, now: now)
+        case .allThreeProviders:   return StubUsageTransport(mode: .allThreeProviders, now: now)
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)

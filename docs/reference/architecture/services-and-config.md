@@ -82,6 +82,69 @@ black; ADR-0094 §7's derived gradient puts the far end at `#606060`) — one gl
 colour for the identity. The popup's header mark uses `ColorRole.githubBrandInk` instead, which
 resolves per appearance, because black ink on the dropdown's dark material is unreadable.
 
+## Codex service status — the third provider (#503, ADR-0125)
+
+The first provider whose **feed contents**, not its schema, force a different shape. It runs the same
+Statuspage v2 schema, so `StatusSummary` decodes it too — but the documented endpoints do not answer
+what the popup asks, and every choice below rests on a captured live body
+([ADR-0125](../../adr/0125-codex-as-a-status-provider.md)).
+
+**Statuses come from `/api/v2/components.json`, never `summary.json`.** The summary is structurally
+truncated — its components run `position` 0–24 contiguously and `CLI` sits at 29 — so one of the five
+monitored services can never appear there (25 components against 34, measured). This is the one
+provider whose endpoint is not the summary, and the reason is not transient.
+
+**Incidents come from `/proxy/status.openai.com/incidents`**, the page's own frontend backend, via a
+separate client and a **separate narrow decoder** (`CodexIncidentFeed`). `/api/v2/incidents.json`
+reports `affected_components: null` on every incident it carries, so it cannot say which service an
+incident touched — and that is the only question `IncidentVisibility` asks. The proxy answers 200
+without a cookie and without a browser User-Agent; a plain `TokenPace/<version>` gets the same bytes.
+
+The endpoint is **undocumented**, so its failure **degrades** rather than propagating: the statuses
+come from a different request, so an unreachable or unparseable incident feed costs the Codex
+incident rows and nothing else. A shape change takes the same path as an outage (the decoder throws
+`StatusFetchError.decode`). Which path a poll took is logged — `codex incidents source=proxy` /
+`source=unavailable` — so a success on an undocumented endpoint is never silent about being one, and
+a degraded run is distinguishable from a quiet day. Its body is never journalled (~half a megabyte).
+
+The proxy also speaks a **vocabulary of its own**: `full_outage` where Statuspage says
+`major_outage`. `CodexStatusMapping.serviceStatus(fromProxy:)` maps it before the shared
+`ServiceStatus(rawAPIValue:)` seam sees it — that one would bucket it to `.unknown`, visibly *milder*
+than an outage.
+
+**Five logical services, one per component** — `codexAPI`, `codexCLI`, `codexVSCode`, `codexWeb`,
+`codexChatGPTDesktop` — each its own switch and its own row. The opposite of GitHub's grouping, and
+for the inverting reason: GitHub's five answer one question through entangled paths, while these are
+different **surfaces**, so "CLI red, Web green" is an action rather than noise. Exact `component_id`
+attribution makes the finer split free. **`Login` is excluded**: the feed lists it twice under two
+different ids, so an exact-name match would resolve arbitrarily.
+
+**The age is never invented.** `components[].updated_at` is **identical on all 34 components** — the
+page's edit stamp, not a status change — so the key is **not read**. The age comes from, in order:
+an **open** `component_impacts[].start_at` in the incident feed (a closed impact describes a state
+the component has left); then `StatusAgeReconstruction.changedAt(from:provider:)` walking the
+journal's own `status` records; then nothing. The reconstruction resolves only to the poll cadence,
+yields nothing on a fresh install, and deliberately does **not** date a long-held status to the
+journal's oldest line — that would report the retention window's edge as a change.
+
+**One backoff for both requests.** A `429` is the page asking us to slow down and there is one page
+behind both URLs, so both feed one `PollingBackoff` and the longer `Retry-After` wins. The incident
+request is deliberately **not** wrapped in `try?`, which would swallow that hint.
+
+**Display order became explicit here.** `ProviderID.displayOrder` (Claude pinned first, the rest by
+`displayName`) with `displayIndex` as the sort key — read by `merging(_:)`, by the popup's satellite
+plates, and by the **generated** Settings provider rows. Not `allCases`: that is the case-declaration
+order, and the case list is archive identity (journal-stable raw values), so a case appended later
+must not reorder the screen. The two orders genuinely differ today.
+
+**Settings:** `Providers › Codex` (`ProvidersCodexPane`) generates one toggle per service from
+`StatusHealth.codexServices`, so a switch cannot name a service the poll does not monitor, and states
+the `Login` exclusion in a footer. `CodexMonitoring` declares `usageEnabled` at default **false**
+ahead of any collector, so the `Codable` shape does not change twice; the status flags are all
+default-on. The asymmetry is deliberate — a status poll is an HTTP GET against a public URL, while
+the quota spawns a process on the user's machine. No derived lock: Codex's quota comes from a local
+subprocess, not from `Codex API`.
+
 ## Incidents and episode subscription (#279, ADR-0071)
 
 A layer on top of the previous stream: incidents as **context** and a **subscription target**,
@@ -115,6 +178,9 @@ live per-poll updates: update interval + token (read/expires) + the raw usage-AP
 | **StatusHealth / StatusSummary** | Pure core of service status (#31, #89; `TokenPaceKit`). `StatusSummary` parses `components[]` (with `updated_at` — the state's age) **and** `incidents[]` (#279): the latter are a separate context layer that doesn't affect service state (ADR-0071 §1 narrows ADR-0013 §2). `status`/`scheduled_maintenances[]` remain undecoded. `ServiceStatus` maps the raw string → semantics (+ `severity`/`isProblem`). `StatusHealth` is a collection of **logical services** `checks: [ServiceCheck]` (ADR-0024): each is a `ServiceID` + `coworkEnabled` + `[ResolvedComponent]` + a computed `status` = worst-of-N. `worstProblem` → the most serious state across all enabled ones (the `ServiceStatus?` signature is preserved — it is what the **menu-bar dot** reads, worst-of-all across providers). **Per-provider since #454** ([ADR-0121](../../adr/0121-github-as-a-status-only-provider.md)): `ServiceID.provider` puts every service on a `ProviderID` axis (`.claude`/`.github`, raw values stable snake-case because they are written into the journal), and beside `worstProblem` sit four accessors that each exist for a different consumer — `checks(of:)` (the popup's per-plate rows), `monitors(_:)` (whether to draw a plate at all), `aggregate(of:)` (the header dot: **includes `operational`**, deliberately *not* `worstProblem`'s shape, because a header labels a section that is present and must say "healthy" out loud rather than by omission; `nil` means "not monitored", never "fine"), and `worstProblem(of:)` (the per-source poll cadence — feeding it the flattened value would let one provider's incident accelerate the *other* provider's poll to the 60-s floor). `fromGitHub`/`unknownGitHub` are **separate** functions rather than a widened `from`: two providers publish two pages, so one summary can never resolve both. `merging(_:)` folds two independently-cadenced polls into the one value the menu bar reads, **replacing** a provider's checks rather than accumulating them. `pageURL(for:)` routes a row's link to its own status page — a GitHub row pointing at Anthropic's would be a dead end. ADR-0013, ADR-0024, ADR-0121 |
 | **MonitoredServices** | Pure Codable value config for "which logical services to monitor" (#89, ADR-0024): `claudeCodeEnabled`/`webDesktopEnabled` + `WebDesktopMode` (`chatOnly`/`chatAndCowork`). Forward-compat decode (unknown mode → `.chatOnly`). `static default` = both on, `chatOnly`. **Unchanged in #341** — which is exactly why its doc comment stays true |
 | **GitHubMonitoring** | The GitHub provider's config (#454, [ADR-0121](../../adr/0121-github-as-a-status-only-provider.md)) — today the single `developmentServicesEnabled` flag behind `Development services`. A **struct, not a bare `Bool`**, because config types here grow (`MonitoredServices` gained `webDesktopMode` later, and a `Copilot services` group is the named next member): a struct absorbs that as a new key with a default, where a loose flag would force a second unrelated key beside it. Tolerant decode like `MonitoredServices` (an omitted key takes the default rather than failing the whole blob). Persists under its **own** `PersistedConfig` key, never inside `monitoredServices` — the rule that key already states, and more so across providers: folded into Claude's blob it would inherit Claude's invalidation as well as its downgrade hazard. **`default` is off** — the one opt-in monitoring flag in the app; a provider that appears on upgrade must not poll a third party, or put a new dot in the menu bar, before being asked. No provider-level master switch and no derived lock: with one service the switch **is** the provider, and nothing here underpins anything else the way `Claude API` underpins Claude's services |
+| **CodexMonitoring** | The Codex provider's config (#503, [ADR-0125](../../adr/0125-codex-as-a-status-provider.md)) — five service flags, all default **on**, plus `usageEnabled` at default **false**, declared before any collector reads it so the `Codable` shape does not change twice. `isEnabled(_:)`/`setEnabled(_:_:)` take a `ServiceID`, which is what lets the Settings page **generate** its rows from `StatusHealth.codexServices` rather than hand-list five setters that can drift from five switches. `isMonitoringAnything` deliberately ignores `usageEnabled`: the status loop asks it to decide whether to fetch a status page, and a quota switch is no reason to make that request. Tolerant decode; its **own** `PersistedConfig` key. No derived lock — Codex's quota comes from a local subprocess, not from `Codex API`, so a `claudeApiLocked` analogue would assert a dependency that does not exist |
+| **CodexIncidents / CodexIncidentClient** | The undocumented incident feed (#503, [ADR-0125](../../adr/0125-codex-as-a-status-provider.md)). A **narrow decoder of its own** (`CodexIncidentFeed`/`CodexIncident`/`CodexAffectedComponent`/`CodexComponentImpact`/`CodexIncidentUpdate`) rather than a widened `StatusIncident`: the shapes differ in nearly every key (`published_at` for `created_at`, `to_status` for `status`, a rich-text `message` object for a plain `body`, `component_id` where Statuspage nests a component array, plus `component_impacts`/`status_summaries` with no analogue), so one type over both would be all optionals and no reader would know which feed produced it. `CodexStatusMapping` carries the three joins: `serviceStatus(fromProxy:)` (maps `full_outage`→`.majorOutage` before the shared seam buckets it to the milder `.unknown`), `componentNames(in:)` (`component_id`→name, verified to resolve every id in the captured feed), `changedAt(in:componentNames:)` (the age, from **open** impacts only) and `visibleIncidents(...)` (the same gate `IncidentVisibility` applies, reading `current_status` because it decides whether the incident still hurts). `CodexIncidentClient` throws the same `StatusFetchError` the status client does, so a `429` reaches the caller's backoff instead of flattening into "unavailable"; a `DecodingError` maps to `.decode`, which is what makes a shape change at an undocumented endpoint degrade like an outage |
+| **StatusAgeReconstruction** | When each component last changed status, recovered from the journal's own `status` records (#503, [ADR-0125](../../adr/0125-codex-as-a-status-provider.md)) — the fallback for a provider whose feed cannot say. The source is already written: every `status` line carries `t`, its `provider`, and `svc` (the whole feed with names and raw statuses). Walks back from the newest line while a component reads the same status. Its **limits are the point**: resolution is the poll cadence (never better), a fresh install yields nothing rather than an age of zero, and a status held for the whole record is deliberately **not** dated to the oldest line — that would report the retention window's edge as a change that never happened |
 | **ProviderMonitoring** | A composite over the previous one (#341, [ADR-0085](../../adr/0085-provider-monitoring-model.md)): `usageApiEnabled` (usage collection — what feeds the bars) **alongside** `services: MonitoredServices` (the status page), because these are different subsystems. `claudeApiLocked` is **computed** (`usage || code || web`), never stored: `Claude API` has no toggle of its own — it's enabled as long as anything is enabled. Derivation removes the desync at the root. The two halves persist under **separate keys** so a downgrade doesn't wipe the choice by overwriting one blob |
 | **StatusClient** | The HTTP seam for a status endpoint (`TokenPaceKit`), mirroring `UsageClient`: pure `buildRequest(endpoint:userAgent:)` (mandatory `User-Agent`, no auth) / `decode(from:)` kept separate from `fetch(transport:endpoint:userAgent:)`. `endpoint` and `userAgent` are **parameters defaulting to Claude's**, so a second source needs no fork (ADR-0119 §4). Failures → `StatusFetchError` → the shell falls back to `StatusHealth.unknown`; a **`429`** additionally yields `.rateLimited(retryAfter:)` carrying the parsed `Retry-After` (delta-seconds; HTTP-date → `nil`), which arms that source's own hold. Other non-200 codes stay `.decode` — the client deliberately models no other code. It never touches the usage 429 backoff. ADR-0013, ADR-0119 |
 | **IncidentVisibility** | A pure gate for "which incidents to show" (#279, `TokenPaceKit`): drops closed ones, unrelated ones (no overlap between `components[].name` and `StatusHealth.monitoredComponentNames`), already-green ones, and stale ones. Produces `VisibleIncident` — name, stage (`IncidentStage`), severity (worst-of over **monitored** components only, so color tracks the components), `shortlink`, age, and the `updateIDs` set. ADR-0071 §4, §9 |

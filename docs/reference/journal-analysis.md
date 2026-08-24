@@ -115,9 +115,17 @@ these lines carry two more keys:
 |---|---|---|
 | `v` | Int | the version of the **`status`** line format (**2** is current); absent reads as 1. A counter of its own — unrelated to the `usage` line's `v` above |
 | `t` | ISO-8601 UTC | the moment of the status poll |
-| `provider` | String | which status page this line came from (`claude`). Written on every line since v2 and backfilled onto every archived one, so **never** infer it from absence |
-| `svc[]` | array | the **whole feed** of that page (`n` = component name, `s` = raw status) — six components for Claude, including ones no config monitors |
+| `provider` | String | which status page this line came from (`claude`, `codex`). Written on every line since v2 and backfilled onto every archived one, so **never** infer it from absence — and **always group by it** before counting, since one file now holds several pages' polls |
+| `svc[]` | array | the **whole feed** of that page (`n` = component name, `s` = raw status), including components no config monitors. The feeds differ in size by an order of magnitude — Codex's carries every OpenAI component, not only the Codex ones — so a count over `svc` is a statement about one provider, never a comparison across them |
 | `worst` | String | worst-of over the **monitored** services of *this provider*, or `operational` |
+
+**`codex` lines are also read back by the app**, which nothing else in the journal is: they are the
+fallback source for a Codex component's age when the incident feed cannot supply one
+([ADR-0125](../adr/0125-codex-as-a-status-provider.md)). Two consequences for anyone processing them.
+A rewrite or a filter that drops `status` lines silently removes ages from the popup. And the
+reconstruction reads the newest line's `svc` and walks back while a component's `s` holds — so it
+resolves only to the poll cadence, and a status held across the whole retained record deliberately
+yields **no** age rather than one dated to the oldest line.
 
 **`svc` and `worst` answer different questions, and they disagree on purpose.** `svc` is the page's
 response verbatim; `worst` is the aggregate over what the user was actually watching. So a line can

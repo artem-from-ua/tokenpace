@@ -39,6 +39,8 @@ final class SignalHub: @unchecked Sendable {
         /// The GitHub status loop's scheduler (#454) — its own subscription, so the two status
         /// sources receive sleep/wake independently rather than racing for one continuation.
         case github
+        /// The Codex status loop's scheduler (#503) — its own subscription, for the same reason.
+        case codex
     }
 
     private let lock = NSLock()
@@ -488,6 +490,15 @@ actor StubUsageTransport: UsageTransport {
         case githubDegraded
         case githubOutage
         case githubClaudeDown
+        // Codex provider (#503). The usage side stays calm in all of them so nothing competes with
+        // the subject; `allThreeProviders` is the exception that also moves GitHub, because its
+        // subject *is* the plates side by side.
+        case codexGreen
+        case codexDegraded
+        case codexCLIOutage
+        case codexIncident
+        case codexIncidentsUnavailable
+        case allThreeProviders
         /// A money-credits ("extra usage") frame for the trailing ¤ icon (#144). Each `CreditsFrame`
         /// pins the 7-day window at 100 % (so `anyBaseLimitExhausted` holds and the icon shows) and
         /// carries a `spend` + `extra_usage` block covering one credits state (paced / limit-reached /
@@ -968,8 +979,8 @@ actor StubUsageTransport: UsageTransport {
     private func githubStatusBody() -> Data {
         let git = mode == .githubOutage ? "major_outage" : "operational"
         let api = mode == .githubOutage ? "degraded_performance" : "operational"
-        let actions = (mode == .githubDegraded || mode == .githubClaudeDown)
-            ? "degraded_performance" : "operational"
+        let actions = (mode == .githubDegraded || mode == .githubClaudeDown
+            || mode == .allThreeProviders) ? "degraded_performance" : "operational"
         // Long-settled, well outside `PopupViewController.recoveryWindow`, so a healthy component
         // never renders as "just recovered" in a frame whose subject is something else.
         // Stamped against the **stub's** clock, not the wall clock. Most scenarios freeze time at a
@@ -1017,6 +1028,60 @@ actor StubUsageTransport: UsageTransport {
         let body = """
         {"page":{"name":"GitHub","url":"https://www.githubstatus.com"},\
         "components":[\(components)],"incidents":[\(incidents)],"scheduled_maintenances":[]}
+        """
+        return Data(body.utf8)
+    }
+
+    /// Codex's component feed — `components.json`, which is what the poll actually reads.
+    ///
+    /// The canned list keeps `CLI` at position 29 and includes both `Login` rows, exactly as the live
+    /// page does: those two facts are the reason for the endpoint choice and the `Login` exclusion,
+    /// and a tidied stub would hide both from anyone verifying them.
+    private func codexComponentsBody() -> Data {
+        let cli: String
+        switch mode {
+        case .codexCLIOutage: cli = "major_outage"
+        case .codexIncident, .codexIncidentsUnavailable, .allThreeProviders: cli = "degraded_performance"
+        default: cli = "operational"
+        }
+        let web = (mode == .codexDegraded) ? "degraded_performance" : "operational"
+        // `updated_at` identical on every component, as the live page has it — the very reason the
+        // age comes from elsewhere. A stub that varied it would make a broken implementation pass.
+        let stamp = Self.isoString(now().addingTimeInterval(-46 * 24 * 3600))
+        func entry(_ id: String, _ name: String, _ status: String, _ position: Int) -> String {
+            "{\"id\":\"\(id)\",\"name\":\"\(name)\",\"status\":\"\(status)\","
+                + "\"position\":\(position),\"updated_at\":\"\(stamp)\"}"
+        }
+        let components = [
+            entry("c-responses", "Responses", "operational", 0),
+            entry("c-desktop", "Codex in ChatGPT Desktop", "operational", 2),
+            entry("c-login-a", "Login", "operational", 3),
+            entry("c-sora", "Sora", "operational", 9),
+            entry("c-web", "Codex Web", web, 20),
+            entry("c-vscode", "VS Code extension", "operational", 22),
+            entry("c-api", "Codex API", "operational", 23),
+            entry("c-login-b", "Login", "operational", 27),
+            entry("c-cli", "CLI", cli, 29),
+        ].joined(separator: ",")
+        return Data("{\"page\":{\"name\":\"OpenAI\"},\"components\":[\(components)]}".utf8)
+    }
+
+    /// Codex's incident feed — the proxy shape, not Statuspage's: `published_at`, `to_status`,
+    /// `component_id`, and the `component_impacts[]` the ages come from.
+    private func codexIncidentsBody() -> Data {
+        guard mode == .codexIncident || mode == .allThreeProviders else {
+            return Data("{\"incidents\":[]}".utf8)
+        }
+        let started = Self.isoString(now().addingTimeInterval(-95 * 60))
+        let body = """
+        {"incidents":[{"id":"cx1","name":"Elevated error rates in Codex","status":"investigating",\
+        "published_at":"\(started)",\
+        "affected_components":[{"component_id":"c-cli","status":"degraded_performance",\
+        "current_status":"degraded_performance"}],\
+        "component_impacts":[{"id":"i1","component_id":"c-cli","status":"degraded_performance",\
+        "start_at":"\(started)","end_at":null}],\
+        "updates":[{"id":"cu1","to_status":"investigating","published_at":"\(started)",\
+        "message_string":"We are investigating elevated error rates affecting Codex."}]}]}
         """
         return Data(body.utf8)
     }
@@ -1246,6 +1311,25 @@ actor StubUsageTransport: UsageTransport {
                 url: StatusHealth.githubEndpoint, statusCode: 200, httpVersion: "HTTP/1.1",
                 headerFields: [:])!
             return (githubStatusBody(), response)
+        }
+
+        // Codex's **two** URLs (#503), each its own branch: the components feed and the incident
+        // feed are different endpoints with different bodies, and routing is by exact URL.
+        if request.url == StatusHealth.codexEndpoint {
+            let response = HTTPURLResponse(
+                url: StatusHealth.codexEndpoint, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: [:])!
+            return (codexComponentsBody(), response)
+        }
+        if request.url == StatusHealth.codexIncidentsEndpoint {
+            // The degradation frame answers 500 here while the components request above still
+            // answers 200 — the only way to see a partial failure, where the statuses stand and the
+            // incident rows vanish.
+            let code = mode == .codexIncidentsUnavailable ? 500 : 200
+            let response = HTTPURLResponse(
+                url: StatusHealth.codexIncidentsEndpoint, statusCode: code, httpVersion: "HTTP/1.1",
+                headerFields: [:])!
+            return (codexIncidentsBody(), response)
         }
 
         // Idle frame (#100, ADR-0027): `five_hour` with `resets_at: null` and **no** `session` entry in
@@ -1667,6 +1751,9 @@ actor StubUsageTransport: UsageTransport {
         case let .pacing(frame): frame
         case .calmDegraded:      .calmBoth
         case .allGreen:          .calmBoth
+        // The Codex frames' subject is a plate, so their bars are calm and stay out of the way.
+        case .codexGreen, .codexDegraded, .codexCLIOutage, .codexIncident,
+             .codexIncidentsUnavailable, .allThreeProviders: .calmBoth
         default:                 nil
         }
         if let frame = pacingFrame {

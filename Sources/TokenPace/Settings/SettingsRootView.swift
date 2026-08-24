@@ -94,6 +94,7 @@ struct SettingsRootView: View {
             switch child {
             case .providersClaude:      ProvidersClaudePane(model: model)
             case .providersGitHub:      ProvidersGitHubPane(model: model)
+            case .providersCodex:       ProvidersCodexPane(model: model)
             case .appearanceMenuBar:    MenuBarPane(model: model)
             case .appearanceDropdown:   DropdownPane(model: model)
             case .appearanceLegend:     LegendPane()

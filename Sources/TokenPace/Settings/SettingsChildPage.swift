@@ -18,6 +18,8 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     /// Providers › GitHub — the second provider (#454), watched for service status only. It has no
     /// usage half: GitHub publishes no subscription limit for the bars to draw.
     case providersGitHub = 54
+    /// Providers › Codex — OpenAI's five Codex surfaces, watched for service status (#503).
+    case providersCodex = 55
     /// Appearance › Menu bar — everything that configures the menu-bar widget.
     case appearanceMenuBar = 51
     /// Appearance › Dropdown — everything that configures the popup.
@@ -33,11 +35,28 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
 
     var id: Int { rawValue }
 
+    /// The provider this page configures, or `nil` for a page that configures a surface.
+    var provider: ProviderID? {
+        switch self {
+        case .providersClaude: return .claude
+        case .providersGitHub: return .github
+        case .providersCodex:  return .codex
+        case .appearanceMenuBar, .appearanceDropdown, .appearanceLegend: return nil
+        }
+    }
+
+    /// The child page that configures `provider`. The inverse of ``provider``, so the Providers list
+    /// can be generated from ``ProviderID/displayOrder`` rather than hand-listed beside it — a row
+    /// and its page then cannot fall out of step.
+    static func page(for provider: ProviderID) -> SettingsChildPage {
+        allCases.first { $0.provider == provider }!
+    }
+
     /// The section this page belongs under. Drilling never changes the section, so this is also the
     /// row the sidebar keeps highlighted while the page shows.
     var section: SettingsSection {
         switch self {
-        case .providersClaude, .providersGitHub: return .providers
+        case .providersClaude, .providersGitHub, .providersCodex: return .providers
         case .appearanceMenuBar, .appearanceDropdown, .appearanceLegend: return .appearance
         }
     }
@@ -55,8 +74,10 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     /// shows while the page is open (the same slot a section's own name uses).
     var title: String {
         switch self {
-        case .providersClaude: return "Claude"
-        case .providersGitHub: return "GitHub"
+        // The provider's own name, so the page title and the popup's plate header cannot drift.
+        case .providersClaude: return ProviderID.claude.displayName
+        case .providersGitHub: return ProviderID.github.displayName
+        case .providersCodex:  return ProviderID.codex.displayName
         case .appearanceMenuBar: return "Menu bar"
         case .appearanceDropdown: return "Dropdown"
         case .appearanceLegend: return "Legend"
@@ -72,7 +93,7 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     /// provider row identifies a company and these two identify a surface.
     var symbol: String? {
         switch self {
-        case .providersClaude, .providersGitHub: return nil
+        case .providersClaude, .providersGitHub, .providersCodex: return nil
         case .appearanceMenuBar: return "distribute.vertical"
         case .appearanceDropdown: return "chart.bar.horizontal.page"
         // A map's legend is the direct reading of the page's name, and the page is a key to marks
@@ -107,7 +128,7 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     /// thing they say. The white chip needs a hairline to exist on a light form row.
     var tint: CapsuleTint? {
         switch self {
-        case .providersClaude, .providersGitHub: return nil
+        case .providersClaude, .providersGitHub, .providersCodex: return nil
         case .appearanceMenuBar: return CapsuleTint(flat: 0x000000)
         case .appearanceDropdown: return CapsuleTint(flat: 0xFFFFFF, glyph: .black, needsBorder: true)
         // **About's blue**, the sidebar's reference colour — not a third flat tone.
@@ -160,8 +181,9 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
         case .appearanceLegend:   return 0
         case .appearanceMenuBar:  return 1
         case .appearanceDropdown: return 2
-        case .providersClaude:    return 0
-        case .providersGitHub:    return 1
+        // Every provider row sits in `ProviderID.displayOrder`, the one place that order is decided.
+        case .providersClaude, .providersGitHub, .providersCodex:
+            return provider?.displayIndex ?? 0
         }
     }
 }

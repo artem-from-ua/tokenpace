@@ -37,6 +37,7 @@ enum PersistedConfig {
         /// different provider entirely, so folding it into the Claude blob would hand it Claude's
         /// invalidation as well as Claude's downgrade hazard.
         static let githubMonitoring = "githubMonitoring"
+        static let codexMonitoring = "codexMonitoring"
         /// **Retired.** Held a JSON snapshot of the user's own Appearance setup, so the old "Custom"
         /// radio could return to it after a detour through the presets (#333). The preset rows preview
         /// instead of applying now, so nothing overwrites the stored configuration and there is no
@@ -264,6 +265,23 @@ enum PersistedConfig {
         set {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             defaults.set(data, forKey: Key.githubMonitoring)
+        }
+    }
+
+    /// The Codex provider's config (#503) — five status services plus the quota switch.
+    ///
+    /// Its **own** key, never folded into another provider's blob: an older build rewriting that blob
+    /// knows nothing of this provider and would erase the user's choice.
+    static var codexMonitoring: CodexMonitoring {
+        get {
+            guard let data = defaults.data(forKey: Key.codexMonitoring),
+                  let decoded = try? JSONDecoder().decode(CodexMonitoring.self, from: data)
+            else { return .default }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Key.codexMonitoring)
         }
     }
 

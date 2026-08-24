@@ -195,7 +195,7 @@ public struct StatusSample: Sendable, Equatable, Codable {
     /// Raw components: `[{n: name, s: rawStatus}]`.
     ///
     /// The **whole feed** of ``provider``'s status page, not the subset the user was monitoring
-    /// (ADR-0119). Six components for Claude today. Recording the page verbatim keeps the line
+    /// (ADR-0119). Recording the page verbatim keeps the line
     /// self-describing: which services were monitored is a *setting*, it is not in the line, and it
     /// changes under the user's hand — so a narrowed `svc` would silently change meaning between two
     /// lines that look alike. `worst`, by contrast, **is** the monitored-set answer, so the pair

@@ -22,6 +22,7 @@ final class SettingsModel {
     var onProviderMonitoringChange: ((ProviderMonitoring) -> Void)?
     /// Separate from `onProviderMonitoringChange`, which carries Claude's config only (#454).
     var onGitHubMonitoringChange: ((GitHubMonitoring) -> Void)?
+    var onCodexMonitoringChange: ((CodexMonitoring) -> Void)?
     var onCheckForUpdatesNow: (() -> Void)?
     var onInstallUpdateNow: (() -> Void)?
     var onColorAdviceChange: ((ColorAdvice) -> Void)?
@@ -247,6 +248,30 @@ final class SettingsModel {
         githubDevelopmentServicesEnabled ? "Development services" : "Off"
     }
 
+    // MARK: Codex provider (#503)
+
+    /// Codex's status config. Placeholder until `resync()` reads the stored value.
+    var codexMonitoring: CodexMonitoring = .default
+
+    /// The state line under the `Codex` row. Counts services, like Claude's, because Codex's five
+    /// **are** five switches — a group name would promise a granularity that is the opposite of what
+    /// the page offers.
+    var codexProviderSummary: String {
+        let count = StatusHealth.monitoredCodexComponentNames(for: codexMonitoring).count
+        guard count > 0 else { return "Off" }
+        return "\(count) service\(count == 1 ? "" : "s") monitored"
+    }
+
+    /// The state line under one provider's row — the accessor the generated Providers list reads, so
+    /// a provider added to `ProviderID` gets a row without an edit here.
+    func providerSummary(_ provider: ProviderID) -> String {
+        switch provider {
+        case .claude: return claudeProviderSummary
+        case .github: return githubProviderSummary
+        case .codex:  return codexProviderSummary
+        }
+    }
+
     /// The state line under a surface's navigator row on the Appearance page — labelled
     /// `Style: Balance` using the child page's own control label, from the same
     /// `AppearanceBarStyle.segments` table the picker reads.
@@ -255,8 +280,8 @@ final class SettingsModel {
         switch page {
         case .appearanceMenuBar: style = menuBarStyle
         case .appearanceDropdown: style = dropdownStyle
-        // These report their own state via `claudeProviderSummary` / `githubProviderSummary`.
-        case .providersClaude, .providersGitHub: return nil
+        // Provider pages report their own state via `providerSummary(_:)`.
+        case .providersClaude, .providersGitHub, .providersCodex: return nil
         // Legend configures nothing; its row carries a fixed subtitle instead.
         case .appearanceLegend: return nil
         }
@@ -541,13 +566,15 @@ final class SettingsModel {
         dropdownStyle = PersistedConfig.dropdownStyle
 
         // Straight assignments, not `set…` methods: a re-sync must not re-fire
-        // `onProviderMonitoringChange`/`onGitHubMonitoringChange`, or opening Settings would kick a poll.
+        // `onProviderMonitoringChange`/`onGitHubMonitoringChange`/`onCodexMonitoringChange`, or
+        // opening Settings would kick a poll.
         let pm = PersistedConfig.providerMonitoring
         usageApiEnabled = pm.usageApiEnabled
         claudeCodeEnabled = pm.services.claudeCodeEnabled
         webDesktopEnabled = pm.services.webDesktopEnabled
         webDesktopMode = pm.services.webDesktopMode
         githubDevelopmentServicesEnabled = PersistedConfig.githubMonitoring.developmentServicesEnabled
+        codexMonitoring = PersistedConfig.codexMonitoring
 
         backToWorkEnabled = PersistedConfig.backToWorkEnabled
         extraUsageNotifyEnabled = PersistedConfig.extraUsageNotifyEnabled
@@ -763,6 +790,18 @@ final class SettingsModel {
         PersistedConfig.githubMonitoring = config
         AppLogger.lifecycle.notice("github: development services set \(on, privacy: .public)")
         onGitHubMonitoringChange?(config)
+    }
+
+    /// Turn one Codex service on or off. Takes the ``ServiceID`` rather than a per-flag setter, so
+    /// the page can generate a row per service from `StatusHealth.codexServices` — five hand-written
+    /// setters would be five chances for a switch and its flag to disagree.
+    func setCodexService(_ id: ServiceID, _ on: Bool) {
+        codexMonitoring.setEnabled(id, on)
+        let config = codexMonitoring
+        PersistedConfig.codexMonitoring = config
+        AppLogger.lifecycle.notice(
+            "codex: service \(String(describing: id), privacy: .public) set \(on, privacy: .public)")
+        onCodexMonitoringChange?(config)
     }
 
     func setBackToWork(_ on: Bool) {

@@ -144,6 +144,10 @@ final class SettingsWindowController: NSWindowController {
 
     /// The GitHub provider's switch changed (#454) — its own forwarder, so flipping it kicks that
     /// provider's poll without re-resolving Claude's status.
+    var onCodexMonitoringChange: ((CodexMonitoring) -> Void)? {
+        get { model.onCodexMonitoringChange } set { model.onCodexMonitoringChange = newValue }
+    }
+
     var onGitHubMonitoringChange: ((GitHubMonitoring) -> Void)? {
         get { model.onGitHubMonitoringChange } set { model.onGitHubMonitoringChange = newValue }
     }

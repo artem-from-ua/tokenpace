@@ -517,13 +517,18 @@ separate level of hierarchy, which this row does not have.
 The split runs along **lines**, not along a "name ↔ value" axis: the verdict stands in full ink together
 with the name, and that is deliberate — it is the most actionable element of the row.
 
-## Provider plates and the header dot (#454, ADR-0121)
+## Provider plates and the header dot (#454, ADR-0121; #503, ADR-0125)
 
-The popup can hold **two plates**, one per provider: Claude's `CardBackdropView` and, below it,
-GitHub's own — separate glass, separate stack, separate rows. Two providers on one plate read as one
-subject with a subheading, and the component names cannot correct that (`Actions` and `Issues` never
-say whose they are). When GitHub is off, its plate collapses to zero height and the popup ends at
-Claude's card exactly as it did before the provider existed.
+The popup holds **one plate per provider** — separate glass, separate stack, separate rows. Several
+providers on one plate read as one subject with subheadings, and the component names cannot correct
+that (`Actions`, `Issues`, `CLI` and `API` never say whose they are). A provider that is off
+collapses its plate to zero height, so the popup ends at the last enabled one.
+
+**The order is `ProviderID.displayOrder`: Claude, Codex, GitHub.** Claude is pinned first because it
+owns the usage bars — its plate is the main stack, and every other provider is a satellite card below
+it. The rest is alphabetical by `displayName`. This is deliberately **not** the enum's case order
+(`claude, github, codex`), which is archive identity: the raw values are journal-stable, so a case
+appended later must not reorder the screen. A popup reading Claude → GitHub → Codex is a bug.
 
 **A section header's dot is drawn only while that provider is `operational`.** This is the one dot in
 the app that appears on a calm state — and, symmetrically, the one that *disappears* when something is
@@ -546,8 +551,9 @@ dot is doing), but a header is not one of a set; it is the thing the set hangs f
 present it uses the rows' own gap and nudge, so every dot in the popup lands on one vertical line.
 
 **Under ⌥** each plate switches to **its own** incidents ([ADR-0071](../adr/0071-incident-subscriptions.md)
-§2 — the dimension, not the level of detail), and the GitHub header grows the same `· updated …` tail
-Claude's carries, reading **GitHub's own** poll age. The subscribe control sits on whichever plate has
+§2 — the dimension, not the level of detail), and every satellite header grows the same `· updated …`
+tail Claude's carries, reading **that provider's own** poll age — they poll on independent cadences,
+so one age standing for all of them would be a quiet lie. The subscribe control sits on whichever plate has
 an incident — both when both do — and either one toggles the same app-wide subscription.
 
 ### Impossible combinations these introduce
@@ -558,14 +564,18 @@ an incident — both when both do — and either one toggles the same app-wide s
 | A **yellow, orange, red, blue or grey header dot** | Same gate: every non-`operational` aggregate yields `nil`. Those five tones belong to the *rows*, and to the menu-bar dot — never to a provider header |
 | A **grey header dot before the first poll** | A `nil` aggregate yields no dot at all. Grey would claim we looked and could not tell, which is a different statement from "we have not looked" — the same honesty `ServiceStatus.unknown` exists to protect |
 | A **green dot in the menu bar** | Unchanged by #454: silence there is still a complete answer to "can I work" ([ADR-0013](../adr/0013-claude-status-line.md) §8). Green enters the vocabulary in **one** position only — a popup provider header on a calm provider |
-| A **GitHub incident row under the `Claude` header** (or the reverse) | Each plate renders only its own list. An incident row deliberately does not name the services it affects ([ADR-0071](../adr/0071-incident-subscriptions.md) §3), so the header above it is the only attribution there is — which is the whole reason there are two plates |
-| **`No ongoing incidents` on a calm GitHub plate under ⌥** | Claude's plate says that because its section is on screen *because* something is wrong, so a blank dimension there would read as a glitch. GitHub's plate is on screen whenever the provider is monitored, so a calm provider under ⌥ shows **nothing** — the header's green dot has already answered it |
+| **One provider's incident row under another's header** | Each plate renders only its own list. An incident row deliberately does not name the services it affects ([ADR-0071](../adr/0071-incident-subscriptions.md) §3), so the header above it is the only attribution there is — which is the whole reason the plates are separate |
+| **`No ongoing incidents` on a calm satellite plate under ⌥** | Claude's plate says that because its section is on screen *because* something is wrong, so a blank dimension there would read as a glitch. A satellite plate is on screen whenever its provider is monitored, so a calm one under ⌥ shows **nothing** — the header's green dot has already answered it |
 | A **subscribe row on a plate with no incident of its own** | The control sits beside its cause. On a healthy provider's plate it would read as an offer to follow that provider's silence |
 | A **GitHub plate carrying bars, a percentage, or a `Token limits usage` section** | GitHub is status-only and publishes no subscription limit the bars model. There is no usage half in the app, in the config, or on the Settings page |
+| A **Codex plate carrying bars or a percentage** | Codex has a quota, but nothing collects it yet: `CodexMonitoring.usageEnabled` is declared and unread. Until a collector exists, a Codex bar draws a number the app does not have |
+| A **`Login` row on the Codex plate**, in any state | The feed lists `Login` **twice**, under two different ids, so an exact-name match resolves arbitrarily. TokenPace watches neither copy, so no configuration produces this row ([ADR-0125](../adr/0125-codex-as-a-status-provider.md) §D4) |
+| A **linked stage word on a Codex incident row** | The proxy incident feed carries no `shortlink`. Claude's and GitHub's stage words are links; Codex's is plain text, because a link there would be an invented URL |
+| A **Codex plate with incident rows but no service rows, under ⌥, while everything is `operational`** | Same rule as every plate: a calm provider under ⌥ shows nothing. And in the reverse case — the incident endpoint being unavailable — the rows stay and the incidents are the half that vanishes, never the other way round |
+| A **Codex wordmark that differs between light and dark** | Unlike GitHub, Codex has **one** brand role: `ColorRole.codexBrand` (`#5871C0`) is mid-luminance and reads on both materials, so no per-appearance ink companion exists |
 | A **GitHub row badge with a branch, an Octocat, or any glyph other than `cloud.fill`** | Every provider badge wears the same glyph: shape is the category, colour is the identity ([ADR-0094](../adr/0094-provider-row-brand-badge.md) §4, [ADR-0121](../adr/0121-github-as-a-status-only-provider.md) §D6) |
 | **Pure black GitHub ink in the popup** | The badge is `ColorRole.githubBrand` (`#000000`); the popup header is `ColorRole.githubBrandInk`, which resolves per appearance (`#1F2328` / `#E6EDF3`) because black on the dropdown's dark material is unreadable |
-| A **GitHub plate on a default install** | The provider is **off by default** — the one opt-in monitoring flag in the app. Drawing it means drawing a configuration the user chose |
-| A **`Monitoring is off` dead end over a live GitHub plate** | `isMonitoringAnything` spans providers since #454; a GitHub-only configuration is a fully monitored state |
+| A **`Monitoring is off` dead end over any live provider plate** | `isMonitoringAnything` spans every provider; a configuration with only GitHub or only Codex enabled is a fully monitored state |
 
 ## Impossible combinations
 

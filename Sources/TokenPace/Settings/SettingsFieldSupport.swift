@@ -292,6 +292,23 @@ struct SettingsRowBadge: Equatable {
     static var github: SettingsRowBadge {
         brand(ColorRole.githubBrand.defaultColor, symbol: "cloud.fill")
     }
+
+    /// Codex's row (#503) — `#5871C0` under the same shared glyph.
+    @MainActor
+    static var codex: SettingsRowBadge {
+        brand(ColorRole.codexBrand.defaultColor, symbol: "cloud.fill")
+    }
+
+    /// The badge for one provider — what lets the Providers list be generated from
+    /// ``ProviderID/displayOrder`` instead of hand-listing a row per provider beside it.
+    @MainActor
+    static func provider(_ provider: ProviderID) -> SettingsRowBadge {
+        switch provider {
+        case .claude: return .claude
+        case .github: return .github
+        case .codex:  return .codex
+        }
+    }
 }
 
 private extension NSColor {
