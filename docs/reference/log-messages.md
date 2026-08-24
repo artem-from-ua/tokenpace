@@ -207,7 +207,7 @@ and the enable/disable line from `DevToolsWindowController.swift`.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| — | `journal` | `.error` | `status-payload-log: write failed <error>` | `writeLine` — the line could not be serialised or the directory could not be prepared; the sample is dropped, the poll continues |
+| — | `journal` | `.error` | `status-payload-log: write failed <error>` | `writeObject` — the line could not be serialised or the directory could not be prepared; the sample is dropped, the poll continues. Shared by the status payload log and the dev Codex quota log |
 | — | `journal` | `.error` | `status-payload-log: open failed errno=<errno>` | `appendLocked` — `open()` on the payload file failed |
 | — | `journal` | `.error` | `status-payload-log: lock failed errno=<errno>` | `appendLocked` — `flock(LOCK_EX)` failed; the line is dropped rather than risk an interleaved write |
 | — | `journal` | `.error` | `status-payload-log: write() failed errno=<errno>` | `appendLocked` — a `write()` returned ≤ 0 mid-line |

@@ -616,5 +616,45 @@ struct CodexQuotaTests {
             .hasNotStarted(now: Self.now))
     }
 
+    // MARK: - The two account-level flags (#520)
+
+    /// `rateLimitReachedType` arrives `null` on the live account, and the dev quota log records what
+    /// the server said rather than a default — so an absent flag and a `false` one stay
+    /// distinguishable.
+    @Test("the live shape's flags decode to what the server sent")
+    func liveShapeFlagsDecode() throws {
+        let limits = try #require(decode(Self.liveShape).rateLimits)
+        #expect(limits.spendControlReached == false)
+        #expect(limits.rateLimitReachedType == nil)
+    }
+
+    /// A word we have not seen is a word we have not seen — the vocabulary is the server's, so the
+    /// field is an opaque string and an unfamiliar one must reach the log intact.
+    @Test("an unfamiliar rateLimitReachedType survives to the snapshot")
+    func unfamiliarReachedTypeSurvives() throws {
+        let json = """
+        {"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1787500000},
+        "secondary":null,"planType":"plus","spendControlReached":true,
+        "rateLimitReachedType":"something_new"}}
+        """
+        let snapshot = try CodexQuotaNormalizer.snapshot(from: decode(json))
+        #expect(snapshot.spendControlReached == true)
+        #expect(snapshot.rateLimitReachedType == "something_new")
+    }
+
+    /// The flags are diagnostic-only, and the bars decode from the same payload: a type we did not
+    /// expect must cost the flag and not the windows.
+    @Test("a wrongly-typed flag drops the flag, not the windows")
+    func wronglyTypedFlagDoesNotFailTheRead() throws {
+        let json = """
+        {"rateLimits":{"primary":{"usedPercent":3,"windowDurationMins":10080,"resetsAt":1787500000},
+        "secondary":null,"planType":"plus","spendControlReached":"yes","rateLimitReachedType":7}}
+        """
+        let snapshot = try CodexQuotaNormalizer.snapshot(from: decode(json))
+        #expect(snapshot.windows.count == 1)
+        #expect(snapshot.spendControlReached == nil)
+        #expect(snapshot.rateLimitReachedType == nil)
+    }
+
     private static let candidates = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
 }

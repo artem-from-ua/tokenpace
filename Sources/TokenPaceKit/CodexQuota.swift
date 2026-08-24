@@ -102,21 +102,38 @@ public struct CodexRateLimits: Sendable, Equatable, Decodable {
     /// `"plus"`, `"pro"`, … — the raw plan word, title-cased for the plate header by
     /// ``codexPlanLabel(planType:)``.
     public let planType: String?
+    /// Whether a spend control stopped the account. `null` on the live Plus account probed;
+    /// nothing renders it, and the dev quota log records it because a window reading zero against a
+    /// rolling horizon may be a spend stop rather than an unstarted window.
+    public let spendControlReached: Bool?
+    /// Which limit the account is currently up against, in the server's own words. `null` on the
+    /// live Plus account probed. Decoded as an opaque string — the vocabulary is the server's, and
+    /// an unrecognised word is one we have not seen rather than a decode failure.
+    public let rateLimitReachedType: String?
 
     public init(primary: CodexRateLimitWindow?, secondary: CodexRateLimitWindow?,
-                planType: String?) {
+                planType: String?, spendControlReached: Bool? = nil,
+                rateLimitReachedType: String? = nil) {
         self.primary = primary
         self.secondary = secondary
         self.planType = planType
+        self.spendControlReached = spendControlReached
+        self.rateLimitReachedType = rateLimitReachedType
     }
 
-    private enum CodingKeys: String, CodingKey { case primary, secondary, planType }
+    private enum CodingKeys: String, CodingKey {
+        case primary, secondary, planType, spendControlReached, rateLimitReachedType
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.primary = try c.decodeIfPresent(CodexRateLimitWindow.self, forKey: .primary)
         self.secondary = try c.decodeIfPresent(CodexRateLimitWindow.self, forKey: .secondary)
         self.planType = try c.decodeIfPresent(String.self, forKey: .planType)
+        // `try?` on these two: they are diagnostic-only, so a type we did not expect must cost the
+        // field and not the whole read — the bars depend on the same decode.
+        self.spendControlReached = try? c.decodeIfPresent(Bool.self, forKey: .spendControlReached)
+        self.rateLimitReachedType = try? c.decodeIfPresent(String.self, forKey: .rateLimitReachedType)
     }
 }
 
@@ -168,10 +185,17 @@ public struct CodexQuotaSnapshot: Sendable, Equatable {
     public let windows: [CodexQuotaWindow]
     /// `"Plus"`, or `nil` when the server named no plan (the header then reads a bare "Codex").
     public let planLabel: String?
+    /// The two account-level flags, carried verbatim for the dev quota log. Nothing on screen reads
+    /// them: they exist so a recorded observation says whether a zero came with a spend stop.
+    public let spendControlReached: Bool?
+    public let rateLimitReachedType: String?
 
-    public init(windows: [CodexQuotaWindow], planLabel: String?) {
+    public init(windows: [CodexQuotaWindow], planLabel: String?,
+                spendControlReached: Bool? = nil, rateLimitReachedType: String? = nil) {
         self.windows = windows
         self.planLabel = planLabel
+        self.spendControlReached = spendControlReached
+        self.rateLimitReachedType = rateLimitReachedType
     }
 }
 
@@ -266,7 +290,9 @@ public enum CodexQuotaNormalizer {
             }
         guard !windows.isEmpty else { throw CodexQuotaError.notSignedIn }
         return CodexQuotaSnapshot(
-            windows: windows, planLabel: codexPlanLabel(planType: limits.planType))
+            windows: windows, planLabel: codexPlanLabel(planType: limits.planType),
+            spendControlReached: limits.spendControlReached,
+            rateLimitReachedType: limits.rateLimitReachedType)
     }
 
     /// The popup rows for one snapshot, one per reported window.

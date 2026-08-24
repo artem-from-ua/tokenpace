@@ -1990,6 +1990,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // body, and no email is in reach because `account/read` is not called.
                     AppLogger.network.notice(
                         "codex quota: \(snapshot.windows.count, privacy: .public) window(s)")
+                    // Dev quota log: every successful poll, including the readings the rows drop as
+                    // not-started — those are the samples a window anomaly has to be reconstructed
+                    // from. Same two gates as the status payload log; the record itself refuses to
+                    // write from a release build.
+                    if PersistedConfig.statusPayloadLogEnabled, self.currentScenario == .realNetwork {
+                        let at = self.currentDate()
+                        Task { [log = self.statusPayloadLog] in
+                            await log.recordCodexQuota(snapshot, at: at)
+                        }
+                    }
                 case .failure:
                     // The bars are dropped rather than frozen: a stale percentage under a
                     // live-looking bar is worse than no bar, and Troubleshoot carries the reason.

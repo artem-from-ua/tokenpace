@@ -15,6 +15,9 @@ import TokenPaceKit
 /// Three gates, all must pass: the dev-tools checkbox (`PersistedConfig.statusPayloadLogEnabled`,
 /// default off), the live-network scenario, and a changed ``StatusPayloadFingerprint``.
 ///
+/// It also writes a second, dev-only family — one line per Codex quota poll, in
+/// ``recordCodexQuota(_:at:)``, whose gates are the same two minus the fingerprint.
+///
 /// An `actor` for the same reason as ``UsageJournal``: it owns mutable state and does file I/O, and
 /// must never block a poll. Every failure is logged and swallowed.
 actor StatusPayloadLog {
@@ -51,13 +54,61 @@ actor StatusPayloadLog {
         return true
     }
 
+    /// Record one Codex quota read — **every poll, unchanged or not**. Returns whether a line was
+    /// written, which is `false` only for a release build.
+    ///
+    /// No fingerprint gate, unlike ``recordIfChanged(body:summary:at:)``, and that is the point of
+    /// the record. A Codex window that has not started reports a `resetsAt` recomputed as `now` plus
+    /// the window length on every request, so it differs in every response while meaning "nothing is
+    /// happening" — a change gate would write each of those and nothing else. The cadence is itself
+    /// the evidence: a gap between two lines says the app stopped observing, and an unbroken run of
+    /// identical readings says the state held.
+    ///
+    /// Windows carry only the four numbers the server sent plus our not-started verdict. No plan, no
+    /// account identifier, no response body: `account/read` is not called, so nothing here is in
+    /// reach of an email.
+    @discardableResult
+    func recordCodexQuota(_ snapshot: CodexQuotaSnapshot, at instant: Date) -> Bool {
+        // A release build writes nothing at all. The file name would already keep it out of the
+        // release journal, and refusing the write is what makes that independent of the name.
+        guard !isRelease else { return false }
+        let windows = snapshot.windows.map { window -> [String: Any] in
+            var w: [String: Any] = [
+                "usedPercent": window.utilization,
+                "windowDurationMins": window.durationSeconds / 60,
+                "notStarted": window.hasNotStarted(now: instant),
+            ]
+            // Omitted rather than null when the server sent no reset, so a reader never has to tell
+            // "absent" from "the epoch".
+            if let resetsAt = window.resetsAt { w["resetsAt"] = resetsAt.timeIntervalSince1970 }
+            return w
+        }
+        var line: [String: Any] = ["v": 1, "observedAt": Self.timestamp(instant), "windows": windows]
+        if let flag = snapshot.spendControlReached { line["spendControlReached"] = flag }
+        if let kind = snapshot.rateLimitReachedType { line["rateLimitReachedType"] = kind }
+        writeObject(line, to: codexQuotaFileURL(for: instant))
+        return true
+    }
+
     func fileURL(for instant: Date) -> URL {
+        let suffix = isRelease ? "" : "-dev"
+        return directory.appendingPathComponent(
+            "status-payloads\(suffix)-\(Self.monthComponent(instant)).jsonl")
+    }
+
+    /// A family of its own, named so that `JournalMigration.belongsToBuild` cannot match it: that
+    /// predicate keys on the `usage-journal-` prefix, so a release build's migration never opens
+    /// this file whatever its suffix says.
+    func codexQuotaFileURL(for instant: Date) -> URL {
+        directory.appendingPathComponent("codex-quota-dev-\(Self.monthComponent(instant)).jsonl")
+    }
+
+    private static func monthComponent(_ instant: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM"
-        let suffix = isRelease ? "" : "-dev"
-        return directory.appendingPathComponent("status-payloads\(suffix)-\(formatter.string(from: instant)).jsonl")
+        return formatter.string(from: instant)
     }
 
     /// A fresh formatter per call: `ISO8601DateFormatter` is not `Sendable`, and writes happen at
@@ -72,18 +123,18 @@ actor StatusPayloadLog {
     // MARK: - Write
 
     private func writeLine(body: Data, fingerprint: String, at instant: Date) {
-        let url = fileURL(for: instant)
+        // Re-parse so it nests as a real JSON value; fall back to raw text rather than dropping
+        // the sample if it somehow won't parse.
+        let payload = (try? JSONSerialization.jsonObject(with: body))
+            ?? String(data: body, encoding: .utf8) as Any
+        writeObject(
+            ["t": Self.timestamp(instant), "fp": fingerprint, "payload": payload],
+            to: fileURL(for: instant))
+    }
+
+    private func writeObject(_ object: [String: Any], to url: URL) {
         do {
-            // Re-parse so it nests as a real JSON value; fall back to raw text rather than dropping
-            // the sample if it somehow won't parse.
-            let payload = (try? JSONSerialization.jsonObject(with: body))
-                ?? String(data: body, encoding: .utf8) as Any
-            let line: [String: Any] = [
-                "t": Self.timestamp(instant),
-                "fp": fingerprint,
-                "payload": payload,
-            ]
-            var data = try JSONSerialization.data(withJSONObject: line, options: [.withoutEscapingSlashes])
+            var data = try JSONSerialization.data(withJSONObject: object, options: [.withoutEscapingSlashes])
             data.append(0x0A)  // '\n'
 
             try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

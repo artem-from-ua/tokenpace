@@ -1637,6 +1637,11 @@ is read on every poll, so it takes effect immediately, with no restart. The butt
 "no file" right after you enable it is a normal state. The full format description is in
 [incident-subscriptions.md](../design/incident-subscriptions.md) §11.
 
+The same checkbox also drives the **dev Codex quota log** (#520): one line per successful Codex quota
+poll — every poll, not only changed ones — in `codex-quota-dev-YYYY-MM.jsonl` beside it. Dev builds
+only, and the `Reveal in Finder` button does not open it. Its format is in
+[journal-analysis.md](../reference/journal-analysis.md#the-codex-quota-log--a-separate-file-dev-only).
+
 The gate is the **`defaults` key `devToolsEnabled`** (`defaults write com.artem-n.tokenpace devToolsEnabled
 -bool true`, [ADR-0053](../adr/0053-devtools-flag-via-defaults.md)) **plus** a held ⌥ Option on the
 "Development tools…" menu item. It does not depend on the build type: the gate is a `UserDefaults` key, not
