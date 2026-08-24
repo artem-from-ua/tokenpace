@@ -380,18 +380,35 @@ struct DropdownPane: View {
                 }
             }
 
-            // The ⌥ caption (#475), in its own unnamed section at the foot of the page.
+            // The two ⌥ switches (#475, #521), in their own unnamed section at the foot of the page.
             //
-            // **The one control on this pane that is not a preset value.** Everything above is an
+            // **The two controls on this pane that are not preset values.** Everything above is an
             // `AppearancePresetValues` member: picking a preset rewrites it, and Copy config carries it
-            // to another Mac. This switch does neither, on purpose — it records that its owner already
-            // knows the shortcut, a fact about a person rather than about how the dropdown should look.
+            // to another Mac. These do neither, on purpose — they record what their owner already knows
+            // and wants within reach, facts about a person rather than about how the dropdown looks.
             //
-            // No `SettingsHint`: the label names the caption verbatim and the caption says what it does.
+            // **They are independent, and deliberately so.** The caption is about what ⌥ expands on the
+            // widgets — data ages, the detail rows' wording, the ruler's ticks, incidents — so it stays
+            // true and worth drawing with `Settings…` and `Quit` permanently on screen. Neither row
+            // disables the other; all four combinations are states someone may want.
             Section {
+                // No `SettingsHint`: the label names the caption verbatim and the caption says what it
+                // does.
                 Toggle("Show «hold ⌥ Option» hint", isOn: Binding(
                     get: { model.showOptionHint },
                     set: { model.setShowOptionHint($0) }))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    // The label does not name the items and the hint does: which items the column holds
+                    // varies with the build and the state (`Troubleshoot…` and `Development tools…` are
+                    // themselves conditional), so a label listing them goes stale — the same reason
+                    // `optionHintText` keeps to the word "more".
+                    Toggle("Always show action items", isOn: Binding(
+                        get: { model.alwaysShowActionItems },
+                        set: { model.setAlwaysShowActionItems($0) }))
+                    SettingsHint(text: "Keeps *Settings…* and *Quit TokenPace* in the dropdown "
+                                 + "without holding ⌥ Option.")
+                }
             }
         }
         .formStyle(.grouped)

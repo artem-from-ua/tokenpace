@@ -78,6 +78,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The last ⌥ state pushed to the menu, so the poll only re-toggles the item on a real change.
     private var lastOptionHeld = false
 
+    /// Whether `Settings…` and `Quit` stay on screen with ⌥ up (#521), cached from
+    /// `PersistedConfig.alwaysShowActionItems`.
+    ///
+    /// Cached rather than read where it is used: the ⌥ poll runs 20 times a second, and a `UserDefaults`
+    /// lookup has no business in that path. Written at menu-build time and again in `menuWillOpen` —
+    /// the menu is built once at launch and never rebuilt, so the re-read on open is what lets a
+    /// Settings change land without a restart, exactly as `optionHintEnabled` does.
+    private var alwaysShowActions = true
+
+    /// Whether the dropdown's action column is on screen right now — ⌥ held, or pinned by #521.
+    ///
+    /// One definition for the two places that answer it: the ⌥ swap, and `refreshUpdateMenuItem`, which
+    /// decides the update line's separator while the menu is **closed**. They used to agree because
+    /// both read ⌥ alone; with a switch in the mix they would drift the moment one was edited.
+    private var actionItemsVisible: Bool { lastOptionHeld || alwaysShowActions }
+
     // MARK: live polling
 
     /// Fan-in of sleep/wake (`NSWorkspace`) and network (`NWPathMonitor`) signals into the loop.
@@ -507,18 +523,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Action items at the bottom of the same menu. `keyEquivalent: ""` keeps a shortcut glyph off
         // the right edge — none is wanted, and there is no main menu to host a default ⌘Q.
         //
-        // **Every item below is ⌥-gated.** With ⌥ up the menu is the widget and nothing else; the
-        // popup draws a dim "hold ⌥ Option for more" caption where this column would be. The native
-        // `isAlternate` mechanism does NOT work in a status-item menu, so the reveal is driven by a
-        // modifier-polling timer set in `menuWillOpen` — see `updateTroubleshootVisibility(_:)`.
+        // **The column splits in two** (#521). `Settings…`, `Quit` and Quit's separator follow the
+        // "Always show action items" switch, default-on: they are the way in and the way out, and a
+        // status-item menu that offers neither without a modifier departs from the platform.
+        // `Troubleshoot…` and `Development tools…` stay ⌥-only whatever the switch says — specialist
+        // entrances, reached when something is already wrong. The native `isAlternate` mechanism does
+        // NOT work in a status-item menu, so the ⌥ reveal is driven by a modifier-polling timer set in
+        // `menuWillOpen` — see `updateTroubleshootVisibility(_:)`.
         //
-        // They are built **hidden**, matching the ⌥-up state the menu opens into. `menuWillOpen` seeds
-        // the real state before the menu is drawn, so a user opening with ⌥ already down still gets the
-        // full column — but the built-in state has to be the common one, or the first frame flickers.
+        // The built-in state has to be the one the menu usually opens into, or the first frame
+        // flickers: the ⌥-only pair start hidden, the switched three follow the setting read just
+        // above. `menuWillOpen` seeds the real state before the menu is drawn either way, so opening
+        // with ⌥ already down still gets the full column.
+        alwaysShowActions = PersistedConfig.alwaysShowActionItems
+        popupVC.alwaysShowActionItems = alwaysShowActions
         let settingsItem = NSMenuItem(title: "", action: #selector(openSettings as () -> Void), keyEquivalent: "")
         settingsItem.attributedTitle = Self.dropdownMenuItemText("Settings…")
         settingsItem.target = self
-        settingsItem.isHidden = true
+        settingsItem.isHidden = !alwaysShowActions
         menu.addItem(settingsItem)
         self.settingsItem = settingsItem
 
@@ -565,14 +587,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // real network shows no tag. The tag is revealed only while ⌥ Option is held (swapped in
         // `updateTroubleshootVisibility`).
         let quitSeparator = NSMenuItem.separator()
-        quitSeparator.isHidden = true
+        quitSeparator.isHidden = !alwaysShowActions
         menu.addItem(quitSeparator)
         self.quitSeparatorItem = quitSeparator
         updateQuitDevTitle()
         let quitItem = NSMenuItem(title: "", action: #selector(quit), keyEquivalent: "")
         quitItem.attributedTitle = Self.dropdownMenuItemText("Quit TokenPace")
         quitItem.target = self
-        quitItem.isHidden = true
+        quitItem.isHidden = !alwaysShowActions
         menu.addItem(quitItem)
         self.quitItem = quitItem
 
@@ -883,10 +905,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reRenderForCurrentTime()           // clear the stale rows/dot right away
     }
 
-    /// Show or hide **every action item** — and flip the popup's ⌥-driven content — for the current
+    /// Show or hide the ⌥-driven action items — and flip the popup's ⌥-driven content — for the current
     /// ⌥ Option state (ADR-0020). Called on menu open and by `optionPollTimer` while it is open — the
     /// status-item-menu replacement for the inert native `isAlternate` swap. Skips the work when the
     /// state is unchanged, so the poll is cheap.
+    ///
+    /// Not every item answers to ⌥ alone any more (#521): `Settings…`, `Quit` and Quit's separator also
+    /// answer to `alwaysShowActions`, which is why the visibility below goes through `actionsVisible`
+    /// rather than the parameter. That flag only ever changes in `menuWillOpen`, before the forced
+    /// desync, so the early return above still holds inside a tracking session — nothing but ⌥ moves
+    /// while the timer runs.
     ///
     /// The name is historical: it gated only "Troubleshoot…" originally. Renaming it would touch every
     /// call site for no behavioural gain.
@@ -896,17 +924,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The guard above is not scoped to `troubleshootItem`: the popup's caption must follow ⌥ even
         // in the moments that optional is nil, and every item below is optional-chained anyway.
         troubleshootItem?.isHidden = !optionHeld
-        // ⌥-gated — see the menu-build comment. The separator goes with them: a divider above a
-        // hidden Quit would be a line under nothing.
-        settingsItem?.isHidden = !optionHeld
-        quitSeparatorItem?.isHidden = !optionHeld
-        quitItem?.isHidden = !optionHeld
+        // The three the switch can pin — see the menu-build comment. The separator goes with them: a
+        // divider above a hidden Quit would be a line under nothing.
+        let actionsVisible = actionItemsVisible
+        settingsItem?.isHidden = !actionsVisible
+        quitSeparatorItem?.isHidden = !actionsVisible
+        quitItem?.isHidden = !actionsVisible
         // The update line itself stays visible in both states — it is a notice, not an action. Its
-        // separator does not: it divides that line from the items above, and with ⌥ up there is nothing
-        // above it to divide from. Guarded on the item's own visibility so a hidden update line does not
-        // grow a separator under ⌥.
+        // separator does not: it divides that line from the items above, so it belongs on screen only
+        // while there are items above to divide from. Guarded on the item's own visibility so a hidden
+        // update line does not grow a separator.
         if let updateAvailableItem, !updateAvailableItem.isHidden {
-            updateSeparatorItem?.isHidden = !optionHeld
+            updateSeparatorItem?.isHidden = !actionsVisible
         }
         // "Development tools…" needs both gates: ⌥ Option AND the `devToolsEnabled` defaults key. The
         // item always exists now, so the flag gate is applied here (re-checked each open, so toggling
@@ -2361,9 +2390,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         // The separator divides the update line from the action items **above** it — so it belongs on
-        // screen only while those items are there. With ⌥ up they are hidden, and a divider between
-        // the card and the update line is a rule under nothing.
-        updateSeparatorItem?.isHidden = !lastOptionHeld
+        // screen only while those items are there, and a divider between the card and the update line
+        // is a rule under nothing. Same condition as the ⌥ swap uses (#521): this runs while the menu
+        // is **closed** — after an update check, an install verdict, at launch — so ⌥ alone stopped
+        // being the whole answer the moment a switch could pin the items too.
+        updateSeparatorItem?.isHidden = !actionItemsVisible
         updateAvailableItem?.isHidden = false
         // The card is no longer alone: it must keep its trimmed bottom margin, or the gap above this
         // row reads as a layout fault.
@@ -2703,10 +2734,12 @@ extension AppDelegate: NSMenuDelegate {
     /// by menu tracking, so a modifier-polling timer drives the reveal instead. Seed visibility from
     /// the modifiers already held at open time (the user may open the menu with ⌥ down).
     func menuWillOpen(_ menu: NSMenu) {
-        // Re-read the ⌥-caption switch on every open: the menu is built once at launch and never
+        // Re-read both dropdown switches on every open: the menu is built once at launch and never
         // rebuilt, so a Settings change would otherwise not land until a restart. Set before the
-        // visibility seed, which draws the caption.
+        // visibility seed, which draws the caption and applies the items' state.
         popupVC.optionHintEnabled = PersistedConfig.showOptionHint
+        alwaysShowActions = PersistedConfig.alwaysShowActionItems
+        popupVC.alwaysShowActionItems = alwaysShowActions
         // Seed visibility from the modifiers held at open time. Force the first sync by desyncing
         // `lastOptionHeld`.
         lastOptionHeld = !NSEvent.modifierFlags.contains(.option)

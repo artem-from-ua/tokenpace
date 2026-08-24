@@ -202,8 +202,11 @@ enum PersistedConfig {
         /// (opt-in) — writing to disk without asking is a habit we don't start. See the property.
         static let journalEnabled = "journalEnabled"
         /// Whether the dropdown shows the "hold ⌥ Option for more" caption (#475). Default-**on** — it
-        /// is the only thing announcing the hidden action items. See the property.
+        /// is the only thing announcing what ⌥ reveals. See the property.
         static let showOptionHint = "showOptionHint"
+        /// Whether `Settings…` and `Quit` stay in the dropdown with ⌥ up (#521). Default-**on** — a
+        /// status-item menu offering no visible way out departs from the platform. See the property.
+        static let alwaysShowActionItems = "alwaysShowActionItems"
         /// Whether raw status-page payloads are logged to a dev-only JSONL (#279, ADR-0071 §10).
         /// Default-off, dev-tools only — see the property.
         static let statusPayloadLogEnabled = "statusPayloadLogEnabled"
@@ -983,19 +986,41 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.journalEnabled) }
     }
 
-    /// Whether the dropdown draws the "hold ⌥ Option for more" caption where the action items sit while
-    /// ⌥ is up (#475). **Default-on** (opt-out), the same shape as ``pausePollingWhenScreenLocked``. On
-    /// by default because it is the **only** thing announcing that the menu has actions at all — with it
-    /// off, `Settings…` and `Quit` are reachable solely by holding ⌥, a dead end for someone who doesn't
-    /// know the shortcut.
+    /// Whether the dropdown draws the "hold ⌥ Option for more" caption while ⌥ is up (#475).
+    /// **Default-on** (opt-out), the same shape as ``pausePollingWhenScreenLocked``. On by default
+    /// because it is the only thing announcing that ⌥ has anything to show.
+    ///
+    /// What it announces is mostly **not** the action items: ⌥ expands the widgets themselves — the
+    /// per-provider data ages, the detail rows' wording, the ruler's ticks and style name, incidents in
+    /// place of the service rows. So this switch is independent of ``alwaysShowActionItems``, and the
+    /// caption stays true with `Settings…` and `Quit` permanently on screen.
     ///
     /// Its control sits on **Appearance › Dropdown**, yet it is deliberately **not** an
-    /// ``AppearancePresetValues`` member — the one switch on that pane a preset does not rewrite and Copy
-    /// config does not carry, because it records what its owner has already learned, not what the
-    /// dropdown should look like. Read live on each menu open, so a change needs no restart.
+    /// ``AppearancePresetValues`` member — a preset does not rewrite it and Copy config does not carry
+    /// it, because it records what its owner has already learned, not what the dropdown should look
+    /// like. Read live on each menu open, so a change needs no restart.
     static var showOptionHint: Bool {
         get { defaults.object(forKey: Key.showOptionHint) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.showOptionHint) }
+    }
+
+    /// Whether `Settings…`, its separator and `Quit TokenPace` stay in the dropdown with ⌥ up (#521).
+    ///
+    /// **Default-on** (opt-out). A status-item menu that offers no visible way out departs from the
+    /// platform, and [ADR-0117](../../docs/adr/0117-dropdown-actions-behind-option.md) accepted that
+    /// departure while naming this switch as the first thing to revisit if the caption proved too thin
+    /// a guard. On by default puts the conventional shape back; the ⌥-only column becomes a choice.
+    ///
+    /// **Only those three.** `Troubleshoot…` and `Development tools…` stay ⌥-gated in either state —
+    /// they are specialist entrances, reached when something is already wrong — and so does Quit's
+    /// build tag, which identifies the running process rather than serving the everyday menu.
+    ///
+    /// Not an ``AppearancePresetValues`` member, for the same reason ``showOptionHint`` is not: it
+    /// records what its owner wants within reach, not how the dropdown should look. Read live on each
+    /// menu open, and once more at menu-build time so the first frame matches.
+    static var alwaysShowActionItems: Bool {
+        get { defaults.object(forKey: Key.alwaysShowActionItems) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.alwaysShowActionItems) }
     }
 
     /// The user's subscription to the current status-page episode (#279), or the empty state when
