@@ -546,6 +546,7 @@ where the limits sit above the service lines.
 | Header | `Codex` — the bare wordmark, plus its dot when the provider is calm | `Codex ･ Plus` — the plan word, and the poll age after it |
 | Quota rows | title, status word, `n% used`, the reset line, the bar | the verbose forms, plus a **stand-by** line on a 7-day window when there is advice to give |
 | Quota row — window not started | title, `ready to start`, a green knobless bar, and **no second line** | unchanged: there is no detail to expand |
+| Quota row — not started, account flagged reached | title, `waiting for limit reset`, a **grey** knobless bar, and no second line | unchanged: there is no detail to expand |
 | Status rows | only what is broken or just recovered | replaced by this provider's incidents |
 
 **A Codex window that has not started renders like Claude's idle 5-hour row, and for the same
@@ -561,6 +562,23 @@ which would claim a reset is happening this second.
 The raw value stays observable: Troubleshoot's `Reported resets` line prints the epoch seconds the
 server sent, so the backend's behaviour can still be read off a surface even though no countdown
 draws it.
+
+**But `ready to start` is gated on the account, not just on the window.** `rateLimits` carries two
+account-level flags — `spendControlReached` and `rateLimitReachedType` — and upstream reports
+accounts showing 100 % left while actually rate-limited
+([openai/codex#34360](https://github.com/openai/codex/issues/34360),
+[#36528](https://github.com/openai/codex/issues/36528)). So a spotless window is a claim about the
+window, not a promise the next request succeeds. With either flag set the same row keeps its shape
+and swaps its word: **grey**, `waiting for limit reset` — Claude's wording for an idle window with
+no path to start, deliberately neutral about which limit blocks. The widget answers *can I work*,
+and saying yes over a server that has said no is the worst answer it has
+([#518](https://github.com/artem-from-ua/tokenpace/issues/518)).
+
+**An absent flag is "unavailable", never "false".** Both arrive `null` on the live Plus account, so
+only an explicit `spendControlReached: true` counts, and **any** non-empty `rateLimitReachedType`
+does — the vocabulary is the server's and will grow, so a word we have not met must not read as
+silence. The flags gate the not-started row **only**: an anchored window keeps its percentage,
+pacing and countdown, all of which stay true while the account is flagged.
 
 **The plan word is ⌥-gated, exactly as Claude's is.** It names the subscription once and never
 changes between polls, so it is an on-demand detail rather than something to watch. A resting
@@ -610,6 +628,7 @@ an incident — both when both do — and either one toggles the same app-wide s
 | A **subscribe row on a plate with no incident of its own** | The control sits beside its cause. On a healthy provider's plate it would read as an offer to follow that provider's silence |
 | A **GitHub plate carrying bars, a percentage, or a `Token limits usage` section** | GitHub is status-only and publishes no subscription limit the bars model. There is no usage half in the app, in the config, or on the Settings page |
 | A **5-hour row on the Codex plate** | The server reports one window — a week — and `secondary` is `null`. A 5-hour row would be a bar for a limit Codex does not report, under an invented reset ([ADR-0127](../adr/0127-codex-quota-from-the-app-server.md) §D5). The plate shows one row per **reported** window, so two rows are possible the day the server sends a `secondary`, but a *5-hour* one never appears alongside today's week |
+| A **Codex row reading `ready to start` while `spendControlReached` or `rateLimitReachedType` is set** | The encouraging word is gated on the account's reached flags, not on the window alone. A flagged account draws the same idle shape in **grey**, reading `waiting for limit reset`. The reverse pair is possible and ordinary: a flag absent or `null` leaves the row green and encouraging, because `null` means unavailable rather than blocked ([#518](https://github.com/artem-from-ua/tokenpace/issues/518)) |
 | A **Codex row reading `0%` beside a reset a full week out** | That pair is the window-not-started state, and it draws no second line at all — the title, `ready to start` and a knobless bar. A `0%` with a `7d` countdown next to it is the sliding value the state exists to suppress |
 | A **`resetting…` on a Codex row that has not started** | `resetting…` is what a `nil` reset line renders, and it claims a reset is in progress this second. A window that has not started drops the whole detail line instead, so the fallback is never reached |
 | A **red blocking-reset badge on a Codex row** | `blockingReset` answers "which reset unblocks **Claude** work" and is picked from Claude's rows alone. Codex resets render as plain text. This is also why Codex rows live in their own array — appending them to `rows` would renumber the indices that badge is keyed to (ADR-0127 §D7) |

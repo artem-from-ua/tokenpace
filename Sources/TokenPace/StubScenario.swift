@@ -72,6 +72,7 @@ enum StubScenario: String, CaseIterable {
     case codexQuotaExhausted = "codex-quota-exhausted"
     case codexTwoWindows = "codex-two-windows"
     case codexQuotaNotStarted = "codex-quota-not-started"
+    case codexQuotaReached = "codex-quota-reached"
     case codexNotSignedIn = "codex-not-signed-in"
     case codexCLIMissing = "codex-cli-missing"
     case codexCLIOld = "codex-cli-old"
@@ -209,6 +210,7 @@ enum StubScenario: String, CaseIterable {
         case .codexQuotaExhausted: return "Codex quota — limit reached"
         case .codexTwoWindows:     return "Codex quota — two windows"
         case .codexQuotaNotStarted: return "Codex quota — window not started"
+        case .codexQuotaReached:   return "Codex quota — flagged reached at 0 %"
         case .codexNotSignedIn:    return "Codex quota — not signed in"
         case .codexCLIMissing:     return "Codex quota — codex not installed"
         case .codexCLIOld:         return "Codex quota — codex too old"
@@ -460,6 +462,13 @@ enum StubScenario: String, CaseIterable {
                  + "\"0%\", no reset, no \"resetting…\" — just `7-day  ready to start` over a "
                  + "green knobless bar. Troubleshoot still carries the raw epoch under "
                  + "`Reported resets`, and it advances between reads."
+        case .codexQuotaReached:
+            return "The SAME spotless reading, with the account flagged reached — upstream reports "
+                 + "accounts showing 100 % left while blocked. The row must NOT say \"ready to "
+                 + "start\": it goes GREY and reads `7-day  waiting for limit reset`, on both the "
+                 + "plate and the menu-bar block. Compare it side by side with "
+                 + "`codex-quota-not-started`, whose only difference is the flag: identical numbers, "
+                 + "opposite verdicts."
         case .codexNotSignedIn:
             return "Codex installed but signed out: the plate keeps its status half and shows no "
                  + "bars. Troubleshoot carries the reason; the popup shows no warning banner, since "
@@ -677,7 +686,7 @@ enum StubScenario: String, CaseIterable {
         // The quota scenarios keep the network side calm — their subject is the Codex plate's bars,
         // and a busy Claude stack above would compete for the eye.
         case .codexQuotaGreen, .codexQuotaOrange, .codexQuotaExhausted, .codexTwoWindows,
-             .codexQuotaNotStarted,
+             .codexQuotaNotStarted, .codexQuotaReached,
              .codexNotSignedIn, .codexCLIMissing, .codexCLIOld:
             return StubUsageTransport(mode: .codexGreen, now: now)
         case .allThreeProviders:   return StubUsageTransport(mode: .allThreeProviders, now: now)
@@ -746,6 +755,11 @@ enum StubScenario: String, CaseIterable {
         // the server's does — the defect is only visible when the value is recomputed per read.
         case .codexQuotaNotStarted:
             return StubCodexQuotaSource(.notStarted([604_800]), now: now)
+        // The same reading with the account flagged reached. It cannot be produced on a live
+        // account on demand, and it is the pair the gate exists for: a spotless window under a
+        // server that has already said no.
+        case .codexQuotaReached:
+            return StubCodexQuotaSource(.notStartedReached([604_800]), now: now)
         // One week, the shape the server actually sends today.
         case .menuBarClaudeCodex, .menuBarCodexOnly, .menuBarCodexOneWindow,
              .menuBarProvidersDeselected:
@@ -803,13 +817,16 @@ enum StubScenario: String, CaseIterable {
     /// the clock advancing: ``optimisticReset`` arms a one-shot timer for a reset ~20 s out;
     /// ``resetGrace`` holds the 5h bar "ready" across empty polls via a real-time freshness window;
     /// ``colorCycle``'s whole point is a colour changing over time;
-    /// ``codexQuotaNotStarted``'s reset is recomputed from `now` at every read, so the raw epoch in
-    /// Troubleshoot only advances — the symptom being suppressed — while the clock does. Every other
-    /// stub is driven purely by the poll counter, so a frozen clock reproduces it.
+    /// ``codexQuotaNotStarted`` and ``codexQuotaReached`` recompute their reset from `now` at every
+    /// read, so the raw epoch in Troubleshoot only advances — the symptom being suppressed — while
+    /// the clock does. Every other stub is driven purely by the poll counter, so a frozen clock
+    /// reproduces it.
     var usesRealClock: Bool {
         switch self {
-        case .optimisticReset, .resetGrace, .colorCycle, .codexQuotaNotStarted: return true
-        default:                                                               return false
+        case .optimisticReset, .resetGrace, .colorCycle, .codexQuotaNotStarted, .codexQuotaReached:
+            return true
+        default:
+            return false
         }
     }
 

@@ -341,6 +341,10 @@ struct StubCodexQuotaSource: CodexQuotaSource {
         /// plus the window's own length on every read, so it never ticks down. The stub reproduces
         /// that by deriving the reset from its own clock at read time, exactly as the server does.
         case notStarted([Int])
+        /// The same not-started shape with the account flagged reached — the one combination a live
+        /// account cannot be put into on demand, and the one the flags exist to catch: every window
+        /// reads spotless while the server has already said no.
+        case notStartedReached([Int])
         case failure(CodexQuotaError)
     }
 
@@ -369,22 +373,32 @@ struct StubCodexQuotaSource: CodexQuotaSource {
                 },
                 planLabel: "Plus")
         case let .notStarted(durations):
-            let base = now()
-            return CodexQuotaSnapshot(
-                windows: durations.map { duration in
-                    CodexQuotaWindow(
-                        utilization: 0,
-                        durationSeconds: duration,
-                        resetsAt: base.addingTimeInterval(Double(duration)))
-                },
-                planLabel: "Plus")
+            return notStartedSnapshot(durations, reachedType: nil)
+        // `rateLimitReachedType` carries the server's own word; `spendControlReached` stays `nil`, so
+        // the scenario also proves the string alone gates the row — a stub setting both would pass
+        // even if only the Bool were consulted.
+        case let .notStartedReached(durations):
+            return notStartedSnapshot(durations, reachedType: "primary")
         }
+    }
+
+    private func notStartedSnapshot(_ durations: [Int], reachedType: String?) -> CodexQuotaSnapshot {
+        let base = now()
+        return CodexQuotaSnapshot(
+            windows: durations.map { duration in
+                CodexQuotaWindow(
+                    utilization: 0,
+                    durationSeconds: duration,
+                    resetsAt: base.addingTimeInterval(Double(duration)))
+            },
+            planLabel: "Plus",
+            rateLimitReachedType: reachedType)
     }
 
     func diagnostics() async -> CodexQuotaDiagnostics {
         var d = CodexQuotaDiagnostics(binaryPath: "/opt/homebrew/bin/codex", version: "0.148.0")
         switch outcome {
-        case .windows, .notStarted:
+        case .windows, .notStarted, .notStartedReached:
             d.lastSuccess = now()
             d.lastLatency = 0.44
             // A second read, so a `notStarted` scenario recomputes its reset from `now` here exactly

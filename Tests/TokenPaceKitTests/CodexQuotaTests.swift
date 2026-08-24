@@ -642,8 +642,9 @@ struct CodexQuotaTests {
         #expect(snapshot.rateLimitReachedType == "something_new")
     }
 
-    /// The flags are diagnostic-only, and the bars decode from the same payload: a type we did not
-    /// expect must cost the flag and not the windows.
+    /// The bars decode from the same payload: a type we did not expect must cost the flag and not
+    /// the windows. It costs the gate too, which is the safe direction only because a dropped flag
+    /// reads as unavailable rather than as `false` — an unreadable answer never becomes permission.
     @Test("a wrongly-typed flag drops the flag, not the windows")
     func wronglyTypedFlagDoesNotFailTheRead() throws {
         let json = """
@@ -654,6 +655,127 @@ struct CodexQuotaTests {
         #expect(snapshot.windows.count == 1)
         #expect(snapshot.spendControlReached == nil)
         #expect(snapshot.rateLimitReachedType == nil)
+    }
+
+    // MARK: - The reached flags gate the encouraging row (#518)
+
+    /// A snapshot in the not-started shape, with whatever the caller wants the account flags to say.
+    private static func notStartedSnapshot(spendControl: Bool? = nil,
+                                           reachedType: String? = nil) -> CodexQuotaSnapshot {
+        CodexQuotaSnapshot(
+            windows: [CodexQuotaWindow(utilization: 0, durationSeconds: 604_800,
+                                       resetsAt: now.addingTimeInterval(604_800))],
+            planLabel: "Plus",
+            spendControlReached: spendControl,
+            rateLimitReachedType: reachedType)
+    }
+
+    /// **`nil` means unavailable, not false.** Both fields are absent on the live Plus account, so a
+    /// predicate reading absence as "you are fine" would fire on every ordinary read and be
+    /// indistinguishable from one that works.
+    @Test("an absent flag is not a reached account")
+    func absentFlagsAreNotReached() {
+        #expect(!Self.notStartedSnapshot().isReachedFlagged)
+        #expect(!Self.notStartedSnapshot(spendControl: false, reachedType: nil).isReachedFlagged)
+    }
+
+    /// Either flag alone is enough — they name different blockers and the row's answer is the same
+    /// either way, so neither may depend on the other being set.
+    @Test("either flag alone flags the account")
+    func eitherFlagAloneCounts() {
+        #expect(Self.notStartedSnapshot(spendControl: true).isReachedFlagged)
+        #expect(Self.notStartedSnapshot(reachedType: "primary").isReachedFlagged)
+        #expect(Self.notStartedSnapshot(spendControl: true, reachedType: "primary").isReachedFlagged)
+    }
+
+    /// The vocabulary is the server's and it will grow, so an unrecognised word is a reached state we
+    /// have not met — never silence. An empty string is the one string that is not a word.
+    @Test("an unknown reached type still counts, an empty one does not")
+    func unknownReachedTypeCounts() {
+        #expect(Self.notStartedSnapshot(reachedType: "something_new").isReachedFlagged)
+        #expect(!Self.notStartedSnapshot(reachedType: "").isReachedFlagged)
+    }
+
+    /// The defect itself: a window whose numbers say "fresh" over an account the server has stopped.
+    /// The row keeps the idle shape — nothing is spent and there is still no reset to count down to —
+    /// and swaps `ready to start` for the grey `waiting for limit reset` the view draws on
+    /// `sessionBlocked`.
+    @Test("a flagged account turns the not-started row blocked, not encouraging")
+    func flaggedAccountBlocksTheRow() throws {
+        let rows = CodexQuotaNormalizer.rows(from: Self.notStartedSnapshot(reachedType: "primary"),
+                                             now: Self.now)
+        let row = try #require(rows.first)
+        #expect(row.sessionIdle)
+        #expect(row.sessionBlocked)
+        // Still the same row otherwise: no countdown appears alongside the changed word.
+        #expect(row.title == "7-day")
+        #expect(row.resetLine == nil)
+        #expect(row.resetLineVerbose == nil)
+        #expect(row.utilization == 0)
+    }
+
+    /// The unflagged reading must stay encouraging, or the gate has replaced one wrong row with
+    /// another — this is the state every ordinary Codex reset passes through.
+    @Test("an unflagged not-started row stays ready to start")
+    func unflaggedRowStaysReady() throws {
+        let row = try #require(
+            CodexQuotaNormalizer.rows(from: Self.notStartedSnapshot(), now: Self.now).first)
+        #expect(row.sessionIdle)
+        #expect(!row.sessionBlocked)
+    }
+
+    /// The flags gate the **not-started** row and nothing else. An anchored window already renders
+    /// its own percentage, pacing and countdown, all of which stay true while the account is flagged;
+    /// suppressing them would remove information the user acts on.
+    @Test("a flagged account leaves an anchored row untouched")
+    func flaggedAccountLeavesAnchoredRowsAlone() throws {
+        let snapshot = CodexQuotaSnapshot(
+            windows: [CodexQuotaWindow(utilization: 62, durationSeconds: 604_800,
+                                       resetsAt: Self.now.addingTimeInterval(200_000))],
+            planLabel: "Plus", spendControlReached: true)
+        let row = try #require(CodexQuotaNormalizer.rows(from: snapshot, now: Self.now).first)
+        #expect(!row.sessionIdle)
+        #expect(!row.sessionBlocked)
+        #expect(row.utilization == 62)
+        #expect(row.resetLine != nil)
+    }
+
+    /// The flag is account-level while `hasNotStarted` is per window, so with two windows reported
+    /// only the ones that have not started take the blocked word — and every one of them does, since
+    /// one account cannot be blocked for one window and free for another.
+    @Test("the account flag reaches every not-started window and no other")
+    func flagAppliesPerWindowByState() {
+        let snapshot = CodexQuotaSnapshot(
+            windows: [
+                CodexQuotaWindow(utilization: 0, durationSeconds: 604_800,
+                                 resetsAt: Self.now.addingTimeInterval(604_800)),
+                CodexQuotaWindow(utilization: 0, durationSeconds: 18_000,
+                                 resetsAt: Self.now.addingTimeInterval(18_000)),
+                CodexQuotaWindow(utilization: 12, durationSeconds: 18_000,
+                                 resetsAt: Self.now.addingTimeInterval(9_000)),
+            ],
+            planLabel: "Plus", rateLimitReachedType: "primary")
+        let rows = CodexQuotaNormalizer.rows(from: snapshot, now: Self.now)
+        #expect(rows.count == 3)
+        #expect(rows[0].sessionIdle && rows[0].sessionBlocked)
+        #expect(rows[1].sessionIdle && rows[1].sessionBlocked)
+        #expect(!rows[2].sessionIdle && !rows[2].sessionBlocked)
+    }
+
+    /// The blocked row must reach the widget as the grey idle bar, not as a green one — the menu bar
+    /// answers "can I work" with less room than the popup, so a wrong word there is a wrong answer
+    /// with nothing beside it to correct the impression.
+    @Test("the blocked row reaches the menu-bar block and its spoken label")
+    func blockedRowReachesTheMenuBar() throws {
+        let rows = CodexQuotaNormalizer.rows(from: Self.notStartedSnapshot(spendControl: true),
+                                             now: Self.now)
+        let block = try #require(MenuBarLayout.block(for: .codex, rows: rows))
+        let bar = try #require(block.bars.first)
+        #expect(bar.idle)
+        #expect(bar.blocked)
+        let layout = MenuBarLayout(mode: .expanded(blocks: [block]))
+        #expect(layout.spokenDescription.contains("waiting for reset"))
+        #expect(!layout.spokenDescription.contains("ready to start"))
     }
 
     private static let candidates = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
