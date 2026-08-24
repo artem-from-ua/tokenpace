@@ -275,7 +275,7 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox |
 | — | `lifecycle` | `.notice` | `archive: destination chosen` | user picked an archive folder via `NSOpenPanel`; the path itself is not logged |
 | — | `lifecycle` | `.notice` | `journal: enabled set <bool>` | user toggled the "Record usage history" checkbox in Settings → General → Usage history (ADR-0067) |
-| — | `lifecycle` | `.notice` | `dropdown: option hint set <bool>` | user toggled "Show «hold ⌥ Option» hint" in Settings → Appearance › Dropdown. The menu re-reads the key on every open, so the line is the only record of *when* it changed |
+| — | `lifecycle` | `.notice` | `dropdown: option hint set <bool>` | user toggled "Show the ⌥ Option hint" in Settings → Appearance › Dropdown. The menu re-reads the key on every open, so the line is the only record of *when* it changed |
 | — | `lifecycle` | `.notice` | `dropdown: always show actions set <bool>` | user toggled "Always show action items" in Settings → Appearance › Dropdown ([ADR-0126](../adr/0126-settings-and-quit-stay-visible-by-default.md)): whether `Settings…` and `Quit` stay in the menu with ⌥ up. Re-read on every open and once at menu-build time, so like the row above this line is the only record of *when* it changed |
 | — | `lifecycle` | `.notice` | `back-to-work: enabled set <bool>` | user toggled the "Back to work" notification switch (ADR-0039) |
 | — | `lifecycle` | `.notice` | `back-to-work: time window set <start>–<end>` | user changed the allowed-hours pickers; `<start>`/`<end>` are minute-of-day |

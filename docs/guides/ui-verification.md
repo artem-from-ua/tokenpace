@@ -945,7 +945,7 @@ not of a window — [the rule about the menu material/vibrancy](#testing-menu-ba
 No stub: the behavior depends on the modifier and two defaults keys, not on the data. Any scenario
 works — `TOKENPACE_STUB=screenshot` gives a stable frame to compare margins against.
 
-**Two independent switches** sit in Settings → Appearance › Dropdown: "Show «hold ⌥ Option» hint"
+**Two independent switches** sit in Settings → Appearance › Dropdown: "Show the ⌥ Option hint"
 and "Always show action items" (default-on,
 [ADR-0126](../adr/0126-settings-and-quit-stay-visible-by-default.md)). Neither disables the other —
 all four combinations are reachable, and "both on" is a state worth looking at on its own.
