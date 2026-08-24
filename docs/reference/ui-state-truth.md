@@ -30,6 +30,8 @@ take which color; [users-and-goals.md](users-and-goals.md) — the "is this sign
 |---|---|
 | `barWidth` | 34 |
 | `barHeight` | 5 |
+| `barGap` (between bars **inside** one provider's block) | 5 |
+| `blockGap` (between two providers' blocks) | **8** — wider than `barGap`, so the grouping reads as "bars together, blocks apart" |
 | `barCorner` (track **and** strip) | 1.5 |
 | `tickWidth` × `tickHeight` (time marker) | 5 × 9 |
 | `centreTickWidth` × `centreTickHeight` (zero tick — Balance **and** Pressure) | **1.5** × **10** (under the track) |
@@ -644,7 +646,11 @@ Check before you draw a state.
 | The pause glyph **and** the currency symbol together | Guaranteed by [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md): the credits marker is zeroed out while `blockedPause` |
 | An exhausted limit with **neither** of them | The flip side of the same thing: at `mainWindowExhausted` the states are exhaustive — either `creditsCanCover` (the currency symbol) or `isBlocked` (the pause glyph). There is no empty variant |
 | Bars under the pause glyph or under the currency symbol | Both "not on a subscription" answers produce `MenuBarMode.iconOnlyReset` — a case with no field for bars ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)), so there is nothing to draw them from. **With no exceptions from [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md):** the stale phase that used to hold diagnostic bars next to ⚠️ has been cancelled |
-| **A countdown next to bars** | `MenuBarMode.expanded` has no field for the number ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)) — the pair is unrepresentable, not merely unreachable. The number lives only in `iconOnlyReset` (glyph + countdown, no bars) |
+| **A countdown next to bars** | `MenuBarMode.expanded(blocks:)` has no field for the number ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md), [ADR-0128](../adr/0128-menu-bar-repeats-a-block-per-provider.md)) — the pair is unrepresentable, not merely unreachable. The number lives only in `iconOnlyReset` (glyph + countdown, no bars) |
+| **A brand-tinted bar** | A bar's colour **is** the pacing verdict, and there is no second channel on a 5 pt shape ([ADR-0128](../adr/0128-menu-bar-repeats-a-block-per-provider.md)). Providers are separated by a gap and identified by **position** — never by hue, and never by a drawn rule |
+| **A block with no bars, or a widget with no blocks** | Both are held by the type: a provider whose only bar is elided is dropped whole, and unticking every provider under "Providers to display" still leaves one block drawn |
+| **The status dot anywhere but last** | It is the trailing element, after every block — and it is still absent while everything is green ([ADR-0013](../adr/0013-claude-status-line.md) §8) |
+| **Two raised hands** | The awaiting-input hand is drawn once, leftmost, outside every block — it is a fact about Claude Code sessions, not about a quota |
 | The pause glyph or the currency symbol next to ⚠️ | `exhaustedUnknownReset` draws ⚠️ **alone** ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)): a glyph would assert a state right next to a sign that disclaims the data. The one place where `isBlocked` is true and there is no pause |
 | A red bar at 100% | An exhausted 5h/7d window routes to a bar-less state **before** the bars are built; with a broken `resets_at` it routes to `exhaustedUnknownReset`, also bar-less |
 | 100% of credits + "well ahead of pace" | `creditsStatusText` at `usage >= 1` returns `"limit reached"` |

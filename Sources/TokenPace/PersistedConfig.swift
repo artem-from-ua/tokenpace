@@ -100,6 +100,13 @@ enum PersistedConfig {
         static let showServiceStatusDot = "menuBar.showServiceStatusDot"
         /// Legacy pre-#381 key for the same toggle, before the surface became a key prefix.
         static let legacyShowServiceStatusDot = "showServiceStatusDot"
+        /// The providers whose menu-bar block the user has **unchecked**, as their journal-stable
+        /// `ProviderID` raw values (ADR-0128).
+        ///
+        /// Stored as the hidden set, not the shown one: a provider added by a later build is then
+        /// checked out of the box with no migration, and a downgrade that cannot spell its id leaves the
+        /// entry alone rather than dropping it.
+        static let menuBarHiddenProviders = "menuBar.hiddenProviders"
         /// Whether the **top (5-hour)** bar is hidden until it needs attention — stored as the raw
         /// `TopBarHiding` string (ADR-0086). Default `.untilItNeedsAttention` (from the `.workHarder`
         /// preset) — see the property.
@@ -555,6 +562,27 @@ enum PersistedConfig {
             ?? AppearancePreset.defaultValues.showServiceStatusDot
     }
 
+    /// Which providers the menu-bar widget draws a block for (ADR-0128) — every provider whose usage
+    /// collection is on, minus the ones the user unchecked under Appearance → Menu bar.
+    ///
+    /// The widget's width is the sum of what is checked and has no ceiling: this control is what the
+    /// user reaches for when the item grows too wide, rather than a heuristic that drops a block on
+    /// their behalf.
+    static var menuBarHiddenProviders: Set<ProviderID> {
+        get {
+            let raw = defaults.array(forKey: Key.menuBarHiddenProviders) as? [String] ?? []
+            return Set(raw.compactMap(ProviderID.init(rawValue:)))
+        }
+        set {
+            defaults.set(newValue.map(\.rawValue).sorted(), forKey: Key.menuBarHiddenProviders)
+        }
+    }
+
+    /// Whether `provider`'s block is drawn in the menu bar.
+    static func showsInMenuBar(_ provider: ProviderID) -> Bool {
+        !menuBarHiddenProviders.contains(provider)
+    }
+
     /// Which **menu-bar** bar is hidden while it is calm — green (on pace or behind), mild-ahead yellow,
     /// or far-behind blue (`BarView.isCalm`) — leaving the other one as the single, vertically centred
     /// bar (ADR-0086, supersedes the boolean of #94). Default `.fiveHour` from the `.workHarder` preset:
@@ -634,6 +662,7 @@ enum PersistedConfig {
         for key in [
             Key.colorsTell,
             Key.showServiceStatusDot,
+            Key.menuBarHiddenProviders,
             Key.hideTop5hBar,
             // Cleared too, for the same reason as `legacyBarStyle` below: a Reset must also sweep a
             // pre-ADR-0086 boolean the migration may not have reached yet, or it would sit there ready

@@ -126,6 +126,6 @@ enum BarStylePreviewRenderer {
 
         // Bars only. A service dot, credits glyph, pause glyph or awaiting hand would each add width
         // and shift the bars sideways, making the three tiles about decorations rather than scales.
-        return MenuBarLayout(mode: .expanded(fiveHour: fiveHour, sevenDay: sevenDay))
+        return MenuBarLayout(mode: MenuBarLayout.claudeBlockMode(fiveHour: fiveHour, sevenDay: sevenDay))
     }
 }

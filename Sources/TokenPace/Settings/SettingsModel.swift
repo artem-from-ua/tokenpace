@@ -29,6 +29,8 @@ final class SettingsModel {
     var onMenuBarStyleChange: ((BarStyle) -> Void)?
     var onDropdownStyleChange: ((BarStyle) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
+    /// The menu-bar "Providers to display" checkboxes changed — the widget's block set and width follow.
+    var onMenuBarProvidersChange: ((Set<ProviderID>) -> Void)?
     var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)?
     var onExtraUsageVisibilityChange: ((PopupSectionVisibility) -> Void)?
     var onTopBarHidingChange: ((TopBarHiding) -> Void)?
@@ -192,6 +194,9 @@ final class SettingsModel {
     /// (ADR-0090).
     var showExtraUsage: PopupSectionVisibility = .onceUsed
     var showServiceDot = false
+    /// Providers whose menu-bar block the user unchecked (ADR-0128). Stored as the hidden set so a
+    /// provider added later is checked out of the box.
+    var menuBarHiddenProviders: Set<ProviderID> = []
     /// The **menu-bar widget**'s bar style (#224, per-surface since #329).
     var menuBarStyle: BarStyle = .progress
     /// The **dropdown popup**'s bar style, independent of ``menuBarStyle`` (#329).
@@ -567,6 +572,7 @@ final class SettingsModel {
         showPerModelLimits = PersistedConfig.showPerModelLimits
         showExtraUsage = PersistedConfig.showExtraUsage
         showServiceDot = PersistedConfig.showServiceStatusDot
+        menuBarHiddenProviders = PersistedConfig.menuBarHiddenProviders
         menuBarStyle = PersistedConfig.menuBarStyle
         dropdownStyle = PersistedConfig.dropdownStyle
 
@@ -681,6 +687,41 @@ final class SettingsModel {
         onServiceDotChange?(on)
     }
 
+    /// The providers the "Providers to display" checkboxes list — those collecting usage, in
+    /// ``ProviderID/displayOrder``. A status-only provider draws no bars, so it gets no row.
+    var menuBarProviderChoices: [ProviderID] {
+        ProviderID.displayOrder.filter { provider in
+            switch provider {
+            case .claude: return usageApiEnabled
+            case .codex:  return codexMonitoring.usageEnabled
+            case .github: return false
+            }
+        }
+    }
+
+    /// Check or uncheck one provider's menu-bar block (ADR-0128). Unchecking every provider is
+    /// allowed here; the widget still draws the first block, since an empty item reads as a crash.
+    /// Whether `provider` is the only one still drawn — the checkbox that must stay ticked.
+    ///
+    /// Unticking every provider is not a state the widget can honour: `hidingMenuBarProviders` keeps
+    /// the first block rather than drawing an empty item, so an all-unticked list would show a widget
+    /// contradicting its own settings. Refusing the last tick makes that impossible instead of
+    /// silently overriding it.
+    func isOnlyMenuBarProvider(_ provider: ProviderID) -> Bool {
+        menuBarProviderChoices.filter { !menuBarHiddenProviders.contains($0) } == [provider]
+    }
+
+    func setShowsInMenuBar(_ provider: ProviderID, _ shown: Bool) {
+        guard shown || !isOnlyMenuBarProvider(provider) else { return }
+        dropPreviewBeforeEdit()
+        if shown { menuBarHiddenProviders.remove(provider) }
+        else     { menuBarHiddenProviders.insert(provider) }
+        PersistedConfig.menuBarHiddenProviders = menuBarHiddenProviders
+        AppLogger.lifecycle.notice(
+            "menu-bar-providers: \(provider.rawValue, privacy: .public) set \(shown, privacy: .public)")
+        onMenuBarProvidersChange?(menuBarHiddenProviders)
+    }
+
     /// Touches the menu-bar surface only (#224, #329) — the dropdown keeps whatever it was set to.
     func setMenuBarStyle(_ style: BarStyle) {
         dropPreviewBeforeEdit()
@@ -764,6 +805,7 @@ final class SettingsModel {
         onModelLimitsVisibilityChange?(showPerModelLimits)
         onExtraUsageVisibilityChange?(showExtraUsage)
         onServiceDotChange?(showServiceDot)
+        onMenuBarProvidersChange?(menuBarHiddenProviders)
         onMenuBarStyleChange?(menuBarStyle)
         onDropdownStyleChange?(dropdownStyle)
         onAwaitingInputAppearanceChange?()   // #233: a preset/reset may flip the menu-bar copy

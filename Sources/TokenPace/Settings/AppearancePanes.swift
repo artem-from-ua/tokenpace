@@ -286,6 +286,39 @@ struct MenuBarPane: View {
                 }
             }
 
+            // Which providers get a block, and so how wide the item is (ADR-0128). Shown only once
+            // there is a choice to make — with one provider collecting usage the section would be a
+            // single checkbox that must stay ticked.
+            //
+            // The list is what is **collecting usage**, not every `ProviderID`: a status-only provider
+            // has no bars, so a row for it would be a checkbox over nothing.
+            if model.menuBarProviderChoices.count > 1 {
+                Section("Providers to display") {
+                    // Checkboxes, not the switches the rest of Settings uses: these are a **set** —
+                    // several rows answering one question together — where a switch row answers its own
+                    // question on its own. The checkbox also puts the control before the name, so the
+                    // column of boxes reads as one list rather than a stack of unrelated settings.
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(model.menuBarProviderChoices, id: \.self) { provider in
+                            // The last ticked box is disabled rather than refused on click: a checkbox
+                            // that can be clicked and does nothing reads as a bug, while a dimmed one
+                            // says the choice is unavailable before it is made.
+                            Toggle(provider.displayName, isOn: Binding(
+                                get: { !model.menuBarHiddenProviders.contains(provider) },
+                                set: { model.setShowsInMenuBar(provider, $0) }))
+                                .toggleStyle(.checkbox)
+                                .disabled(model.isOnlyMenuBarProvider(provider))
+                        }
+                        if let only = model.menuBarProviderChoices
+                            .first(where: { model.isOnlyMenuBarProvider($0) }) {
+                            SettingsHint(text: "\(only.displayName) stays in the menu bar — the widget "
+                                + "always draws one provider.")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
             // The service dot gets its own card: the three rows above are about the **pacing bars** and
             // read `PacingModel`, while this one is about **external incidents** and reads
             // `ProviderMonitoring`. A single row needs no section header, like the polling-pause section

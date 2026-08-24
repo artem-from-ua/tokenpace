@@ -2,9 +2,19 @@
 status: accepted
 date: 2026-08-14
 supersedes: [0029]
+superseded_by: [0128]
 ---
 
 # ADR-0091: A countdown only where work isn't running
+
+> **Partially superseded by [ADR-0128](0128-menu-bar-repeats-a-block-per-provider.md).** Only the
+> *shape* is superseded: §2's `MenuBarMode.expanded(fiveHour:sevenDay:)` becomes
+> `expanded(blocks: [ProviderBlock])`, the `which: LimitWindow` parameters become `provider:`, and
+> `.error` — whose four values `drawError` had already stopped reading — loses its payload
+> altogether. **The decision itself still stands in full**: a countdown exists only where there are
+> no bars, the type is what makes "bars *and* a number" unrepresentable, an exhausted window never
+> draws a bar, contradictory data gets one signal, and ⚠️ still means only that the data contradicts
+> itself.
 
 > Replaces [ADR-0029](0029-reset-countdown-selection-by-severity.md) (choosing the reset time by
 > a severity table and the `ResetCountdownMode` mode) and partially supersedes
