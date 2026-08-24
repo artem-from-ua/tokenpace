@@ -1922,6 +1922,24 @@ final class PopupViewController: NSViewController {
     static let weeklyResetUnknownDetail =
         "Claude has not reported a weekly reset yet — start a session in Claude Code and it will appear."
 
+    /// The Codex quota read contradicted itself — the account is flagged reached while a window still
+    /// reports nothing spent (#518).
+    ///
+    /// **Names the fault as the provider's, not the user's.** "Limit reached" would describe a state
+    /// of the account and send the user to wait out a reset that may not be coming; what actually
+    /// happened is that the answer is wrong. Matches the menu bar's accessibility description for the
+    /// same state, so the two surfaces speak with one phrase — the rule
+    /// ``weeklyResetUnknownTitle`` follows.
+    static let codexQuotaContradictionTitle = "Codex reset time bug"
+
+    /// The second line: what the server said, and what follows from it.
+    ///
+    /// States the contradiction and stops. The app does not know **why** the backend answers this way
+    /// — upstream has open reports and no cause — so a sentence guessing at one would be invention,
+    /// and there is no next step to offer either: nothing the user does on this machine fixes it.
+    static let codexQuotaContradictionDetail =
+        "Codex reported the limit reached and zero usage at once — its quota numbers cannot be trusted right now."
+
     /// Anthropic's official primary accent colour (`#d97757`, a terracotta orange) — confirmed
     /// against `anthropics/skills`' `brand-guidelines/SKILL.md` on GitHub, the same value the local
     /// Claude Code "claude" theme slot resolves to. Used only for the "Claude Code" section header,
@@ -2258,10 +2276,15 @@ final class PopupViewController: NSViewController {
         plate.stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         let quotaRows = layout.quotaRows(of: provider)
+        // A read that contradicted itself: its rows are already withheld, and the plate reports the
+        // fault in their place. It keeps the plate standing on its own — with every status service
+        // off and no drawable window left, dropping the plate would take the only explanation with it
+        // and leave the bars silently missing.
+        let quotaFault = layout.hasQuotaFault(of: provider)
         // The plate stands on either half: a provider whose status services are all off but whose
         // quota is collected still has bars to draw, and the reverse is the shipped status-only case.
         let monitorsStatus = layout.serviceStatus?.monitors(provider) ?? false
-        guard monitorsStatus || !quotaRows.isEmpty else {
+        guard monitorsStatus || !quotaRows.isEmpty || quotaFault else {
             // Both views, not just the card: the stack is a sibling subview pinned to the card, so
             // hiding the card alone leaves the stack holding the geometry open and the popup ends in
             // a blank band where the plate would be.
@@ -2311,6 +2334,22 @@ final class PopupViewController: NSViewController {
             leadingView: Self.headerRow(dot: dot, title: leading), rightView: NSView(),
             to: plate.stack)
         plate.stack.setCustomSpacing(Metrics.sectionSpacing, after: headerRow)
+
+        // The contradiction block, above the bars: the same two-line ⚠️ shape the popup already gives
+        // a malformed Claude body (`hasBrokenActiveReset`), and for the same reason — the read
+        // answered and its answer disagrees with itself, so what it reported cannot be paced. Red and
+        // ⚠️-led rather than the dimmed treatment `weeklyResetUnknown` takes: nothing is broken there,
+        // the API simply has not opened a window yet, whereas this one **is** broken.
+        //
+        // No bar accompanies it. The withheld row is withheld in the model, so there is nothing here
+        // to suppress — this block draws in the space it would have occupied.
+        if quotaFault {
+            addWarningTitle(Self.codexQuotaContradictionTitle, to: plate.stack)
+            let detail = addWrappingLabel(
+                Self.codexQuotaContradictionDetail,
+                font: .systemFont(ofSize: Metrics.textSize), secondary: true, to: plate.stack)
+            plate.stack.setCustomSpacing(Metrics.sectionSpacing, after: detail)
+        }
 
         // This provider's own quota bars, above its status rows — the same order Claude's plate uses,
         // where the limits come first and the service lines sit under them.
@@ -3418,7 +3457,8 @@ final class PopupViewController: NSViewController {
     /// never breaks. We pin it to the content width (`width − 2·hPadding`) and set
     /// `preferredMaxLayoutWidth` to match, so it wraps at word boundaries within the popup.
     @discardableResult
-    private func addWrappingLabel(_ text: String, font: NSFont, secondary: Bool = false) -> NSView {
+    private func addWrappingLabel(_ text: String, font: NSFont, secondary: Bool = false,
+                                  to target: NSStackView? = nil) -> NSView {
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = font
         label.textColor = secondary ? Self.dimmedLabelColor : ColorRole.label.defaultColor
@@ -3427,7 +3467,7 @@ final class PopupViewController: NSViewController {
         let contentWidth = Metrics.contentWidth
         label.preferredMaxLayoutWidth = contentWidth
         label.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
-        stack.addArrangedSubview(label)
+        (target ?? stack).addArrangedSubview(label)
         return label
     }
 
@@ -3443,7 +3483,8 @@ final class PopupViewController: NSViewController {
     private func addWarningTitle(
         _ text: String,
         symbolName: String = "exclamationmark.triangle.fill",
-        color: NSColor? = nil
+        color: NSColor? = nil,
+        to target: NSStackView? = nil
     ) -> NSView {
         let font = NSFont.boldSystemFont(ofSize: Metrics.textSize)
         let color = color ?? ColorRole.red.defaultColor
@@ -3462,7 +3503,7 @@ final class PopupViewController: NSViewController {
             string: text, attributes: [.font: font, .foregroundColor: color]))
 
         let label = NSTextField(labelWithAttributedString: attributed)
-        stack.addArrangedSubview(label)
+        (target ?? stack).addArrangedSubview(label)
         return label
     }
 

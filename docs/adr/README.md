@@ -145,7 +145,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0117](0117-dropdown-actions-behind-option.md) | Every dropdown action sits behind ⌥ Option, announced by a caption | partially superseded → [0126](0126-settings-and-quit-stay-visible-by-default.md) |
 | [0127](0127-codex-quota-from-the-app-server.md) | Codex quota from a short-lived `app-server` process, with window durations as data rather than enum cases | partially superseded → [0129](0129-ready-to-start-is-gated-on-the-account-reached-flags.md) |
 | [0128](0128-menu-bar-repeats-a-block-per-provider.md) | The menu bar repeats a block per provider, with the status dot pinned rightmost | accepted |
-| [0129](0129-ready-to-start-is-gated-on-the-account-reached-flags.md) | `ready to start` is gated on the account's reached flags, not on the window alone | accepted |
+| [0129](0129-ready-to-start-is-gated-on-the-account-reached-flags.md) | A Codex read that reports the limit reached at zero usage is malformed data, not a quota state | accepted |
 
 ## Maintaining this index
 

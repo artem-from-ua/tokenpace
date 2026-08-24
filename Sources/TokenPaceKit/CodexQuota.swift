@@ -185,8 +185,9 @@ public struct CodexQuotaSnapshot: Sendable, Equatable {
     public let windows: [CodexQuotaWindow]
     /// `"Plus"`, or `nil` when the server named no plan (the header then reads a bare "Codex").
     public let planLabel: String?
-    /// The two account-level flags, verbatim. They gate ``isReachedFlagged`` and are recorded by the
-    /// dev quota log, so an observation says whether a zero came with a spend stop.
+    /// The two account-level flags, verbatim. They feed ``isReachedFlagged`` and, through it, the
+    /// contradiction check that withholds a row; the dev quota log records them, so an observation
+    /// says whether a zero came with a spend stop.
     public let spendControlReached: Bool?
     public let rateLimitReachedType: String?
 
@@ -213,10 +214,35 @@ public struct CodexQuotaSnapshot: Sendable, Equatable {
     /// `rateLimitReachedType` is the opposite shape: an opaque string whose vocabulary is the
     /// server's and will grow. **Any** non-empty value is a reached state — naming one is the server
     /// saying it reached something, and a word we have not met yet must not read as silence.
+    ///
+    /// On its own this says nothing is wrong: an account that is genuinely up against its limit
+    /// reports it here beside a window at 100 %, which is an ordinary reading. It is the pairing with
+    /// a *spotless* window that is impossible — see ``hasContradictoryReachedFlag(now:)``.
     public var isReachedFlagged: Bool {
         if spendControlReached == true { return true }
         if let type = rateLimitReachedType, !type.isEmpty { return true }
         return false
+    }
+
+    /// Whether this read **contradicts itself**: the account is flagged reached while a window still
+    /// reports nothing spent against a horizon of its own full length.
+    ///
+    /// The server is asserting both "the limit is reached" and "nothing has been used", and the two
+    /// cannot both be true of one account. Upstream reports exactly this shape — accounts showing
+    /// 100 % left while actually rate-limited
+    /// ([openai/codex#34360](https://github.com/openai/codex/issues/34360),
+    /// [#36528](https://github.com/openai/codex/issues/36528)).
+    ///
+    /// **This is a defect in the answer, not a state of the quota**, which is why it takes the
+    /// malformed-payload treatment rather than a row: neither number can be believed, so a bar drawn
+    /// from either is a scale built on a value we have just rejected. The popup answers it the way it
+    /// answers a Claude body whose `resets_at` will not parse
+    /// (``UsageSnapshot/hasBrokenActiveReset``) — the rows are withheld and a warning is shown.
+    ///
+    /// Only the *not-started* windows contradict the flag. A window at 62 % beside a reached flag is
+    /// an account approaching or holding its limit, which is ordinary and stays fully drawn.
+    public func hasContradictoryReachedFlag(now: Date) -> Bool {
+        isReachedFlagged && windows.contains { $0.hasNotStarted(now: now) }
     }
 }
 
@@ -279,10 +305,10 @@ public struct CodexQuotaWindow: Sendable, Equatable {
     /// countdown, raises no notification, and the quota is not journalled, so nothing here has to be
     /// walked back when the next reading disagrees.
     ///
-    /// **This answers about the window and nothing else.** Whether the *account* is blocked lives on
-    /// the snapshot (``CodexQuotaSnapshot/isReachedFlagged``), and it is what decides between the two
-    /// words this state can carry — so `true` here is not on its own permission to say
-    /// `ready to start`.
+    /// **This answers about the window and nothing else, and `true` is not on its own permission to
+    /// draw the row.** The account-level reached flags live on the snapshot, and this state beside a
+    /// raised one is a self-contradicting payload rather than a fresh window — see
+    /// ``CodexQuotaSnapshot/hasContradictoryReachedFlag(now:)``, which withholds the row entirely.
     public func hasNotStarted(now: Date) -> Bool {
         guard utilization == 0, durationSeconds > 0, let resetsAt else { return false }
         let ahead = resetsAt.timeIntervalSince(now)
@@ -327,15 +353,19 @@ public enum CodexQuotaNormalizer {
     /// 5-hour bar above its 7-day one — makes adding one the obvious move, and it would be a drawn
     /// bar for a limit this server does not report, under a reset date invented to fill the field.
     /// Codex reports the windows it has; the plate shows those and no others.
+    /// **A window contradicted by the account's reached flags gets no row at all**, so no bar is
+    /// drawn from numbers the read has just disqualified. The fault is reported instead, by
+    /// ``CodexQuotaSnapshot/hasContradictoryReachedFlag(now:)``, and both surfaces read this one
+    /// array — so dropping the row here is also what keeps the bar out of the menu bar.
+    ///
+    /// The reached flags are account-level while `hasNotStarted` is a window's own question, and the
+    /// two meet here: this is the one place holding both. Copying the account fact onto every window
+    /// instead would let two rows off one read disagree about whether the account is blocked.
     public static func rows(from snapshot: CodexQuotaSnapshot, now: Date) -> [LimitRow] {
-        // The reached flags are account-level and `hasNotStarted` is a window's own question, so the
-        // two meet here rather than inside the window: this is the one place holding both, and the
-        // alternative — copying an account fact onto every window — would let two rows off one read
-        // disagree about whether the account is blocked.
-        let blocked = snapshot.isReachedFlagged
-        return snapshot.windows.map { window in
+        let flagged = snapshot.isReachedFlagged
+        return snapshot.windows.compactMap { window in
             if window.hasNotStarted(now: now) {
-                return notStartedRow(for: window, blocked: blocked)
+                return flagged ? nil : notStartedRow(for: window)
             }
             let resetsAt = window.resetsAt ?? now
             let bar = PacingModel.barLayout(
@@ -378,13 +408,10 @@ public enum CodexQuotaNormalizer {
     /// The bar is inert. `.onPaceOrBehind` makes `severity` read `.calm` before `remainingSeconds` is
     /// consulted, so the zeroes below are never drawn from.
     ///
-    /// **`blocked` swaps the word, not the row.** With the account flagged reached
-    /// (``CodexQuotaSnapshot/isReachedFlagged``) the same shape goes grey and reads
-    /// `waiting for limit reset` — Claude's wording for an idle window with no path to start, kept
-    /// deliberately neutral about *which* limit blocks, which is what lets a Codex spend stop borrow
-    /// it unchanged. `ready to start` is the one thing this row must not say then: it invites the
-    /// work the server has already refused.
-    static func notStartedRow(for window: CodexQuotaWindow, blocked: Bool = false) -> LimitRow {
+    /// **Only reached for an unflagged read.** The encouraging word rests on the whole payload
+    /// agreeing with itself; when the account is flagged reached the caller emits no row at all
+    /// rather than recolouring this one.
+    static func notStartedRow(for window: CodexQuotaWindow) -> LimitRow {
         LimitRow(
             title: title(forDurationSeconds: window.durationSeconds),
             utilization: 0,
@@ -396,8 +423,7 @@ public enum CodexQuotaNormalizer {
             subdivisions: PacingModel.subdivisions(
                 forWindowDurationSeconds: window.durationSeconds),
             resetLine: nil,
-            sessionIdle: true,
-            sessionBlocked: blocked)
+            sessionIdle: true)
     }
 
     /// The row's heading, named after its length so the two providers' weeks read alike: `"7-day"`

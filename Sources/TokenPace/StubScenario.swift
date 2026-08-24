@@ -210,7 +210,7 @@ enum StubScenario: String, CaseIterable {
         case .codexQuotaExhausted: return "Codex quota — limit reached"
         case .codexTwoWindows:     return "Codex quota — two windows"
         case .codexQuotaNotStarted: return "Codex quota — window not started"
-        case .codexQuotaReached:   return "Codex quota — flagged reached at 0 %"
+        case .codexQuotaReached:   return "Codex quota — self-contradicting read"
         case .codexNotSignedIn:    return "Codex quota — not signed in"
         case .codexCLIMissing:     return "Codex quota — codex not installed"
         case .codexCLIOld:         return "Codex quota — codex too old"
@@ -463,12 +463,13 @@ enum StubScenario: String, CaseIterable {
                  + "green knobless bar. Troubleshoot still carries the raw epoch under "
                  + "`Reported resets`, and it advances between reads."
         case .codexQuotaReached:
-            return "The SAME spotless reading, with the account flagged reached — upstream reports "
-                 + "accounts showing 100 % left while blocked. The row must NOT say \"ready to "
-                 + "start\": it goes GREY and reads `7-day  waiting for limit reset`, on both the "
-                 + "plate and the menu-bar block. Compare it side by side with "
-                 + "`codex-quota-not-started`, whose only difference is the flag: identical numbers, "
-                 + "opposite verdicts."
+            return "The SAME spotless reading, with the account flagged reached — a payload that "
+                 + "contradicts itself, since 'limit reached' and 'nothing used' cannot both hold. "
+                 + "The Codex plate must show NO BAR at all for that window: in its place a red "
+                 + "⚠️ block reading `Codex reset time bug` over a line saying the numbers cannot "
+                 + "be trusted. The MENU BAR must show no Codex bar either. Compare with "
+                 + "`codex-quota-not-started`, whose only difference is the flag: identical "
+                 + "numbers, one draws a green ready-to-start bar and this one draws none."
         case .codexNotSignedIn:
             return "Codex installed but signed out: the plate keeps its status half and shows no "
                  + "bars. Troubleshoot carries the reason; the popup shows no warning banner, since "
@@ -755,9 +756,8 @@ enum StubScenario: String, CaseIterable {
         // the server's does — the defect is only visible when the value is recomputed per read.
         case .codexQuotaNotStarted:
             return StubCodexQuotaSource(.notStarted([604_800]), now: now)
-        // The same reading with the account flagged reached. It cannot be produced on a live
-        // account on demand, and it is the pair the gate exists for: a spotless window under a
-        // server that has already said no.
+        // The same reading with the account flagged reached — the self-contradicting payload. It
+        // cannot be produced on a live account on demand, and it is the one the gate exists for.
         case .codexQuotaReached:
             return StubCodexQuotaSource(.notStartedReached([604_800]), now: now)
         // One week, the shape the server actually sends today.

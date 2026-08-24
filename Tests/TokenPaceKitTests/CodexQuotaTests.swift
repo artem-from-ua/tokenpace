@@ -657,7 +657,7 @@ struct CodexQuotaTests {
         #expect(snapshot.rateLimitReachedType == nil)
     }
 
-    // MARK: - The reached flags gate the encouraging row (#518)
+    // MARK: - A read that contradicts itself withholds the row (#518)
 
     /// A snapshot in the not-started shape, with whatever the caller wants the account flags to say.
     private static func notStartedSnapshot(spendControl: Bool? = nil,
@@ -679,8 +679,8 @@ struct CodexQuotaTests {
         #expect(!Self.notStartedSnapshot(spendControl: false, reachedType: nil).isReachedFlagged)
     }
 
-    /// Either flag alone is enough — they name different blockers and the row's answer is the same
-    /// either way, so neither may depend on the other being set.
+    /// Either flag alone is enough — they name different blockers and the read is equally
+    /// self-contradicting either way, so neither may depend on the other being set.
     @Test("either flag alone flags the account")
     func eitherFlagAloneCounts() {
         #expect(Self.notStartedSnapshot(spendControl: true).isReachedFlagged)
@@ -696,25 +696,45 @@ struct CodexQuotaTests {
         #expect(!Self.notStartedSnapshot(reachedType: "").isReachedFlagged)
     }
 
-    /// The defect itself: a window whose numbers say "fresh" over an account the server has stopped.
-    /// The row keeps the idle shape — nothing is spent and there is still no reset to count down to —
-    /// and swaps `ready to start` for the grey `waiting for limit reset` the view draws on
-    /// `sessionBlocked`.
-    @Test("a flagged account turns the not-started row blocked, not encouraging")
-    func flaggedAccountBlocksTheRow() throws {
-        let rows = CodexQuotaNormalizer.rows(from: Self.notStartedSnapshot(reachedType: "primary"),
-                                             now: Self.now)
-        let row = try #require(rows.first)
-        #expect(row.sessionIdle)
-        #expect(row.sessionBlocked)
-        // Still the same row otherwise: no countdown appears alongside the changed word.
-        #expect(row.title == "7-day")
-        #expect(row.resetLine == nil)
-        #expect(row.resetLineVerbose == nil)
-        #expect(row.utilization == 0)
+    /// A raised flag on its own is ordinary — an account that really has hit its limit says so beside
+    /// a window at 100 %. It is the pairing with a **spotless** window that cannot be true.
+    @Test("a reached flag contradicts only a window that has not started")
+    func contradictionNeedsBothHalves() {
+        #expect(Self.notStartedSnapshot(reachedType: "primary")
+            .hasContradictoryReachedFlag(now: Self.now))
+        // Flagged and genuinely spent: consistent, and nothing is withheld.
+        let spent = CodexQuotaSnapshot(
+            windows: [CodexQuotaWindow(utilization: 100, durationSeconds: 604_800,
+                                       resetsAt: Self.now.addingTimeInterval(200_000))],
+            planLabel: "Plus", rateLimitReachedType: "primary")
+        #expect(!spent.hasContradictoryReachedFlag(now: Self.now))
+        // Spotless and unflagged: the ordinary post-reset reading.
+        #expect(!Self.notStartedSnapshot().hasContradictoryReachedFlag(now: Self.now))
     }
 
-    /// The unflagged reading must stay encouraging, or the gate has replaced one wrong row with
+    /// The defect itself. Neither number can be believed, so **no row is emitted** — a bar drawn from
+    /// either would be a scale built on a value the read has just disqualified. This is the shape a
+    /// malformed Claude body already takes: withhold, then warn.
+    @Test("a contradicted window yields no row at all")
+    func contradictedWindowYieldsNoRow() {
+        let rows = CodexQuotaNormalizer.rows(from: Self.notStartedSnapshot(reachedType: "primary"),
+                                             now: Self.now)
+        #expect(rows.isEmpty)
+    }
+
+    /// Not a grey row, not a zeroed one, not an idle one — the absence has to be total, or a bar is
+    /// still being drawn from the rejected numbers.
+    @Test("the withheld row is absent, not merely recoloured")
+    func withheldRowIsNotADecoratedOne() {
+        for snapshot in [Self.notStartedSnapshot(spendControl: true),
+                         Self.notStartedSnapshot(reachedType: "weekly")] {
+            let rows = CodexQuotaNormalizer.rows(from: snapshot, now: Self.now)
+            #expect(rows.allSatisfy { !$0.sessionIdle && !$0.sessionBlocked })
+            #expect(rows.isEmpty)
+        }
+    }
+
+    /// The unflagged reading must stay encouraging, or the fix has replaced one wrong row with
     /// another — this is the state every ordinary Codex reset passes through.
     @Test("an unflagged not-started row stays ready to start")
     func unflaggedRowStaysReady() throws {
@@ -724,9 +744,9 @@ struct CodexQuotaTests {
         #expect(!row.sessionBlocked)
     }
 
-    /// The flags gate the **not-started** row and nothing else. An anchored window already renders
-    /// its own percentage, pacing and countdown, all of which stay true while the account is flagged;
-    /// suppressing them would remove information the user acts on.
+    /// The flags withhold the **contradicted** row and nothing else. An anchored window's percentage,
+    /// pacing and countdown are not in question — the account being at its limit is exactly what such
+    /// a window reports — so suppressing them would remove information the user acts on.
     @Test("a flagged account leaves an anchored row untouched")
     func flaggedAccountLeavesAnchoredRowsAlone() throws {
         let snapshot = CodexQuotaSnapshot(
@@ -740,42 +760,53 @@ struct CodexQuotaTests {
         #expect(row.resetLine != nil)
     }
 
-    /// The flag is account-level while `hasNotStarted` is per window, so with two windows reported
-    /// only the ones that have not started take the blocked word — and every one of them does, since
-    /// one account cannot be blocked for one window and free for another.
-    @Test("the account flag reaches every not-started window and no other")
-    func flagAppliesPerWindowByState() {
+    /// The flag is account-level while `hasNotStarted` is per window, so a multi-window read loses
+    /// only the contradicted rows — the surviving one still has trustworthy numbers and still draws.
+    @Test("only the contradicted windows are withheld from a multi-window read")
+    func onlyContradictedWindowsAreWithheld() throws {
         let snapshot = CodexQuotaSnapshot(
             windows: [
                 CodexQuotaWindow(utilization: 0, durationSeconds: 604_800,
                                  resetsAt: Self.now.addingTimeInterval(604_800)),
-                CodexQuotaWindow(utilization: 0, durationSeconds: 18_000,
-                                 resetsAt: Self.now.addingTimeInterval(18_000)),
                 CodexQuotaWindow(utilization: 12, durationSeconds: 18_000,
                                  resetsAt: Self.now.addingTimeInterval(9_000)),
             ],
             planLabel: "Plus", rateLimitReachedType: "primary")
         let rows = CodexQuotaNormalizer.rows(from: snapshot, now: Self.now)
-        #expect(rows.count == 3)
-        #expect(rows[0].sessionIdle && rows[0].sessionBlocked)
-        #expect(rows[1].sessionIdle && rows[1].sessionBlocked)
-        #expect(!rows[2].sessionIdle && !rows[2].sessionBlocked)
+        let row = try #require(rows.first)
+        #expect(rows.count == 1)
+        #expect(row.title == "5-hour")
+        #expect(row.utilization == 12)
+        // The fault is still reported: one window's numbers were rejected even though another's
+        // survived, so the plate warns above the bar it can still draw.
+        #expect(snapshot.hasContradictoryReachedFlag(now: Self.now))
     }
 
-    /// The blocked row must reach the widget as the grey idle bar, not as a green one — the menu bar
-    /// answers "can I work" with less room than the popup, so a wrong word there is a wrong answer
-    /// with nothing beside it to correct the impression.
-    @Test("the blocked row reaches the menu-bar block and its spoken label")
-    func blockedRowReachesTheMenuBar() throws {
+    /// Both surfaces read the one row array, so withholding the row is also what keeps the bar out of
+    /// the widget. A menu-bar bar for this state would be the same untrustworthy scale in the surface
+    /// with the least room to qualify it.
+    @Test("a contradicted read contributes no menu-bar block")
+    func contradictedReadDrawsNoMenuBarBlock() {
         let rows = CodexQuotaNormalizer.rows(from: Self.notStartedSnapshot(spendControl: true),
                                              now: Self.now)
-        let block = try #require(MenuBarLayout.block(for: .codex, rows: rows))
-        let bar = try #require(block.bars.first)
-        #expect(bar.idle)
-        #expect(bar.blocked)
-        let layout = MenuBarLayout(mode: .expanded(blocks: [block]))
-        #expect(layout.spokenDescription.contains("waiting for reset"))
-        #expect(!layout.spokenDescription.contains("ready to start"))
+        #expect(MenuBarLayout.block(for: .codex, rows: rows) == nil)
+    }
+
+    /// Drawing nothing is right, but silence is what a screen reader cannot tell apart from a
+    /// provider that is switched off — so the fault is spoken, in the popup's own words.
+    @Test("the widget speaks the fault it does not draw")
+    func widgetSpeaksTheFault() {
+        let claude = ProviderBlock(
+            provider: .claude,
+            bars: [BarView(layout: BarLayout(usageFraction: 0.3, timeFraction: 0.5,
+                                             pacing: .onPaceOrBehind, remainingSeconds: 3_600,
+                                             windowDurationSeconds: 18_000),
+                           indicator: .neutral, window: .fiveHour)])
+        let layout = MenuBarLayout(mode: .expanded(blocks: [claude]))
+            .withQuotaFaults([.codex])
+        #expect(layout.spokenDescription.contains("Codex: reset time bug"))
+        // And it does not borrow a pacing verdict for numbers it just rejected.
+        #expect(!layout.spokenDescription.contains("Codex: 7-day"))
     }
 
     private static let candidates = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]

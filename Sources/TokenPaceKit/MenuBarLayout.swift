@@ -310,14 +310,24 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// from `AwaitingInputWatcher`, independent of the usage snapshot, so it's grafted on like
     /// `credits`/`blockedPause` rather than computed in `make`.
     public let awaitingInput: AwaitingSessions?
+    /// Providers whose quota read contradicted itself, so they contribute **no block**: the numbers
+    /// that would have drawn one were withheld as untrustworthy.
+    ///
+    /// **Speech only.** Nothing is drawn for it — a glyph would claim widget width for a provider the
+    /// widget cannot say anything true about, and the popup carries the explanation. But silence is
+    /// exactly what a screen-reader user cannot tell apart from a provider that is simply off, so the
+    /// spoken description names the fault.
+    public let quotaFaults: Set<ProviderID>
 
     public init(mode: MenuBarMode, serviceProblem: ServiceStatus? = nil, credits: CreditsMarker? = nil,
-                blockedPause: Bool = false, awaitingInput: AwaitingSessions? = nil) {
+                blockedPause: Bool = false, awaitingInput: AwaitingSessions? = nil,
+                quotaFaults: Set<ProviderID> = []) {
         self.mode = mode
         self.serviceProblem = serviceProblem
         self.credits = credits
         self.blockedPause = blockedPause
         self.awaitingInput = awaitingInput
+        self.quotaFaults = quotaFaults
     }
 
     // MARK: make
@@ -680,13 +690,20 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///
     /// Blocks with no bars are dropped rather than merged, so `expanded`'s invariant holds however
     /// empty the caller's data turns out to be.
+    /// A copy naming the providers whose quota read contradicted itself. Spoken, never drawn.
+    public func withQuotaFaults(_ faults: Set<ProviderID>) -> MenuBarLayout {
+        MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits,
+                      blockedPause: blockedPause, awaitingInput: awaitingInput,
+                      quotaFaults: faults)
+    }
+
     public func withProviderBlocks(_ blocks: [ProviderBlock]) -> MenuBarLayout {
         guard case let .expanded(existing) = mode else { return self }
         let merged = (existing + blocks.filter { !$0.bars.isEmpty })
             .sorted { $0.provider.displayIndex < $1.provider.displayIndex }
         return MenuBarLayout(mode: .expanded(blocks: merged), serviceProblem: serviceProblem,
                              credits: credits, blockedPause: blockedPause,
-                             awaitingInput: awaitingInput)
+                             awaitingInput: awaitingInput, quotaFaults: quotaFaults)
     }
 
     /// A copy of this layout without the blocks the user unchecked under Appearance → Menu bar
@@ -702,7 +719,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         let survivors = kept.isEmpty ? Array(blocks.prefix(1)) : kept
         return MenuBarLayout(mode: .expanded(blocks: survivors), serviceProblem: serviceProblem,
                              credits: credits, blockedPause: blockedPause,
-                             awaitingInput: awaitingInput)
+                             awaitingInput: awaitingInput, quotaFaults: quotaFaults)
     }
 
     /// One satellite provider's block from the popup rows its plate already draws, or `nil` when it has
@@ -756,6 +773,10 @@ public struct MenuBarLayout: Sendable, Equatable {
         case let .weeklyResetUnknown(provider):
             parts.append("\(provider.displayName): weekly reset time unknown")
         }
+        // The same words the popup's warning block uses, so the two surfaces name one fault once —
+        // the rule `weeklyResetUnknownTitle` follows for its own state.
+        parts += quotaFaults.sorted { $0.displayIndex < $1.displayIndex }
+            .map { "\($0.displayName): reset time bug, quota numbers unavailable" }
         if let serviceProblem, serviceProblem != .operational {
             parts.append("Services \(Self.spokenStatus(serviceProblem))")
         }
