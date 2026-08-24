@@ -392,9 +392,13 @@ struct DropdownPane: View {
             // true and worth drawing with `Settings…` and `Quit` permanently on screen. Neither row
             // disables the other; all four combinations are states someone may want.
             Section {
-                // No `SettingsHint`: the label names the caption verbatim and the caption says what it
-                // does.
-                Toggle("Show «hold ⌥ Option» hint", isOn: Binding(
+                // No `SettingsHint`: the caption is one short line and says what it does, so a
+                // description under this row would only repeat it.
+                //
+                // The label names the modifier rather than quoting the caption. Quoting it needed
+                // quotation marks, and every other switch in Settings simply describes what it turns
+                // on — this row was the only one in guillemets, which are not English punctuation.
+                Toggle("Show the ⌥ Option hint", isOn: Binding(
                     get: { model.showOptionHint },
                     set: { model.setShowOptionHint($0) }))
 
