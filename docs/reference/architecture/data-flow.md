@@ -319,9 +319,14 @@ disk is later read back for analytics. Three links, each its own session/PR agai
    the launch migration folds runs already on disk the same way
    ([ADR-0123](../../adr/0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md)). The
    actor's gap clock (`lastPollInstant`) advances on every attempt, written or not — the resume
-   marker answers "were we polling", and inside a run we were.
+   marker answers "were we polling", and inside a run we were. Both the clock and the open run are
+   **per provider**, and every row of every kind carries `provider`
+   ([ADR-0124](../../adr/0124-journal-records-carry-their-provider.md)): one shared clock would let
+   one provider's polling suppress another's resume marker, so an outage would leave no hole in the
+   record and read as continuous observation.
 2. **Aggregator (#244)** — the pure `UsageGridAggregator.grid(...)`: `[JournalRecord]` → a
-   **days × hours** grid for one metric under one filter (5h/7d). The pilot metric
+   **days × hours** grid for one metric under one filter (5h/7d), for one provider (default
+   `.claude` — an unfiltered count over a mixed file sums two series and looks plausible). The pilot metric
    `sampleDensity` counts sample density; gap cells (`GridCell.gap`) are kept separate from "0
    samples" so the visualization doesn't interpolate across a gap (the same honesty as
    `ServiceStatus.unknown`/ADR-0027). AppKit-free, in `TokenPaceKit` — one place the pilot chart

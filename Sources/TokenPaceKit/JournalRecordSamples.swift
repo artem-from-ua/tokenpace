@@ -32,6 +32,8 @@ public struct UsageSample: Sendable, Equatable, Codable {
     /// - **4** — #426: every window's `sev` is recomputed by the **current** colour model and stamped
     ///   with ``sevV``; the value written at poll time survives as `sevRaw` on the windows where the
     ///   two disagree. Adds the field, so it is a format bump as well as a colour-model one.
+    /// - **5** — #502: ``provider`` names whose quota the line measures. Nothing else moves, and
+    ///   ``sevV`` deliberately does not: the colour model is unchanged.
     public let v: Int
     /// Which generation of the **colour model** produced this line's `sev` values — the second axis
     /// described on ``v``.
@@ -44,6 +46,11 @@ public struct UsageSample: Sendable, Equatable, Codable {
     /// "older than the first generation that named itself". That is what makes a re-run cheap to scope
     /// — migrate the lines whose `sevV` is below ``currentColorVersion``, leave the rest alone.
     public let sevV: Int
+    /// Whose quota this line measures (``ProviderID``, a journal-stable snake_case string).
+    ///
+    /// Stored as `String` rather than the enum so a line written by a build that knows a provider
+    /// this one does not still decodes, instead of failing the whole record.
+    public let provider: String
     /// Poll timestamp (ISO-8601, UTC, no fractional seconds — ``ResetClock/isoString(from:)``).
     public let t: String
     /// Usage-API response latency in milliseconds, or `nil` when unmeasured.
@@ -69,7 +76,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
     public let blockingReset: BlockingResetSample?
 
     /// The version this build writes. Bump together with the case list on ``v``.
-    public static let currentVersion = 4
+    public static let currentVersion = 5
 
     /// The colour-model generation this build writes into ``sevV``. Bump it whenever a change to
     /// ``PacingBucket``/``PacingModel`` would give an existing sample a different `sev` — that is the
@@ -82,6 +89,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
     public init(
         v: Int = UsageSample.currentVersion,
         sevV: Int = UsageSample.currentColorVersion,
+        provider: String = ProviderID.claude.rawValue,
         t: String,
         ms: Int? = nil,
         plan: String? = nil,
@@ -100,6 +108,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
     ) {
         self.v = v
         self.sevV = sevV
+        self.provider = provider
         self.t = t
         self.ms = ms
         self.plan = plan
@@ -118,7 +127,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case v, sevV, t, ms, plan, tier, h5, d7, opus, sonnet, scoped, sessionIdle, spend
+        case v, sevV, provider, t, ms, plan, tier, h5, d7, opus, sonnet, scoped, sessionIdle, spend
         case blocked, credits, brokenReset, blockingReset
     }
 
@@ -130,6 +139,10 @@ public struct UsageSample: Sendable, Equatable, Codable {
         // Absent means "written before any colour model named itself" — see the field's doc. Not 1:
         // that number is claimed by the model #426 shipped, and a v1 line has no claim to it.
         self.sevV = try c.decodeIfPresent(Int.self, forKey: .sevV) ?? 0
+        // The Claude fallback exists for lines a rewrite cannot reach — a `.v4.bak`, a line pasted
+        // into a bug report — not as a policy: the migration writes the key onto every stored line.
+        self.provider = try c.decodeIfPresent(String.self, forKey: .provider)
+            ?? ProviderID.claude.rawValue
         self.t = try c.decodeIfPresent(String.self, forKey: .t) ?? ""
         self.ms = try c.decodeIfPresent(Int.self, forKey: .ms)
         self.plan = try c.decodeIfPresent(String.self, forKey: .plan)
@@ -257,6 +270,12 @@ public struct StatusSample: Sendable, Equatable, Codable {
 /// A failed usage poll as journalled — enough to tell 429 (client) from 5xx (server) from a
 /// malformed body, plus the retry-after hint and the request latency.
 public struct ErrorSample: Sendable, Equatable, Codable {
+    /// Which provider's poll failed (``ProviderID``, a journal-stable snake_case string). A `String`
+    /// for the reason ``UsageSample/provider`` is one.
+    ///
+    /// Part of a run's identity, so two providers failing identically never fold into one line
+    /// (``ErrorRunCollapse/admit(_:sample:at:)``).
+    public let provider: String
     public let t: String
     /// HTTP status as a number (`429`/`503`/…) when a response arrived, or a non-HTTP category string
     /// (`"timeout"`/`"dns"`/`"network"`/`"decode"`/`"nonHTTP"`/`"notSent"`). Encoded as a JSON value
@@ -289,16 +308,18 @@ public struct ErrorSample: Sendable, Equatable, Codable {
     /// inside a run are not kept.
     public let tEnd: String?
     /// The version this build writes. Bump together with the shape.
-    public static let currentVersion = 2
+    public static let currentVersion = 3
     /// This line's own format counter — unrelated to ``UsageSample/v`` and ``StatusSample/v``.
-    /// v1 predates ``detail``/``n``/``tEnd``; an absent `v` decodes as 1.
+    /// v1 predates ``detail``/``n``/``tEnd``, v2 predates ``provider``; an absent `v` decodes as 1.
     public let v: Int
 
     public init(
         t: String, code: ErrorCode, reason: String, detail: String? = nil,
         retryAfter: TimeInterval? = nil, ms: Int? = nil,
-        n: Int? = nil, tEnd: String? = nil, v: Int = ErrorSample.currentVersion
+        n: Int? = nil, tEnd: String? = nil, v: Int = ErrorSample.currentVersion,
+        provider: String = ProviderID.claude.rawValue
     ) {
+        self.provider = provider
         self.t = t
         self.code = code
         self.reason = reason
@@ -310,10 +331,15 @@ public struct ErrorSample: Sendable, Equatable, Codable {
         self.v = v
     }
 
-    private enum CodingKeys: String, CodingKey { case t, code, reason, detail, retryAfter, ms, n, tEnd, v }
+    private enum CodingKeys: String, CodingKey {
+        case t, code, reason, detail, retryAfter, ms, n, tEnd, v, provider
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Same fallback discipline as ``UsageSample/provider``: for the lines a rewrite cannot reach.
+        self.provider = try c.decodeIfPresent(String.self, forKey: .provider)
+            ?? ProviderID.claude.rawValue
         self.t = try c.decodeIfPresent(String.self, forKey: .t) ?? ""
         self.code = try c.decodeIfPresent(ErrorCode.self, forKey: .code) ?? .category("unknown")
         self.reason = try c.decodeIfPresent(String.self, forKey: .reason) ?? "unknown"
@@ -356,20 +382,47 @@ public enum ErrorCode: Sendable, Equatable, Codable {
 /// A marker written after a sampling gap longer than the expected interval — so a reader can tell
 /// "nothing happened" from "we weren't looking" and never interpolate across the hole.
 public struct ResumeMarker: Sendable, Equatable, Codable {
+    /// This shape's own format counter — unrelated to every other kind's `v`.
+    ///
+    /// - **0** — the original shape, which carried no counter at all. An absent `v` reads as **0**,
+    ///   not 1: the field never existed here, so there is no generation "1" to claim. Same argument
+    ///   as ``UsageSample/sevV``, and it makes the migration predicate `v < currentVersion` read
+    ///   identically for all four kinds.
+    /// - **1** — #502: ``provider`` names whose observation gap this marks.
+    public let v: Int
+    /// Whose gap this is (``ProviderID``, a journal-stable snake_case string). A `String` for the
+    /// reason ``UsageSample/provider`` is one.
+    ///
+    /// Each provider's writer keeps its own gap clock, so one provider's polling can never suppress
+    /// another's marker and read an outage as continuous observation.
+    public let provider: String
     /// Timestamp of the first poll after the gap.
     public let t: String
     /// The gap length in seconds (`now − previous`).
     public let gap: TimeInterval
 
-    public init(t: String, gap: TimeInterval) {
+    /// The version this build writes. Bump together with the case list on ``v``.
+    public static let currentVersion = 1
+
+    public init(
+        t: String, gap: TimeInterval,
+        v: Int = ResumeMarker.currentVersion,
+        provider: String = ProviderID.claude.rawValue
+    ) {
+        self.v = v
+        self.provider = provider
         self.t = t
         self.gap = gap
     }
 
-    private enum CodingKeys: String, CodingKey { case t, gap }
+    private enum CodingKeys: String, CodingKey { case t, gap, v, provider }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.v = try c.decodeIfPresent(Int.self, forKey: .v) ?? 0
+        // Same fallback discipline as ``UsageSample/provider``: for the lines a rewrite cannot reach.
+        self.provider = try c.decodeIfPresent(String.self, forKey: .provider)
+            ?? ProviderID.claude.rawValue
         self.t = try c.decodeIfPresent(String.self, forKey: .t) ?? ""
         self.gap = try c.decodeIfPresent(TimeInterval.self, forKey: .gap) ?? 0
     }

@@ -22,10 +22,16 @@ public enum JournalGap {
     ///   - previous: The last poll instant written to this file, or `nil` if none yet.
     ///   - now: The current poll instant.
     ///   - expectedInterval: The cadence the caller expected (e.g. the poll's effective interval).
-    public static func marker(previous: Date?, now: Date, expectedInterval: TimeInterval) -> ResumeMarker? {
+    ///   - provider: whose gap this is. `previous` must be that provider's **own** clock: a shared one
+    ///     lets one provider's polling suppress another's marker, so an outage would leave no hole and
+    ///     read as continuous observation.
+    public static func marker(
+        previous: Date?, now: Date, expectedInterval: TimeInterval,
+        provider: ProviderID = .claude
+    ) -> ResumeMarker? {
         guard let previous else { return nil }
         let gap = now.timeIntervalSince(previous)
         guard expectedInterval > 0, gap > expectedInterval * gapThresholdMultiplier else { return nil }
-        return ResumeMarker(t: ResetClock.isoString(from: now), gap: gap)
+        return ResumeMarker(t: ResetClock.isoString(from: now), gap: gap, provider: provider.rawValue)
     }
 }

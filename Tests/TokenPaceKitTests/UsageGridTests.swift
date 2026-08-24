@@ -21,7 +21,10 @@ struct UsageGridTests {
 
     /// A minimal `.usage` record at `t` — only the fields the aggregator reads matter; the windows are
     /// placeholders (the density metric ignores them).
-    private func usage(at t: Date, zone: TimeZone = UsageGridTests.utc) -> JournalRecord {
+    private func usage(
+        at t: Date, zone: TimeZone = UsageGridTests.utc,
+        provider: String = ProviderID.claude.rawValue
+    ) -> JournalRecord {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = zone
         let iso = ISO8601DateFormatter()
@@ -29,15 +32,18 @@ struct UsageGridTests {
         iso.timeZone = zone
         let win = WindowSample(util: 0, reset: "", timePct: 0, sev: .green)
         return .usage(UsageSample(
-            t: iso.string(from: t), h5: win, d7: win,
+            provider: provider, t: iso.string(from: t), h5: win, d7: win,
             credits: CreditsFlags(active: false, showIcon: false, onCredits: false)))
     }
 
-    private func resume(at t: Date, gap: TimeInterval, zone: TimeZone = UsageGridTests.utc) -> JournalRecord {
+    private func resume(
+        at t: Date, gap: TimeInterval, zone: TimeZone = UsageGridTests.utc,
+        provider: String = ProviderID.claude.rawValue
+    ) -> JournalRecord {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         iso.timeZone = zone
-        return .resume(ResumeMarker(t: iso.string(from: t), gap: gap))
+        return .resume(ResumeMarker(t: iso.string(from: t), gap: gap, provider: provider))
     }
 
     // MARK: - Shape
@@ -103,6 +109,41 @@ struct UsageGridTests {
             from: records, filter: .sevenDay, dayCount: 1, now: now, timeZone: Self.utc)
         #expect(five.cells == seven.cells)     // same count under either filter
         #expect(five.cells[0][8] == .value(5))
+    }
+
+    // MARK: - Provider filter (#502)
+
+    /// A mixed file counted without a filter double-counts every hour both providers polled, and the
+    /// result looks plausible — nothing in a density cell says it summed two series. So the parameter
+    /// defaults to `.claude` rather than "all".
+    @Test func gridCountsOnlyTheRequestedProvider() {
+        let now = date(2026, 6, 15, 23, zone: Self.utc)
+        let mine = (0..<3).map { usage(at: date(2026, 6, 15, 8, $0 * 10, zone: Self.utc)) }
+        let theirs = (0..<4).map {
+            usage(at: date(2026, 6, 15, 8, $0 * 10 + 5, zone: Self.utc), provider: "github")
+        }
+        let records = mine + theirs
+
+        let byDefault = UsageGridAggregator.grid(
+            from: records, filter: .fiveHour, dayCount: 1, now: now, timeZone: Self.utc)
+        #expect(byDefault.cells[0][8] == .value(3))
+
+        let unfiltered = UsageGridAggregator.grid(
+            from: records, filter: .fiveHour, provider: nil, dayCount: 1, now: now, timeZone: Self.utc)
+        #expect(unfiltered.cells[0][8] == .value(7))   // asking for all of them is explicit
+    }
+
+    /// Another provider's hole is not this one's: it kept polling through it, so its cells stay values.
+    @Test func aGapBelongsToTheProviderThatRecordedIt() {
+        let now = date(2026, 6, 15, 23, zone: Self.utc)
+        let records = [
+            usage(at: date(2026, 6, 15, 8, 30, zone: Self.utc)),
+            resume(at: date(2026, 6, 15, 9, 0, zone: Self.utc), gap: 3600, provider: "github"),
+        ]
+        let g = UsageGridAggregator.grid(
+            from: records, filter: .fiveHour, dayCount: 1, now: now, timeZone: Self.utc)
+        #expect(g.cells[0][8] == .value(1))
+        #expect(g.cells[0][9] == .value(0))            // not `.gap` — Claude was never blind here
     }
 
     // MARK: - Zero vs gap

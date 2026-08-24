@@ -100,6 +100,10 @@ public enum UsageGridAggregator {
     ///   - records: The stream from ``JournalReader/parse(_:)``, in file (chronological) order.
     ///   - metric: Which quantity each cell measures. Defaults to the pilot's ``UsageMetric/sampleDensity``.
     ///   - filter: The 5-hour / 7-day limit-window filter.
+    ///   - provider: Whose series to count. **Defaults to `.claude`, not `nil`** — a mixed file counted
+    ///     without a filter double-counts every hour both providers polled, and the result looks
+    ///     plausible: nothing in a density cell says it summed two series. `nil` asks for all of them
+    ///     deliberately.
     ///   - dayCount: How many day-rows to build (the most recent `dayCount` days ending with `now`).
     ///   - now: Current instant (inject for deterministic tests; do **not** call `Date()` here).
     ///   - timeZone: Wall-clock zone whose midnight/hour boundaries anchor the cells. Defaults to
@@ -109,6 +113,7 @@ public enum UsageGridAggregator {
         from records: [JournalRecord],
         metric: UsageMetric = .sampleDensity,
         filter: UsageGridFilter,
+        provider: ProviderID? = .claude,
         dayCount: Int,
         now: Date,
         timeZone: TimeZone = .current
@@ -156,7 +161,8 @@ public enum UsageGridAggregator {
         for record in records {
             switch record {
             case let .usage(sample):
-                guard let date = ResetClock.parse(sample.t), let idx = indices(for: date) else {
+                guard provider == nil || sample.provider == provider?.rawValue,
+                      let date = ResetClock.parse(sample.t), let idx = indices(for: date) else {
                     continue
                 }
                 // A gap already claimed this cell — honesty wins, leave the hole.
@@ -166,7 +172,9 @@ public enum UsageGridAggregator {
 
             case let .resume(marker):
                 // The gap covers [t − gap … t]. Mark every cell whose hour overlaps that interval.
-                guard let gapEnd = ResetClock.parse(marker.t) else { continue }
+                // Another provider's hole is not this one's: it kept polling through it.
+                guard provider == nil || marker.provider == provider?.rawValue,
+                      let gapEnd = ResetClock.parse(marker.t) else { continue }
                 let gapStart = gapEnd.addingTimeInterval(-marker.gap)
                 markGap(from: gapStart, to: gapEnd, in: &cells, calendar: calendar,
                         windowStart: windowStart, dayCount: dayCount, indices: indices)

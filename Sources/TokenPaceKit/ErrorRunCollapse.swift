@@ -8,6 +8,10 @@ import Foundation
 /// fails on every poll, and writing each one produced 122 408 identical lines from a single outage —
 /// 98% of a real user's journal, all of it saying the same thing (ADR-0123).
 public struct ErrorRun: Sendable, Equatable {
+    /// Whose polls are failing (``ProviderID`` raw value). The coarsest part of the identity: two
+    /// providers can fail with the same `code`/`reason`/`detail`/`retryAfter`, and interleaved on one
+    /// cadence they would fold into one line carrying one provider's name.
+    public let provider: String
     public let code: ErrorCode
     public let reason: String
     public let detail: String?
@@ -23,8 +27,10 @@ public struct ErrorRun: Sendable, Equatable {
 
     public init(
         code: ErrorCode, reason: String, detail: String?, retryAfter: TimeInterval?, ms: Int?,
-        first: Date, last: Date, count: Int
+        first: Date, last: Date, count: Int,
+        provider: String = ProviderID.claude.rawValue
     ) {
+        self.provider = provider
         self.code = code
         self.reason = reason
         self.detail = detail
@@ -65,10 +71,10 @@ public enum ErrorRunCollapse {
 
     /// Fold `sample` into `run`, or close it and start a new one.
     ///
-    /// A sample extends the run when the code, reason, detail and `retryAfter` all match **and** the
-    /// run would stay within ``maxRunWidth``. A sample that already carries `n` is a closed run in
-    /// its own right and never extends anything — that is what makes a second migration pass a
-    /// no-op rather than a slow merge of everything into one line.
+    /// A sample extends the run when the provider, code, reason, detail and `retryAfter` all match
+    /// **and** the run would stay within ``maxRunWidth``. A sample that already carries `n` is a
+    /// closed run in its own right and never extends anything — that is what makes a second migration
+    /// pass a no-op rather than a slow merge of everything into one line.
     public static func admit(_ run: ErrorRun?, sample: ErrorSample, at instant: Date) -> Decision {
         // An already-collapsed sample carries its own end; taking `instant` for both would shrink the
         // run to its first attempt every time it passed through, so a second migration pass would
@@ -78,11 +84,13 @@ public enum ErrorRunCollapse {
             retryAfter: sample.retryAfter, ms: sample.ms,
             first: instant,
             last: sample.tEnd.flatMap(ResetClock.parse) ?? instant,
-            count: sample.n ?? 1)
+            count: sample.n ?? 1,
+            provider: sample.provider)
 
         guard let run else { return .extend(fresh) }   // nothing open yet
 
         let matches = sample.n == nil
+            && run.provider == sample.provider
             && run.code == sample.code
             && run.reason == sample.reason
             && run.detail == sample.detail
@@ -93,7 +101,8 @@ public enum ErrorRunCollapse {
         return .extend(ErrorRun(
             code: run.code, reason: run.reason, detail: run.detail,
             retryAfter: run.retryAfter, ms: run.ms,
-            first: run.first, last: instant, count: run.count + 1))
+            first: run.first, last: instant, count: run.count + 1,
+            provider: run.provider))
     }
 
     /// The line to write for a closed run, or `nil` when there is nothing open.
@@ -111,6 +120,7 @@ public enum ErrorRunCollapse {
             retryAfter: run.retryAfter,
             ms: run.ms,
             n: collapsed ? run.count : nil,
-            tEnd: collapsed ? ResetClock.isoString(from: run.last) : nil)
+            tEnd: collapsed ? ResetClock.isoString(from: run.last) : nil,
+            provider: run.provider)
     }
 }

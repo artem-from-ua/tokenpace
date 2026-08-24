@@ -57,6 +57,59 @@ struct ErrorRunCollapseTests {
         #expect(next.detail == "keychain access denied")
     }
 
+    /// The failure this whole tag exists to prevent, one layer down: two providers can fail with the
+    /// same code, reason, detail and `retryAfter`, and folded together they would leave one line
+    /// carrying one of their names.
+    @Test func runsDoNotMergeAcrossProviders() {
+        let claude = sample()
+        let other = ErrorSample(
+            t: claude.t, code: claude.code, reason: claude.reason, detail: claude.detail,
+            retryAfter: claude.retryAfter, ms: claude.ms, provider: "github")
+        let open = ErrorRun(code: claude.code, reason: claude.reason, detail: claude.detail,
+                            retryAfter: nil, ms: nil, first: e0, last: e0, count: 3,
+                            provider: ProviderID.claude.rawValue)
+
+        let d = ErrorRunCollapse.admit(open, sample: other, at: e0.addingTimeInterval(3))
+        guard case let .flush(closed, next) = d else { Issue.record("expected flush"); return }
+        #expect(closed.count == 3)
+        #expect(closed.provider == ProviderID.claude.rawValue)
+        #expect(next.provider == "github")
+        #expect(next.count == 1)
+    }
+
+    /// The control for the test above: identical in every field including the provider, so it must
+    /// extend. Without it, a collapse switched off entirely would make `runsDoNotMergeAcrossProviders`
+    /// pass for the wrong reason.
+    @Test func theSameProviderStillExtendsTheRun() {
+        let open = ErrorRun(code: .category("notSent"), reason: "notSent", detail: "token expired",
+                            retryAfter: nil, ms: nil, first: e0, last: e0, count: 3,
+                            provider: ProviderID.claude.rawValue)
+        let d = ErrorRunCollapse.admit(open, sample: sample(), at: e0.addingTimeInterval(3))
+        guard case let .extend(run) = d else { Issue.record("expected extend"); return }
+        #expect(run.count == 4)
+    }
+
+    /// The writer keeps one open run per provider and must close **all** of them at termination — a
+    /// single-provider flush there writes one line and silently drops the rest. This covers the pure
+    /// half of that: closing a set of runs yields one line per provider, each keeping its own name and
+    /// count. The `UsageJournal.flushAllErrorRuns` loop that drives it lives in the app target, which
+    /// has no tests of its own.
+    @Test func closingASetOfRunsKeepsEveryProvidersLine() {
+        let open: [String: ErrorRun] = ["claude": 3, "github": 5].reduce(into: [:]) { acc, pair in
+            acc[pair.key] = ErrorRun(
+                code: .category("notSent"), reason: "notSent", detail: nil,
+                retryAfter: nil, ms: nil, first: e0, last: e0.addingTimeInterval(60),
+                count: pair.value, provider: pair.key)
+        }
+        let lines = open.values
+            .compactMap { ErrorRunCollapse.close($0) }
+            .sorted { $0.provider < $1.provider }
+
+        #expect(lines.count == 2)
+        #expect(lines.map(\.provider) == ["claude", "github"])
+        #expect(lines.map(\.n) == [3, 5])
+    }
+
     @Test func aDifferentCodeBreaksTheRun() {
         let open = ErrorRun(code: .category("notSent"), reason: "notSent", detail: nil,
                             retryAfter: nil, ms: nil, first: e0, last: e0, count: 2)
