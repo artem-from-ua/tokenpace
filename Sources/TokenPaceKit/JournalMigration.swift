@@ -69,6 +69,22 @@ import Foundation
 ///   into one line carrying one of their names — the very merge this tag exists to prevent, one
 ///   layer down.
 ///
+/// ## Why the windows move into an array, and the old keys go (#508)
+///
+/// `h5`/`d7` were fixed keys, so a provider reporting one window had to invent the other — a drawn
+/// bar for a limit the server does not report, under a fabricated reset. The v6 pass moves each
+/// window into `windows[]` stamped with its own `secs`, which is what identifies it: Codex names a
+/// window's duration and nothing else, and it left its weekly window in the slot called `primary`
+/// while its five-hour limit was absent, so position names nothing.
+///
+/// **The old keys are removed rather than written beside the array.** Duplicated fields in an
+/// append-only file are permanent, and a reader that accepts either spelling is a branch every
+/// consumer carries forever — the argument the first section of this docblock makes.
+///
+/// The move is a **reshaping**, not a recomputation: every window keeps its `util`, its `sevRaw`
+/// history, and its reconstruction state (`utilSrc`/`resetSrc`/`n`). `sevV` does not move, because
+/// the colour model has not.
+///
 /// ## What the migration must survive
 ///
 /// - **Every kind is rewritten while its own `v` is behind, and passes through untouched once
@@ -101,8 +117,8 @@ public enum JournalMigration {
         /// Individual **windows** whose colour bucket changed when the current model was replayed over
         /// them (#426) — each one now carries a `sevRaw` with its original verdict.
         ///
-        /// Windows, not lines: one sample holds up to six of them, and a line where only the scoped row
-        /// moved is a different event from one where `h5` and `d7` both did. Distinct from
+        /// Windows, not lines: one sample holds several of them, and a line where only the scoped row
+        /// moved is a different event from one where both limit windows did. Distinct from
         /// ``resetsRepaired`` in kind as well as in count — that one restores a fact the app got wrong,
         /// this one re-judges a fact it recorded correctly under rules that have since changed.
         public let severitiesRecomputed: Int
@@ -166,7 +182,9 @@ public enum JournalMigration {
         /// caller can skip the rewrite (and the backup) entirely.
         ///
         /// Keyed on **every** counter that corresponds to a rewritten line. `migrated` counts usage
-        /// samples rewritten for any reason (a stale format, a stale colour model, or both);
+        /// samples rewritten for any reason (a stale format, a stale colour model, or both) — which
+        /// is why moving the windows into an array added no counter of its own: that is a format
+        /// bump, and a second counter would describe the same rewrite twice;
         /// `statusTagged`, `errorTagged` and `resumeTagged` count lines of the other three kinds
         /// relabelled with their provider; `errorsCollapsed` counts runs folded.
         ///
@@ -420,60 +438,89 @@ public enum JournalMigration {
             let goesBackwards = at == nil || (lastAccepted.map { at! < $0 } ?? false)
             if goesBackwards { outOfOrder += 1 }
 
-            let weekly: WeeklyUtilization
+            // The seven-day window is the only one the reconstruction and the blackout repair have
+            // anything to say about, and it is the one input the five-hour window cannot supply for
+            // itself — so it is settled first, and the rest of the array follows.
+            //
+            // Optional since v6: a provider may report no weekly window at all, and every step below
+            // is then skipped rather than run against a fabricated one.
             if let at, !goesBackwards {
-                interpolator = interpolator.advanced(
-                    with: snapshot(from: sample), now: at)
+                // Advanced on every line that moves time forward, weekly window or not: skipping it
+                // would leave the next line with one reading as out of order.
+                interpolator = interpolator.advanced(with: snapshot(from: sample), now: at)
                 lastAccepted = at
-                weekly = interpolator.value(forRaw: sample.d7.raw)
-            } else {
-                weekly = .passthrough(sample.d7.raw)
             }
 
-            // Repair a weekly reset that was written as a `now + 7d` estimate (ADR-0107). Those lines
-            // are identifiable by their signature and recoverable from the anchor that preceded them;
-            // `timePct` is recomputed with them, because it is derived from the date and was pinned
-            // to 0 for the whole blackout.
-            let repaired = repairWeeklyReset(sample.d7, at: at, anchor: weeklyAnchor)
-            if repaired.source == .reconstructed { resetsRepaired += 1 }
-            if !repaired.wasEstimated, let real = ResetClock.parse(sample.d7.reset), !goesBackwards {
-                weeklyAnchor = real          // a genuine server date: the anchor for what follows
-            }
+            var d7: WindowSample?
+            if let original = sample.d7 {
+                let weekly: WeeklyUtilization = at != nil && !goesBackwards
+                    ? interpolator.value(forRaw: original.raw)
+                    : .passthrough(original.raw)
 
-            // The seven-day window, rebuilt first: everything below needs its final values. `util` and
-            // `reset`/`timePct` are settled here, and only then is the colour judged — the v2 → v3 pass
-            // rewrote the date and kept the old `sev`, which left blackout lines carrying a verdict
-            // reached against a `timePct` that had since been corrected.
-            let d7Util = weekly.effective
-            let d7Sev = recomputedSeverity(
-                util: d7Util, timePct: repaired.timePct, reset: repaired.reset,
-                at: at, window: .sevenDay,
-                // The 7-day bar never gates on itself.
-                blueAllowed: true)
-            // The weekly gate for the 5-hour bar, from this same line's final weekly values — the one
-            // input a window cannot supply for itself. Closed by default: without a usable date there
-            // is no trustworthy weekly clock, and the advice is withheld rather than guessed
+                // Repair a weekly reset that was written as a `now + 7d` estimate (ADR-0107). Those
+                // lines are identifiable by their signature and recoverable from the anchor that
+                // preceded them; `timePct` is recomputed with them, because it is derived from the
+                // date and was pinned to 0 for the whole blackout.
+                let repaired = repairWeeklyReset(original, at: at, anchor: weeklyAnchor)
+                if repaired.source == .reconstructed { resetsRepaired += 1 }
+                if !repaired.wasEstimated, let real = ResetClock.parse(original.reset), !goesBackwards {
+                    weeklyAnchor = real      // a genuine server date: the anchor for what follows
+                }
+
+                // `util` and `reset`/`timePct` are settled before the colour is judged — the v2 → v3
+                // pass rewrote the date and kept the old `sev`, which left blackout lines carrying a
+                // verdict reached against a `timePct` that had since been corrected.
+                d7 = WindowSample(
+                    util: weekly.effective, raw: weekly.raw,
+                    utilSrc: weekly.source.rawValue, resetSrc: repaired.source.rawValue,
+                    n: weekly.ratio,
+                    reset: repaired.reset, timePct: repaired.timePct,
+                    sev: recomputedSeverity(
+                        util: weekly.effective, timePct: repaired.timePct, reset: repaired.reset,
+                        at: at, windowSeconds: original.secs,
+                        // The 7-day bar never gates on itself.
+                        blueAllowed: true),
+                    // The verdict the poll wrote, which on a line migrated once already is the
+                    // `sevRaw` it carries and not its current `sev` — the marker always names the
+                    // value being replaced. Taking `sev` here instead overwrites the original with
+                    // an intermediate one, and where the two now agree it drops the marker
+                    // altogether: 102 of them on the maintainer's August journal. Same rule, and the
+                    // same reason, as `recoloured(_:at:blueAllowed:)`.
+                    sevRaw: original.sevRaw ?? original.sev,
+                    windowSeconds: original.secs)
+            }
+            // The weekly gate for the 5-hour bar, from this same line's final weekly values. Closed by
+            // default: without a weekly window, or without a usable date on it, there is no trustworthy
+            // weekly clock, and the advice is withheld rather than guessed
             // (`PacingModel.weeklyHasHeadroom`).
-            let weeklyHeadroom = ResetClock.parse(repaired.reset) == nil ? false
-                : PacingModel.weeklyHasHeadroom(weeklyTimeFraction: repaired.timePct,
-                                                weeklyUsageFraction: min(1, max(0, d7Util / 100)))
+            let weeklyHeadroom = d7.map { w in
+                ResetClock.parse(w.reset) == nil ? false
+                    : PacingModel.weeklyHasHeadroom(
+                        weeklyTimeFraction: w.timePct,
+                        weeklyUsageFraction: min(1, max(0, w.util / 100)))
+            } ?? false
 
-            let d7 = WindowSample(
-                util: d7Util, raw: weekly.raw,
-                utilSrc: weekly.source.rawValue, resetSrc: repaired.source.rawValue,
-                n: weekly.ratio,
-                reset: repaired.reset, timePct: repaired.timePct,
-                sev: d7Sev, sevRaw: sample.d7.sev,
-                windowSeconds: LimitWindow.sevenDay.durationSeconds)
-            let h5 = recoloured(sample.h5, window: .fiveHour, at: at, blueAllowed: weeklyHeadroom)
+            // Every other window keeps its place in the array and is re-judged under its own length.
+            // Only the five-hour one takes the weekly gate: it is the bar that asks the week whether
+            // there is room to push.
+            let windows = sample.windows.map { w -> WindowSample in
+                if w.secs == LimitWindow.sevenDay.durationSeconds, let d7 { return d7 }
+                return recoloured(
+                    w, at: at,
+                    blueAllowed: w.secs == LimitWindow.fiveHour.durationSeconds
+                        ? weeklyHeadroom
+                        // A window that is neither of Claude's two gates on nothing: Codex's windows
+                        // are not slices of one another, so there is no cross-window advice to fund.
+                        : true)
+            }
             // Per-model windows never take the weekly gate — they are slices of that same week
             // (reason 2 on `BarLayout.blueAllowed`). This is where the bulk of the v4 changes land.
-            let opus = sample.opus.map { recoloured($0, window: .sevenDay, at: at, blueAllowed: false) }
-            let sonnet = sample.sonnet.map { recoloured($0, window: .sevenDay, at: at, blueAllowed: false) }
+            let opus = sample.opus.map { recoloured($0, at: at, blueAllowed: false) }
+            let sonnet = sample.sonnet.map { recoloured($0, at: at, blueAllowed: false) }
             let scoped = sample.scoped.map { recoloured($0, at: at) }
 
-            severitiesRecomputed += [d7.sevRaw, h5.sevRaw, opus?.sevRaw, sonnet?.sevRaw]
-                .compactMap { $0 }.count
+            severitiesRecomputed += windows.compactMap { $0.sevRaw }.count
+                + [opus?.sevRaw, sonnet?.sevRaw].compactMap { $0 }.count
                 + scoped.filter { $0.sevRaw != nil }.count
 
             let rewritten = UsageSample(
@@ -483,8 +530,7 @@ public enum JournalMigration {
                 // the second usage provider. A v5 line already carries its own and keeps it.
                 provider: sample.provider,
                 t: sample.t, ms: sample.ms, plan: sample.plan, tier: sample.tier,
-                h5: h5,
-                d7: d7,
+                windows: windows,
                 opus: opus, sonnet: sonnet, scoped: scoped,
                 sessionIdle: sample.sessionIdle, spend: sample.spend,
                 blocked: sample.blocked, credits: sample.credits,
@@ -535,7 +581,7 @@ public enum JournalMigration {
     ///   geometry for the same reason a missing reset does: `remainingSeconds` cannot be derived.
     private static func recomputedSeverity(
         util: Double, timePct: Double, reset: String, at: Date?,
-        window: LimitWindow, blueAllowed: Bool
+        windowSeconds: Int, blueAllowed: Bool
     ) -> PacingBucket {
         guard let at, let resetsAt = ResetClock.parse(reset) else {
             return util >= 100 ? .red : .green
@@ -547,17 +593,21 @@ public enum JournalMigration {
             timeFraction: timePct,
             pacing: timePct >= min(1, max(0, util / 100)) ? .onPaceOrBehind : .ahead,
             remainingSeconds: resetsAt.timeIntervalSince(at),
-            windowDurationSeconds: window.durationSeconds,
+            windowDurationSeconds: windowSeconds,
             blueAllowed: blueAllowed)
         return PacingBucket.of(layout)
     }
 
     /// A window sample with its colour re-judged and the original kept as `sevRaw` where it moved.
+    ///
+    /// The length comes from the sample's own ``WindowSample/secs`` rather than a caller-supplied
+    /// case: a window in the array names its own duration, and a `LimitWindow` parameter could only
+    /// describe the two lengths Claude reports.
     private static func recoloured(
-        _ w: WindowSample, window: LimitWindow, at: Date?, blueAllowed: Bool
+        _ w: WindowSample, at: Date?, blueAllowed: Bool
     ) -> WindowSample {
         let sev = recomputedSeverity(util: w.util, timePct: w.timePct, reset: w.reset,
-                                     at: at, window: window, blueAllowed: blueAllowed)
+                                     at: at, windowSeconds: w.secs, blueAllowed: blueAllowed)
         return WindowSample(
             util: w.util, raw: w.raw, utilSrc: w.utilSrc, resetSrc: w.resetSrc, n: w.n,
             reset: w.reset, timePct: w.timePct, sev: sev,
@@ -565,14 +615,15 @@ public enum JournalMigration {
             // *current* `sev`, not the `sevRaw` it happens to carry — the marker always names the value
             // being replaced, so a second pass never overwrites the original with an intermediate one.
             sevRaw: w.sevRaw ?? w.sev,
-            windowSeconds: window.durationSeconds)
+            windowSeconds: w.secs)
     }
 
-    /// The scoped counterpart of ``recoloured(_:window:at:blueAllowed:)``. Always `blueAllowed: false`:
+    /// The scoped counterpart of ``recoloured(_:at:blueAllowed:)``. Always `blueAllowed: false`:
     /// a scoped limit is part of the weekly window blue talks about.
     private static func recoloured(_ s: ScopedSample, at: Date?) -> ScopedSample {
-        let sev = recomputedSeverity(util: s.pct, timePct: s.timePct, reset: s.reset,
-                                     at: at, window: .sevenDay, blueAllowed: false)
+        let sev = recomputedSeverity(
+            util: s.pct, timePct: s.timePct, reset: s.reset, at: at,
+            windowSeconds: LimitWindow.sevenDay.durationSeconds, blueAllowed: false)
         return ScopedSample(name: s.name, pct: s.pct, reset: s.reset, timePct: s.timePct,
                             sev: sev, sevRaw: s.sevRaw ?? s.sev)
     }
@@ -644,9 +695,13 @@ public enum JournalMigration {
     ///
     /// `resetsAt` is carried across so a weekly reset is visible to the estimator as the drop it is;
     /// nothing else in the snapshot affects the reconstruction.
+    /// A line with neither window contributes an idle snapshot — the estimator learns nothing from
+    /// it, which is what a provider Claude's five-hour counter does not describe should teach it.
     private static func snapshot(from sample: UsageSample) -> UsageSnapshot {
         UsageSnapshot(
-            fiveHour: UsageWindow(utilization: sample.h5.raw, resetsAt: sample.h5.reset),
-            sevenDay: UsageWindow(utilization: sample.d7.raw, resetsAt: sample.d7.reset))
+            fiveHour: UsageWindow(utilization: sample.h5?.raw ?? 0,
+                                  resetsAt: sample.h5?.reset ?? ""),
+            sevenDay: UsageWindow(utilization: sample.d7?.raw ?? 0,
+                                  resetsAt: sample.d7?.reset ?? ""))
     }
 }

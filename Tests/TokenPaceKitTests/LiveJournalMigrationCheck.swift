@@ -136,6 +136,12 @@ struct LiveJournalMigrationCheck {
             #expect(foreignProvider == 0,
                     "\(name): \(foreignProvider) lines carry a provider other than Claude")
 
+            // The #508 invariants, read from the migrated text rather than the counters: the windows
+            // live in the array, every one of them names its own length, and the keys they came from
+            // are gone — a duplicated field in an append-only file is permanent.
+            #expect(!migrated.contains("\"h5\""), "\(name): the `h5` key survived the rewrite")
+            #expect(!migrated.contains("\"d7\""), "\(name): the `d7` key survived the rewrite")
+
             let samples = migrated
                 .split(separator: "\n")
                 .compactMap { line -> UsageSample? in
@@ -149,12 +155,13 @@ struct LiveJournalMigrationCheck {
             // reset in the file — the answer the app eventually received.
             var worstError: TimeInterval = 0
             var repairedSeen = 0
-            for (index, sample) in samples.enumerated() where sample.d7.resetSrc == "reconstructed" {
+            for (index, sample) in samples.enumerated() where sample.d7?.resetSrc == "reconstructed" {
                 repairedSeen += 1
-                guard let repaired = ResetClock.parse(sample.d7.reset) else { continue }
+                guard let repaired = sample.d7.flatMap({ ResetClock.parse($0.reset) }) else { continue }
                 let truth = samples[index...]
-                    .first { $0.d7.resetSrc == "server" }
-                    .flatMap { ResetClock.parse($0.d7.reset) }
+                    .first { $0.d7?.resetSrc == "server" }
+                    .flatMap { $0.d7 }
+                    .flatMap { ResetClock.parse($0.reset) }
                 guard let truth else { continue }
                 worstError = max(worstError, abs(repaired.timeIntervalSince(truth)))
             }
@@ -165,8 +172,8 @@ struct LiveJournalMigrationCheck {
             // edge for hours, which is the defect being repaired. Measured on both journals, exactly
             // one such line exists per blackout.
             var longestZeroRun = 0, currentZeroRun = 0
-            for sample in samples where sample.d7.resetSrc == "reconstructed" {
-                currentZeroRun = sample.d7.timePct == 0 ? currentZeroRun + 1 : 0
+            for sample in samples where sample.d7?.resetSrc == "reconstructed" {
+                currentZeroRun = sample.d7?.timePct == 0 ? currentZeroRun + 1 : 0
                 longestZeroRun = max(longestZeroRun, currentZeroRun)
             }
 
@@ -176,11 +183,12 @@ struct LiveJournalMigrationCheck {
             var transitions: [String: Int] = [:]
             var blueLeftInPerModel = 0
             for sample in samples {
-                for (label, w) in [("h5", sample.h5), ("d7", sample.d7)] + [
+                let limitWindows = sample.windows.map { ("\($0.secs)s", $0) }
+                for (label, w) in limitWindows + [
                     ("opus", sample.opus), ("sonnet", sample.sonnet),
                 ].compactMap({ label, w in w.map { (label, $0) } }) {
                     if let was = w.sevRaw { transitions["\(label): \(was) → \(w.sev)", default: 0] += 1 }
-                    if label != "h5", label != "d7", w.sev == .blue { blueLeftInPerModel += 1 }
+                    if label == "opus" || label == "sonnet", w.sev == .blue { blueLeftInPerModel += 1 }
                 }
                 for s in sample.scoped {
                     if let was = s.sevRaw { transitions["scoped: \(was) → \(s.sev)", default: 0] += 1 }

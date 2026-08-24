@@ -87,23 +87,41 @@ it carries a trap.
 > lines is wrong in the other direction: it reads one failure every three minutes where there were
 > sixteen a second.
 
+> **The limit windows live in `windows[]`, and there is no `h5`/`d7` key.** Since
+> [ADR-0130](../adr/0130-one-usage-record-with-a-windows-array.md) every window is an entry stamped
+> with its own `secs`, and the launch migration rewrote the archive to v6 — the old keys are **gone**
+> from stored lines, not kept beside the array. **Select a window by its `secs`, never by its
+> position**: the array's order is the provider's, a provider may report one window or several, and
+> Codex left its weekly window in the slot its five-hour one had vacated. A script that reads
+> `windows[0]` as the five-hour bar is reading whatever arrived first.
+
 | Field | Type | What it is |
 |---|---|---|
 | `t` | ISO-8601 UTC | the moment of the poll |
-| `h5.util` | Int 0…100 | the 5-hour window, whole percent |
-| `h5.reset` | ISO-8601 | when the window resets |
-| `h5.timePct` | Double 0…1 | how much of the window has elapsed |
-| `h5.sev` | `blue`/`green`/`yellow`/`orange`/`red` | the color bucket, independent of cosmetic settings |
-| `h5.sevRaw` | same | the verdict recorded at poll time — **only** if it differs from `sev`. A missing field means "identical", not "no data" |
-| `d7.*` | same | the 7-day window |
+| `windows[]` | array | every limit window this poll read, in the provider's own order. **Any number, including one**; no window is required |
+| `windows[].secs` | Int | the window's length in seconds — **what identifies it**: `18000` = 5-hour, `604800` = 7-day |
+| `windows[].util` | Double 0…100 | utilization, whole percent from the API |
+| `windows[].raw` | Double | the API's value before reconstruction; equal to `util` except on a reconstructed 7-day window |
+| `windows[].reset` | ISO-8601 | when the window resets (empty when the provider named no instant) |
+| `windows[].timePct` | Double 0…1 | how much of the window has elapsed |
+| `windows[].sev` | `blue`/`green`/`yellow`/`orange`/`red` | the color bucket, independent of cosmetic settings |
+| `windows[].sevRaw` | same | the verdict recorded at poll time — **only** if it differs from `sev`. A missing field means "identical", not "no data" |
+| `windows[].utilSrc` / `resetSrc` / `n` | String / String / Double | the reconstruction state on the 7-day window (ADR-0107); absent where nothing is reconstructed |
 | `scoped[]` | array | per-model limits (`name`, `pct`, `reset`, `timePct`, `sev`, `sevRaw`) |
-| `v` | Int | the version of the line **format** — for a `usage` line, **5** is current; absent reads as 1. Every `kind` has its own counter, so dispatch on `kind` before reading it (a `status` line's `v` is at 2 and means something else entirely) |
-| `provider` | String | whose quota this line measures (`claude`). Written on every line since v5 and backfilled onto every archived one, so **never** infer it from absence |
+| `v` | Int | the version of the line **format** — for a `usage` line, **6** is current; absent reads as 1. Every `kind` has its own counter, so dispatch on `kind` before reading it (a `status` line's `v` is at 2 and means something else entirely) |
+| `provider` | String | whose quota this line measures (`claude`, `codex`). Written on every line since v5 and backfilled onto every archived one, so **never** infer it from absence |
 | `sevV` | Int | the generation of the **color model** that produced `sev` (1 is current); absent = older than the first named one |
-| `spend` | object | the spend limit, credits consumed, currency |
-| `plan` / `tier` | String | `max`/`pro`, the plan — needed to attribute the series |
+| `spend` | object | the spend limit, credits consumed, currency. Claude only — Codex reports no account spend |
+| `plan` / `tier` | String | `max`/`pro`, the plan — needed to attribute the series. On a Codex line `plan` is the server's own plan word (`Plus`) and `tier` is absent |
 | `sessionIdle` | Bool | the app considered the session inactive |
 | `ms` | Int | API response latency |
+
+**Codex lines are `kind: usage` too**, with their own `provider`. They carry the windows the server
+reported — one 7-day window today — and none of the Claude-shaped fields (`scoped`, `spend`,
+`credits`, `blockingReset`) hold anything. **A reading the app classified as not-started is never
+written**: it describes the absence of a window rather than a measurement of one, and the server
+answers it with a horizon that slides second-for-second with the clock. So a gap in the Codex series
+can mean the window had not started, not only that nothing was polled.
 
 ### The `status` line
 
@@ -1576,7 +1594,10 @@ with open("usage-journal-2026-08.jsonl") as f:
             continue
         if o.get("kind") != "usage":
             continue
-        h5 = o.get("h5") or {}
+        # By duration, never by position: the array's order is the provider's.
+        h5 = next((w for w in o.get("windows", []) if w.get("secs") == 18000), None)
+        if h5 is None:                               # this provider reports no 5-hour window
+            continue
         t, reset = P(o.get("t")), P(h5.get("reset"))
         if t is None or h5.get("util") is None:
             continue

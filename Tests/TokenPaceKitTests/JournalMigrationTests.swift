@@ -46,13 +46,20 @@ struct JournalMigrationTests {
         for line in lines {
             let sample = decodeUsage(line)
             #expect(sample?.v == UsageSample.currentVersion)
-            #expect(sample?.d7.raw != nil)          // the API's number is preserved beside `util`
+            #expect(sample?.d7?.raw != nil)         // the API's number is preserved beside `util`
+            // The windows moved out of `h5`/`d7` and each one now names its own length.
+            #expect(sample?.windows.map(\.secs) == [LimitWindow.fiveHour.durationSeconds,
+                                                    LimitWindow.sevenDay.durationSeconds])
         }
         // `gap` is gone from the wire — it is derived now.
         #expect(!out.contains("\"gap\""))
+        // The old keys are gone rather than kept beside the array: a duplicated field in an
+        // append-only file is permanent.
+        #expect(!out.contains("\"h5\""))
+        #expect(!out.contains("\"d7\""))
     }
 
-    @Test func recomputesUtilWithTheLiveAlgorithm() {
+    @Test func recomputesUtilWithTheLiveAlgorithm() throws {
         // A bump at line 3 makes the anchor firm, so later lines carry a reconstructed value strictly
         // inside the bucket — exactly what the running app would have written.
         var lines: [String] = []
@@ -63,11 +70,11 @@ struct JournalMigrationTests {
         let samples = out.split(separator: "\n").compactMap { decodeUsage(String($0)) }
 
         #expect(samples.count == 12)
-        let last = samples[samples.count - 1]
-        #expect(last.d7.raw == 51)                       // the API's value, untouched
-        #expect(last.d7.util > 50.5)                     // reconstructed above the bucket floor
-        #expect(last.d7.util <= 51.5)
-        #expect(last.d7.utilSrc != nil)                  // and it says how it got there
+        let last = try #require(samples[samples.count - 1].d7)
+        #expect(last.raw == 51)                          // the API's value, untouched
+        #expect(last.util > 50.5)                        // reconstructed above the bucket floor
+        #expect(last.util <= 51.5)
+        #expect(last.utilSrc != nil)                     // and it says how it got there
     }
 
     /// Every kind at its current format passes through byte-identical. Nothing is exempt: `status`,
@@ -102,9 +109,12 @@ struct JournalMigrationTests {
     @Test func alreadyCurrentLinesAreLeftAlone() {
         let current = UsageSample(
             t: iso(0),
-            h5: WindowSample(util: 10, reset: "", timePct: 0.5, sev: .green),
-            d7: WindowSample(util: 50.25, raw: 50, utilSrc: "interpolated", n: 9.8,
+            windows: [
+                WindowSample(util: 10, reset: "", timePct: 0.5, sev: .green,
+                             windowSeconds: LimitWindow.fiveHour.durationSeconds),
+                WindowSample(util: 50.25, raw: 50, utilSrc: "interpolated", n: 9.8,
                              reset: "", timePct: 0.5, sev: .green),
+            ],
             credits: CreditsFlags(active: false, showIcon: false, onCredits: false))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
@@ -147,7 +157,7 @@ struct JournalMigrationTests {
         let february = v1Line(t: iso(100), h5: 5, d7: 52)
         let (out, _, _) = JournalMigration.migrate(contents: february, state: carried)
         let sample = decodeUsage(out)
-        #expect(sample?.d7.n == carried.ratio.estimate.rounded(toPlaces: 2),
+        #expect(sample?.d7?.n == carried.ratio.estimate.rounded(toPlaces: 2),
                 "the carried exchange rate should be the one journalled")
     }
 
@@ -241,13 +251,14 @@ struct WeeklyResetRepairTests {
 
         // Both repaired lines now name the instant the server itself reported, within a second.
         for sample in samples.dropFirst() {
-            let repaired = try #require(ResetClock.parse(sample.d7.reset))
+            let d7 = try #require(sample.d7)
+            let repaired = try #require(ResetClock.parse(d7.reset))
             #expect(abs(repaired.timeIntervalSince(truth)) < 1)
-            #expect(sample.d7.resetSrc == "reconstructed")
-            #expect(sample.d7.timePct > 0)          // no longer a flat zero
+            #expect(d7.resetSrc == "reconstructed")
+            #expect(d7.timePct > 0)                 // no longer a flat zero
         }
         // And the elapsed fraction now advances between the two, as time actually did.
-        #expect(samples[2].d7.timePct > samples[1].d7.timePct)
+        #expect(try #require(samples[2].d7).timePct > #require(samples[1].d7).timePct)
     }
 
     /// **The `resetGrace` regression, in the archive.** The first poll of a blackout lands in the
@@ -265,7 +276,7 @@ struct WeeklyResetRepairTests {
 
         let samples = JournalMigration.migrate(contents: input).contents
             .split(separator: "\n").compactMap { decodeUsage(String($0)) }
-        #expect(samples[1].d7.timePct < 0.01)       // start of the window, not the end of it
+        #expect(try #require(samples[1].d7).timePct < 0.01)  // start of the window, not its end
     }
 
     /// A real (microsecond) reset is never mistaken for an estimate.
@@ -273,9 +284,9 @@ struct WeeklyResetRepairTests {
         let input = Self.v2Line(t: Self.at(-1), reset: Self.realReset, timePct: 0.9, d7: 94)
         let (out, _, outcome) = JournalMigration.migrate(contents: input)
         #expect(outcome.resetsRepaired == 0)
-        let sample = try #require(decodeUsage(out))
-        #expect(sample.d7.reset == Self.realReset)
-        #expect(sample.d7.resetSrc == "server")
+        let d7 = try #require(decodeUsage(out)?.d7)
+        #expect(d7.reset == Self.realReset)
+        #expect(d7.resetSrc == "server")
     }
 
     /// With no anchor before it, the line is left exactly as it was: a repair needs something real to
@@ -284,9 +295,9 @@ struct WeeklyResetRepairTests {
         let input = Self.v2Line(t: Self.at(0.5), reset: "2026-08-25T07:30:00Z", timePct: 0)
         let (out, _, outcome) = JournalMigration.migrate(contents: input)
         #expect(outcome.resetsRepaired == 0)
-        let sample = try #require(decodeUsage(out))
-        #expect(sample.d7.reset == "2026-08-25T07:30:00Z")
-        #expect(sample.d7.resetSrc == "unknown")
+        let d7 = try #require(decodeUsage(out)?.d7)
+        #expect(d7.reset == "2026-08-25T07:30:00Z")
+        #expect(d7.resetSrc == "unknown")
     }
 
     /// Running the migration twice must not change anything the second time — the pass is a one-off,
@@ -309,7 +320,7 @@ struct WeeklyResetRepairTests {
     @Test func theLegacySrcKeyStillDecodes() throws {
         let sample = try #require(decodeUsage(
             Self.v2Line(t: Self.at(-1), reset: Self.realReset, timePct: 0.9, d7: 94)))
-        #expect(sample.d7.utilSrc == "interpolated")
+        #expect(try #require(sample.d7).utilSrc == "interpolated")
     }
 }
 
@@ -375,9 +386,12 @@ struct BackupGenerationTests {
     @Test func anAlreadyCurrentFileReportsNoVersion() {
         let current = UsageSample(
             t: Self.at(0),
-            h5: WindowSample(util: 10, reset: "", timePct: 0.5, sev: .green),
-            d7: WindowSample(util: 50, raw: 50, utilSrc: "interpolated", n: 9.8,
+            windows: [
+                WindowSample(util: 10, reset: "", timePct: 0.5, sev: .green,
+                             windowSeconds: LimitWindow.fiveHour.durationSeconds),
+                WindowSample(util: 50, raw: 50, utilSrc: "interpolated", n: 9.8,
                              reset: "", timePct: 0.5, sev: .green),
+            ],
             credits: CreditsFlags(active: false, showIcon: false, onCredits: false))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
@@ -482,7 +496,7 @@ struct SeverityRecomputationTests {
                 t: Self.pollTime, reset: Self.reset,
                 h5: (util: 0, timePct: 0.6, sev: "green"),      // surplus 0.60 > the 0.40 threshold
                 d7: (util: weeklyUtil, timePct: 0.714, sev: "green"))
-            return try #require(Self.migrated(line)).h5.sev
+            return try #require(Self.migrated(line)?.h5).sev
         }
         #expect(try h5Sev(weeklyUtil: 10) == .blue)    // week calm with room → gate open
         #expect(try h5Sev(weeklyUtil: 90) == .green)   // week ahead of pace → gate shut
@@ -494,7 +508,7 @@ struct SeverityRecomputationTests {
             t: Self.pollTime, reset: Self.reset,
             h5: (util: 20, timePct: 0.5, sev: "green"),
             d7: (util: 1, timePct: 0.714, sev: "green"))
-        #expect(try #require(Self.migrated(line)).d7.sev == .blue)
+        #expect(try #require(Self.migrated(line)?.d7).sev == .blue)
     }
 
     /// An idle window (empty `reset`) has no pacing geometry, so the verdict comes from utilisation
@@ -509,9 +523,10 @@ struct SeverityRecomputationTests {
         "credits":{"active":false,"showIcon":false,"onCredits":false},"brokenReset":false}
         """
         let s = try #require(Self.migrated(line))
-        #expect(s.h5.sev == .green)     // idle, nothing spent
-        #expect(s.d7.sev == .red)       // exhausted reads red even with no window geometry
-        #expect(s.d7.sevRaw == .green)  // and that is a change from what was recorded
+        let d7 = try #require(s.d7)
+        #expect(try #require(s.h5).sev == .green)  // idle, nothing spent
+        #expect(d7.sev == .red)         // exhausted reads red even with no window geometry
+        #expect(d7.sevRaw == .green)    // and that is a change from what was recorded
     }
 
     /// Re-running must be a no-op: after one pass every line is current on both axes.
@@ -793,5 +808,135 @@ struct RecordProviderBackfillTests {
         #expect(marker.v == 0)
         #expect(marker.provider == ProviderID.claude.rawValue)
         #expect(marker.gap == 900)
+    }
+}
+
+// MARK: - Windows move into an array (v5 → v6, #508)
+
+/// `h5`/`d7` become entries in `windows[]`, each stamped with its own `secs`. A reshaping, not a
+/// recomputation: every window keeps its `util`, its reconstruction state and its `sevRaw` history,
+/// and the old keys are removed rather than written beside the array.
+@Suite("JournalMigration — windows array")
+struct WindowsArrayMigrationTests {
+
+    /// A v5 usage line: current on every axis except the shape of its windows.
+    ///
+    /// The weekly reset carries fractional seconds — the signature of a date the server sent, which
+    /// is what keeps the blackout repair from mistaking it for a `now + 7d` estimate.
+    static let serverReset = "2026-08-10T12:00:00.123456Z"
+
+    private static func v5Usage(t: String, reset: String = serverReset) -> String {
+        let h5 = #"{"util":10,"raw":10,"reset":"\#(reset)","timePct":0.5,"sev":"green"}"#
+        let d7 = #"{"util":20,"raw":19,"utilSrc":"interpolated","resetSrc":"server","n":9.8,"# +
+            #""reset":"\#(reset)","timePct":0.5,"sev":"green","sevRaw":"blue"}"#
+        let credits = #"{"active":false,"showIcon":false,"onCredits":false}"#
+        return #"{"kind":"usage","v":5,"sevV":1,"provider":"claude","t":"\#(t)","h5":\#(h5),"d7":\#(d7),"# +
+            #""scoped":[],"sessionIdle":false,"blocked":false,"credits":\#(credits),"brokenReset":false}"#
+    }
+
+    private static func migrated(_ line: String) -> UsageSample? {
+        decodeUsage(JournalMigration.migrate(contents: line).contents)
+    }
+
+    @Test func theWindowsMoveIntoTheArrayAndTheOldKeysGo() throws {
+        let input = Self.v5Usage(t: "2026-08-03T12:00:00Z")
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+
+        // A format bump, so `migrated` counts it and names the backup — no counter of its own.
+        #expect(outcome.migrated == 1)
+        #expect(outcome.migratedFromVersion == 5)
+        #expect(outcome.changedAnything)
+
+        let sample = try #require(decodeUsage(out))
+        #expect(sample.v == 6)
+        #expect(sample.windows.map(\.secs) == [LimitWindow.fiveHour.durationSeconds,
+                                               LimitWindow.sevenDay.durationSeconds])
+        #expect(!out.contains("\"h5\""))
+        #expect(!out.contains("\"d7\""))
+    }
+
+    /// The reconstruction state (ADR-0107) still describes each window after the move: the API's
+    /// number is beside the reconstructed one, the date is still the server's, and both `utilSrc` and
+    /// `resetSrc` still say how they got there.
+    ///
+    /// `utilSrc`/`n` are **replayed**, not copied — the pass drives the same estimator the live path
+    /// does, which is what makes the migrated values the ones the app would have written. What the
+    /// move must not do is drop the fields or change what they describe.
+    @Test func theReconstructionStateStillDescribesTheWindow() throws {
+        let sample = try #require(Self.migrated(Self.v5Usage(t: "2026-08-03T12:00:00Z")))
+        let d7 = try #require(sample.d7)
+        #expect(d7.raw == 19)                       // the API's number, untouched
+        #expect(d7.utilSrc != nil)
+        #expect(d7.n != nil)
+        #expect(d7.reset == Self.serverReset)       // a real date is never rewritten
+        #expect(d7.resetSrc == "server")
+        #expect(sample.sevV == UsageSample.currentColorVersion)   // the colour model did not move
+        // The five-hour window keeps its own values verbatim: nothing reconstructs it.
+        let h5 = try #require(sample.h5)
+        #expect(h5.util == 10)
+        #expect(h5.raw == 10)
+        #expect(h5.secs == LimitWindow.fiveHour.durationSeconds)
+    }
+
+    /// The weekly window's `sevRaw` names the verdict the **poll** wrote, so a line already migrated
+    /// once keeps the marker it carries rather than having its current `sev` copied over it.
+    ///
+    /// Taking `sev` instead is a silent loss where the two now agree — the marker vanishes entirely.
+    /// Measured on the maintainer's August journal: 102 of them, on a file that had been migrated
+    /// once already.
+    @Test func aSecondMigrationKeepsTheOriginalWeeklyVerdict() throws {
+        let line = Self.v5Usage(t: "2026-08-03T12:00:00Z")
+        let once = try #require(Self.migrated(line))
+        #expect(try #require(once.d7).sevRaw == .blue)      // the poll's verdict, carried across
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        // Push it back below the current format so the pass rewrites it a second time.
+        let stale = UsageSample(
+            v: UsageSample.currentVersion - 1, sevV: once.sevV, provider: once.provider,
+            t: once.t, windows: once.windows, scoped: once.scoped, credits: once.credits)
+        let staleLine = String(
+            data: try encoder.encode(JournalRecord.usage(stale)), encoding: .utf8)!
+        let twice = try #require(Self.migrated(staleLine))
+        #expect(try #require(twice.d7).sevRaw == .blue)      // still the poll's, not the intermediate
+    }
+
+    @Test func theMoveIsIdempotent() {
+        let input = [Self.v5Usage(t: "2026-08-03T12:00:00Z"),
+                     Self.v5Usage(t: "2026-08-03T12:03:00Z")].joined(separator: "\n")
+        let first = JournalMigration.migrate(contents: input)
+        let second = JournalMigration.migrate(contents: first.contents, state: first.state)
+        #expect(second.outcome.migrated == 0)
+        #expect(!second.outcome.changedAnything)
+        #expect(second.contents == first.contents)
+    }
+
+    /// A pre-v6 line still decodes through the read-only `h5`/`d7` keys, each stamped with the length
+    /// its key stated — a `.v5.bak`, or a line pasted into a bug report, still yields its windows.
+    @Test func aPreV6LineStillDecodesThroughTheOldKeys() throws {
+        let sample = try #require(decodeUsage(Self.v5Usage(t: "2026-08-03T12:00:00Z")))
+        #expect(sample.windows.count == 2)
+        #expect(try #require(sample.h5).secs == LimitWindow.fiveHour.durationSeconds)
+        #expect(try #require(sample.d7).secs == LimitWindow.sevenDay.durationSeconds)
+    }
+
+    /// A provider with one window is a line with one entry — nothing here requires either of Claude's
+    /// windows to be present, and the pass leaves such a line at its own count.
+    @Test func aSingleWindowLineIsCurrentAndKeepsItsOneEntry() {
+        let sample = UsageSample(
+            provider: ProviderID.codex.rawValue,
+            t: "2026-08-03T12:00:00Z",
+            windows: [WindowSample(util: 3, reset: "2026-08-10T12:00:00Z", timePct: 0.4,
+                                   sev: .green)],
+            credits: CreditsFlags(active: false, showIcon: false, onCredits: false))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        let line = String(data: try! encoder.encode(JournalRecord.usage(sample)), encoding: .utf8)!
+
+        let (out, _, outcome) = JournalMigration.migrate(contents: line)
+        #expect(!outcome.changedAnything)
+        #expect(out == line)
+        #expect(decodeUsage(out)?.h5 == nil)      // no five-hour window, and none invented
+        #expect(decodeUsage(out)?.windows.count == 1)
     }
 }

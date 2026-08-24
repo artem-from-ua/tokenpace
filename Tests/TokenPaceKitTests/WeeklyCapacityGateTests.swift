@@ -302,7 +302,7 @@ struct WeeklyGateJournalTests {
         guard case let .usage(sample) = JournalRecord.usage(from: deepBehindWeek, now: now) else {
             Issue.record("expected a usage record"); return
         }
-        #expect(sample.d7.sev == .blue)
+        #expect(sample.d7?.sev == .blue)
     }
 }
 

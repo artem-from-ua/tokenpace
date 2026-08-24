@@ -53,12 +53,14 @@ extension JournalRecord {
             ms: durationMs,
             plan: plan,
             tier: tier,
-            h5: window(snapshot.fiveHour, window: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
-            // `resetSrc` reads the **rendered** snapshot for the same reason `weeklyHeadroom` does:
-            // it must describe the date the user was actually shown. The overlays carry provenance
-            // through, and `optimisticReset` can add a `-rolled` suffix the raw snapshot never had.
-            d7: window(snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true,
+            windows: [
+                window(snapshot.fiveHour, window: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
+                // `resetSrc` reads the **rendered** snapshot for the same reason `weeklyHeadroom` does:
+                // it must describe the date the user was actually shown. The overlays carry provenance
+                // through, and `optimisticReset` can add a `-rolled` suffix the raw snapshot never had.
+                window(snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true,
                        weekly: weekly, resetSource: rendered.sevenDayResetSource),
+            ],
             // Per-model rows: `blueAllowed: false` unconditionally — they are slices of the very week
             // the blue advice is about (reason 2 on `BarLayout.blueAllowed`), so it can never apply.
             opus: snapshot.sevenDayOpus.map { window($0, window: .sevenDay, now: now, blueAllowed: false) },
@@ -75,6 +77,81 @@ extension JournalRecord {
             brokenReset: rendered.hasBrokenActiveReset,
             blockingReset: BlockingReset.forBlocked(snapshot: rendered, now: now).map(BlockingResetSample.init))
         return .usage(sample)
+    }
+
+    /// Build a `usage` record from a Codex quota read — the same `kind` as Claude's, under Codex's
+    /// own `provider`.
+    ///
+    /// Not a second kind, because nothing would differ: both lines answer how much of a window is
+    /// spent and when it resets. What differs is **which windows exist**, and that is data — the
+    /// array holds however many the server named. A second kind would also make the provider tag
+    /// redundant, since the kind would imply it.
+    ///
+    /// Returns `nil` when nothing here is worth recording, which is the admission rule this factory
+    /// owns:
+    ///
+    /// - **A not-started window is dropped** (``CodexQuotaWindow/hasNotStarted(now:)``). It describes
+    ///   the absence of a window, not a measurement of one: the server answers "if you began now, it
+    ///   would end then", and the horizon slides second-for-second with the clock. Stored as a
+    ///   sample it reads as a real reset at 0 %, and the journal is append-only — the maintainer's
+    ///   own weekly window spent ~14 hours reporting 0 against a rolling horizon and then returned
+    ///   to 3 % against a fresh anchor ([#515](https://github.com/artem-from-ua/tokenpace/issues/515),
+    ///   [#519](https://github.com/artem-from-ua/tokenpace/issues/519)), so those hours would be a
+    ///   permanent record of a reset that never happened.
+    /// - **A read left with no windows writes no line.** Once the drop above empties the array there
+    ///   is no measurement to store, and an empty `windows[]` would be a poll claiming to have read
+    ///   nothing.
+    ///
+    /// The Claude-shaped fields stay at their empty states: `scoped`/`spend`/`credits`/`blocked`
+    /// describe an account model Codex does not report, and inventing values for them is the same
+    /// fabrication as inventing a five-hour row.
+    public static func usage(
+        fromCodex snapshot: CodexQuotaSnapshot,
+        now: Date,
+        durationMs: Int? = nil
+    ) -> JournalRecord? {
+        let windows = snapshot.windows
+            .filter { !$0.hasNotStarted(now: now) }
+            .map { codexWindow($0, now: now) }
+        guard !windows.isEmpty else { return nil }
+        return .usage(UsageSample(
+            provider: ProviderID.codex.rawValue,
+            t: ResetClock.isoString(from: now),
+            ms: durationMs,
+            // The plan word the server sent (`"Plus"`), in the same field Claude's Keychain tier
+            // lands in: both answer which plan a reading should be attributed to.
+            plan: snapshot.planLabel,
+            windows: windows,
+            credits: CreditsFlags(active: false, showIcon: false, onCredits: false),
+            // A window with no reset date is not a *broken* one: Codex omits the field on a window it
+            // cannot anchor, and the row already renders that honestly. `brokenReset` means the app
+            // met a date it could not parse.
+            brokenReset: false))
+    }
+
+    /// One Codex window as a journalled sample. Its length is the server's number in seconds, so the
+    /// pacing goes through the duration-taking `PacingModel` overloads rather than a ``LimitWindow``
+    /// case — a case list can only name the windows that existed when it was written.
+    ///
+    /// `blueAllowed: true`: Claude's five-hour bar asks its own weekly bar whether there is room to
+    /// push, and Codex's windows are not slices of one another, so there is no cross-window gate.
+    private static func codexWindow(_ w: CodexQuotaWindow, now: Date) -> WindowSample {
+        guard let resetsAt = w.resetsAt else {
+            // No date to pace against: `timePct` 0 and the verdict falls back to exhausted-or-green,
+            // the same branch Claude's `window(...)` takes on an unparseable reset.
+            return WindowSample(
+                util: w.utilization, reset: "", timePct: 0,
+                sev: w.utilization >= 100 ? .red : .green,
+                windowSeconds: w.durationSeconds)
+        }
+        let layout = PacingModel.barLayout(
+            utilization: w.utilization, resetsAt: resetsAt, now: now,
+            windowDurationSeconds: w.durationSeconds, blueAllowed: true)
+        return WindowSample(
+            util: w.utilization,
+            reset: ResetClock.isoString(from: resetsAt),
+            timePct: layout.timeFraction, sev: PacingBucket.of(layout),
+            windowSeconds: w.durationSeconds)
     }
 
     /// Build a `status` record from a successful status poll — the raw components plus the derived

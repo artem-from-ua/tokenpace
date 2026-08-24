@@ -32,7 +32,7 @@ struct UsageGridTests {
         iso.timeZone = zone
         let win = WindowSample(util: 0, reset: "", timePct: 0, sev: .green)
         return .usage(UsageSample(
-            provider: provider, t: iso.string(from: t), h5: win, d7: win,
+            provider: provider, t: iso.string(from: t), windows: [win],
             credits: CreditsFlags(active: false, showIcon: false, onCredits: false)))
     }
 
@@ -220,7 +220,7 @@ struct UsageGridTests {
         let now = date(2026, 6, 15, 23, zone: Self.utc)
         let win = WindowSample(util: 0, reset: "", timePct: 0, sev: .green)
         let bad = JournalRecord.usage(UsageSample(
-            t: "not-a-date", h5: win, d7: win,
+            t: "not-a-date", windows: [win],
             credits: CreditsFlags(active: false, showIcon: false, onCredits: false)))
         let g = UsageGridAggregator.grid(
             from: [bad], filter: .fiveHour, dayCount: 1, now: now, timeZone: Self.utc)

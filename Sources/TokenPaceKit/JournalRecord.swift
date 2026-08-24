@@ -136,10 +136,18 @@ public struct WindowSample: Sendable, Equatable, Codable {
     /// Live polls never set it: there, computing and recording are the same call, so the two cannot
     /// differ. It exists for archived lines, where the model has moved since.
     public let sevRaw: PacingBucket?
+    /// The window's length in seconds — what says **which** window this is now that windows live in
+    /// an unordered array rather than in `h5`/`d7` slots.
+    ///
+    /// The length, not a name or a slot index: Codex reports a window's duration and nothing else,
+    /// and it dropped its five-hour limit while leaving the weekly one in the `primary` slot, so
+    /// position names no window at all. A duration is the one identity every provider supplies.
+    public let secs: Int
 
-    /// - Parameter windowSeconds: the window this sample describes, which sets how many decimals
-    ///   `timePct` keeps (``JournalPrecision``). Defaults to the seven-day length — the coarser of
-    ///   the two, so a caller that forgets it errs toward *more* precision, never less.
+    /// - Parameter windowSeconds: the window this sample describes. It sets how many decimals
+    ///   `timePct` keeps (``JournalPrecision``) and is stored as ``secs``. Defaults to the seven-day
+    ///   length — the coarser of the two, so a caller that forgets it errs toward *more* precision,
+    ///   never less.
     public init(
         util: Double,
         raw: Double? = nil,
@@ -166,10 +174,11 @@ public struct WindowSample: Sendable, Equatable, Codable {
         // Normalised at construction so "differs" is the only state that survives: a caller passing the
         // same bucket twice means "unchanged", and that is exactly what an absent field says.
         self.sevRaw = sevRaw == sev ? nil : sevRaw
+        self.secs = windowSeconds
     }
 
     private enum CodingKeys: String, CodingKey {
-        case util, raw, utilSrc, resetSrc, n, reset, timePct, sev, sevRaw
+        case util, raw, utilSrc, resetSrc, n, reset, timePct, sev, sevRaw, secs
         /// The pre-v3 spelling of ``utilSrc``, read-only. Migration rewrites every line to the new
         /// key, but a decoder that met an un-migrated file (a `.v2.bak`, a hand-copied line) should
         /// still read it rather than silently reporting no source at all.
@@ -199,6 +208,20 @@ public struct WindowSample: Sendable, Equatable, Codable {
         // equal pair is normalised to `nil` here too, so the decoded shape matches what we would write.
         let sevRaw = try c.decodeIfPresent(PacingBucket.self, forKey: .sevRaw)
         self.sevRaw = sevRaw == sev ? nil : sevRaw
+        // Absent on every pre-v6 line, where the key the window sat under said which it was. The
+        // seven-day default is wrong for an `h5` decoded on its own, so ``UsageSample`` supplies the
+        // length it read the window under instead of letting this fall back — see `stamped(secs:)`.
+        self.secs = try c.decodeIfPresent(Int.self, forKey: .secs)
+            ?? LimitWindow.sevenDay.durationSeconds
+    }
+
+    /// The same window under a stated length — how ``UsageSample`` gives a pre-v6 `h5`/`d7` the
+    /// ``secs`` its key implied. `timePct` is re-rounded to the new length's precision, which is what
+    /// keeps a five-hour window's fraction from being written at the seven-day step.
+    func stamped(secs: Int) -> WindowSample {
+        WindowSample(
+            util: util, raw: raw, utilSrc: utilSrc, resetSrc: resetSrc, n: n,
+            reset: reset, timePct: timePct, sev: sev, sevRaw: sevRaw, windowSeconds: secs)
     }
 
     /// Explicit rather than synthesized, for **two** reasons — either alone is enough to keep it:
@@ -219,6 +242,7 @@ public struct WindowSample: Sendable, Equatable, Codable {
         try c.encode(timePct, forKey: .timePct)
         try c.encode(sev, forKey: .sev)
         try c.encodeIfPresent(sevRaw, forKey: .sevRaw)
+        try c.encode(secs, forKey: .secs)
     }
 
     /// The pacing **gap** in percentage points: `timePct·100 − util`. Positive = headroom (behind

@@ -2009,6 +2009,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // body, and no email is in reach because `account/read` is not called.
                     AppLogger.network.notice(
                         "codex quota: \(snapshot.windows.count, privacy: .public) window(s)")
+                    self.journalCodexQuota(snapshot)
                     // Dev quota log: every successful poll, including the readings the rows drop as
                     // not-started — those are the samples a window anomaly has to be reconstructed
                     // from. Same two gates as the status payload log; the record itself refuses to
@@ -2032,6 +2033,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 self.reRenderForCurrentTime()
             }
+        }
+    }
+
+    /// Append a Codex quota read to the same journal Claude's polls write, as an ordinary `usage`
+    /// line under `provider: codex`. Same two gates as ``journalPoll(_:)``: the journal is on and
+    /// the app is on the live scenario, so no stub's data ever lands in the file.
+    ///
+    /// The factory returns `nil` when the read holds nothing worth storing — every window it named
+    /// was one that has not started. Nothing is written then, and the gap clock is left alone: a
+    /// read that measured no window is not an observation the series can be paced against.
+    private func journalCodexQuota(_ snapshot: CodexQuotaSnapshot) {
+        guard PersistedConfig.journalEnabled, currentScenario == .realNetwork else { return }
+        let now = currentDate()
+        guard let record = JournalRecord.usage(fromCodex: snapshot, now: now) else { return }
+        Task { [usageJournal] in
+            await usageJournal.append(
+                record, at: now, expectedInterval: PollingEngine.baseInterval, provider: .codex)
         }
     }
 
