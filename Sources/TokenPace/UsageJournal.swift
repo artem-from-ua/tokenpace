@@ -220,14 +220,15 @@ actor UsageJournal {
 
     // MARK: - Migration (#386)
 
-    /// The suffix a pre-migration copy keeps, named after the format version the copy **contains**
-    /// (`.v2.bak` for a file that was v2). **Never deleted by the app** — see ``migrateIfNeeded()``.
-    /// Must stay versioned per generation: a fixed name would let a second migration overwrite the
-    /// first one's backup and lose the middle generation.
-    static func backupSuffix(forVersion version: Int) -> String { ".v\(version).bak" }
+    /// The suffix a pre-migration copy keeps. **Never deleted by the app** — see
+    /// ``migrateIfNeeded()``. Naming and collision handling live in `JournalBackupNaming`, which is
+    /// pure and tested; this target only does the I/O.
+    static func backupSuffix(forVersion version: Int) -> String {
+        JournalBackupNaming.suffix(forVersion: version)
+    }
 
     static func isBackup(fileName: String) -> Bool {
-        fileName.range(of: #"\.v\d+\.bak$"#, options: .regularExpression) != nil
+        JournalBackupNaming.isBackup(fileName: fileName)
     }
 
     /// Bring every journal file up to the current sample format, in chronological order. Called once
@@ -239,6 +240,10 @@ actor UsageJournal {
     /// value, so the backup is the only remaining record of what the server actually returned. Each
     /// generation keeps its **own** backup: a file migrated v1 → v2 → v3 leaves both `.v1.bak` and
     /// `.v2.bak`, so any single step can be re-examined.
+    ///
+    /// A repeat pass over the same generation asks for a name that is already taken; when the file
+    /// on disk holds *different* bytes it gets a timestamped name instead (`JournalBackupNaming`).
+    /// The live file is only ever deleted when an existing backup already holds its exact bytes.
     ///
     /// Reconstruction state threads from one file to the next, since the journal is split by month.
     func migrateIfNeeded() {
@@ -263,9 +268,12 @@ actor UsageJournal {
             // A rewrite driven purely by a colour-model bump leaves the file at the current format,
             // so the pass reports no older generation. `?? 1` would falsely claim it was v1.
             let wasVersion = outcome.migratedFromVersion ?? UsageSample.currentVersion
-            if swapIn(rewritten, at: url, wasVersion: wasVersion) {
+            if let suffix = swapIn(rewritten, at: url, wasVersion: wasVersion) {
                 migratedFiles += 1
-                backupSuffixesWritten.insert(Self.backupSuffix(forVersion: wasVersion))
+                // The suffix the original is actually under — a timestamped one when the plain name
+                // was taken by different bytes. Reporting the requested name would name a file that
+                // holds someone else's generation.
+                backupSuffixesWritten.insert(suffix)
                 AppLogger.journal.notice(
                     "\(url.lastPathComponent, privacy: .public): \(outcome.logMessage, privacy: .public)")
             }
@@ -291,48 +299,100 @@ actor UsageJournal {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    /// Write `contents` beside `url` and swap it in atomically, keeping the original as
-    /// `.v<wasVersion>.bak`. Order matters: the new file is fully written *before* anything moves,
-    /// and the original is renamed aside rather than overwritten, so the live path is never partial.
-    private func swapIn(_ contents: String, at url: URL, wasVersion: Int) -> Bool {
+    /// Write `contents` beside `url` and swap it in atomically, putting the original aside as a
+    /// `.bak`. Order matters: the new file is fully written *before* anything moves, and the
+    /// original is renamed aside rather than overwritten, so the live path is never partial.
+    ///
+    /// **The live file is never deleted unless its exact current bytes are already stored
+    /// somewhere.** The one delete path here is reachable only after a byte-for-byte match against
+    /// an existing backup, which is what makes it a no-op rather than a loss.
+    ///
+    /// Returns the suffix the original was kept under, or `nil` if the swap failed. A successful
+    /// swap that deleted a redundant copy returns the existing backup's suffix — the bytes are
+    /// there under that name, which is what the completion log reports.
+    private func swapIn(_ contents: String, at url: URL, wasVersion: Int) -> String? {
         let staging = url.appendingPathExtension("migrating")
-        let backup = URL(fileURLWithPath: url.path + Self.backupSuffix(forVersion: wasVersion))
+        let primarySuffix = Self.backupSuffix(forVersion: wasVersion)
+        let primary = URL(fileURLWithPath: url.path + primarySuffix)
 
-        guard let data = contents.data(using: .utf8) else { return false }
+        guard let data = contents.data(using: .utf8) else { return nil }
         do {
             try data.write(to: staging, options: .atomic)   // writes + renames into place, fsync'd
         } catch {
             AppLogger.journal.error(
                 "journal migration: cannot stage \(url.lastPathComponent, privacy: .public)")
-            return false
+            return nil
         }
 
-        // A backup under *this* version already existing means a previous run migrated this same
-        // generation, so the original evidence is already safe. Never overwrite it.
-        if !fileManager.fileExists(atPath: backup.path) {
+        // A taken primary name is expected, not exceptional: the suffix is named after the oldest
+        // usage line, so every pass over the same generation asks for the same name. Whether the
+        // evidence is already safe depends on the bytes, not on the name existing.
+        let existingMatches: Bool? = fileManager.fileExists(atPath: primary.path)
+            ? sameContents(url, primary)
+            : nil
+
+        let backup: URL?   // where the original went; nil when it was a redundant copy
+        switch JournalBackupNaming.disposition(forVersion: wasVersion,
+                                               existingMatchesLive: existingMatches,
+                                               now: Date()) {
+        case .deleteAlreadyBackedUp:
+            // `primary` holds these exact bytes. Deleting loses nothing, and keeping the older
+            // backup untouched preserves the rule that a backup is never overwritten (#401).
+            try? fileManager.removeItem(at: url)
+            backup = nil
+
+        case .moveAside(let suffix):
+            // Two backups within the same second would still be distinct evidence, so step the name
+            // until it is free rather than overwriting one.
+            let target = firstFreeURL(base: url, suffix: suffix)
             do {
-                try fileManager.moveItem(at: url, to: backup)
+                try fileManager.moveItem(at: url, to: target)
             } catch {
                 try? fileManager.removeItem(at: staging)
                 AppLogger.journal.error(
                     "journal migration: cannot back up \(url.lastPathComponent, privacy: .public)")
-                return false
+                return nil
             }
-        } else {
-            try? fileManager.removeItem(at: url)
+            backup = target
         }
 
         do {
             try fileManager.moveItem(at: staging, to: url)
-            return true
+            return backup.map { $0.lastPathComponent.dropFirst(url.lastPathComponent.count) }
+                .map(String.init) ?? primarySuffix
         } catch {
             // The swap failed after the original was moved aside — put it back rather than leaving
-            // the live path empty.
-            try? fileManager.moveItem(at: backup, to: url)
+            // the live path empty. Nothing to restore on the delete path: the live bytes are in
+            // `primary` and the migrated copy never landed.
+            if let backup { try? fileManager.moveItem(at: backup, to: url) }
             try? fileManager.removeItem(at: staging)
             AppLogger.journal.error(
                 "journal migration: cannot swap in \(url.lastPathComponent, privacy: .public)")
-            return false
+            return nil
         }
+    }
+
+    /// Byte-for-byte equality. Size is compared first: these journals run to several megabytes, and
+    /// a differing length settles it without reading either file.
+    private func sameContents(_ a: URL, _ b: URL) -> Bool {
+        let key: Set<URLResourceKey> = [.fileSizeKey]
+        let sizeA = (try? a.resourceValues(forKeys: key))?.fileSize
+        let sizeB = (try? b.resourceValues(forKeys: key))?.fileSize
+        guard let sizeA, let sizeB, sizeA == sizeB else { return false }
+        guard let dataA = try? Data(contentsOf: a, options: .mappedIfSafe),
+              let dataB = try? Data(contentsOf: b, options: .mappedIfSafe) else { return false }
+        return dataA == dataB
+    }
+
+    /// `base + suffix`, or the first `-2`, `-3`, … variant that does not exist. Only reached when a
+    /// timestamped name repeats within one second.
+    private func firstFreeURL(base: URL, suffix: String) -> URL {
+        let first = URL(fileURLWithPath: base.path + suffix)
+        guard fileManager.fileExists(atPath: first.path) else { return first }
+        for n in 2... {
+            let candidate = URL(fileURLWithPath: base.path + suffix + "-\(n)")
+            if !fileManager.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return first
     }
 }

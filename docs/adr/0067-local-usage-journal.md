@@ -183,6 +183,18 @@ ones. The version comes from the migration itself (`Outcome.migratedFromVersion`
 generations, and the label must match the oldest). Existing `.v1.bak` files need no renaming: they
 hold v1 and are already correctly named under the new rule.
 
+**A taken name is decided by bytes, not by the name existing**
+([#509](https://github.com/artem-from-ua/tokenpace/issues/509)). Naming the backup after the oldest
+*usage* line means a second pass over the same generation asks for a name already on disk — by
+construction, not by accident. Treating that as "the evidence is already safe" and deleting the live
+file is wrong whenever the journal grew since, which it always has: it is append-only and polls every
+three minutes. The live file is now compared against the existing backup (size first, then contents)
+and is deleted **only** on a byte-for-byte match; differing bytes take a timestamped
+`.v<n>.<YYYYMMDD>T<HHMMSS>Z.bak` instead. The invariant is that the live journal is never deleted
+unless its exact current bytes are already stored somewhere. The naming and the delete/keep decision
+live in `JournalBackupNaming` in the Kit target, so they are unit-tested rather than trapped in the
+untested shell.
+
 Three properties the migration must uphold, each verified on live journals:
 
 - **an unparseable line** is carried across byte-for-byte and counted (a truncated tail after a
