@@ -220,6 +220,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// render time, so neither provider's poll can overwrite the other's checks.
     private var lastGitHubHealth: StatusHealth?
 
+    // MARK: Codex status source (#503)
+
+    /// The third status source, in the same per-source shape: its own heartbeat, its own 429 hold,
+    /// its own last-success marker and its own in-flight task.
+    private var codexLoopTask: Task<Void, Never>?
+    private var codexTask: Task<Void, Never>?
+    /// **One** hold for both of Codex's requests. A 429 is the *page* asking us to slow down, and
+    /// there is one page behind both URLs — holding the components request while hammering the
+    /// incidents one would be honouring the letter of the header and not the request.
+    private var codexBackoff = PollingBackoff()
+    private var lastCodexSuccess: Date?
+    private var lastCodexHealth: StatusHealth?
+    /// Whether the last successful poll got its incidents from the undocumented endpoint. Read by
+    /// Troubleshoot: a success there must never quietly hide which path the data came from.
+    private(set) var codexIncidentsFromProxy = false
+
     // MARK: update check
 
     /// The single update menu item, sitting just above Quit behind its own separator. Hidden unless
@@ -263,10 +279,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// two arrive on independent polls, so a single list would be rewritten by whichever landed last
     /// and the other provider's incidents would vanish until its own next poll.
     private var lastGitHubIncidents: [VisibleIncident] = []
+    /// Codex's visible incidents, kept apart for the same reason.
+    private var lastCodexIncidents: [VisibleIncident] = []
     /// Both providers' incidents as one list — what the popup renders under Option, and what the
     /// episode subscription and its notifications read. That is what makes GitHub incidents flow
     /// through the existing notification mechanism with no toggle of their own.
-    private var lastVisibleIncidents: [VisibleIncident] { lastClaudeIncidents + lastGitHubIncidents }
+    private var lastVisibleIncidents: [VisibleIncident] {
+        lastClaudeIncidents + lastGitHubIncidents + lastCodexIncidents
+    }
     /// Routes taps on incident banners. Held for the process's lifetime — `UNUserNotificationCenter`
     /// keeps only a weak reference to its delegate, so letting this go would silently stop routing.
     private lazy var incidentNotificationDelegate = IncidentNotificationDelegate(
@@ -623,6 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let wc = SettingsWindowController()
             wc.onProviderMonitoringChange = { [weak self] config in self?.providerMonitoringChanged(config) }
             wc.onGitHubMonitoringChange = { [weak self] _ in self?.gitHubMonitoringChanged() }
+            wc.onCodexMonitoringChange = { [weak self] _ in self?.codexMonitoringChanged() }
             wc.onCheckForUpdatesNow = { [weak self] in self?.performUpdateCheck(userInitiated: true) }
             wc.onInstallUpdateNow = { [weak self] in self?.installUpdateNow() }
             wc.onColorAdviceChange = { [weak self] mode in
@@ -994,6 +1015,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusLoopTask?.cancel()
         githubLoopTask?.cancel()
         githubTask?.cancel()
+        codexLoopTask?.cancel()
+        codexTask?.cancel()
         updateTask?.cancel()
         installTask?.cancel()
         archiveTask?.cancel()
@@ -1061,6 +1084,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // transport without being torn down).
         startStatusLoop()
         startGitHubLoop()
+        startCodexLoop()
         updateColorCycle(for: currentScenario)   // arm the colour walk when launched under that stub
         startAwaitingCycleIfRequested()          // and the awaiting-input walk (ADR-0073)
 
@@ -1520,23 +1544,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// draw its "Monitoring is off" dead end over a live GitHub section, and the menu bar would show
     /// the nothing-monitored glyph while a GitHub outage was on screen.
     private var isMonitoringAnything: Bool {
-        providerMonitoring.isMonitoringAnything || PersistedConfig.githubMonitoring.isMonitoringAnything
+        providerMonitoring.isMonitoringAnything
+            || PersistedConfig.githubMonitoring.isMonitoringAnything
+            || PersistedConfig.codexMonitoring.isMonitoringAnything
     }
 
-    /// The two providers' health as one value, for the surfaces that read a single ``StatusHealth``:
-    /// the menu-bar dot takes its worst-of-all, the popup groups it back into sections.
+    /// Every provider's health as one value, for the surfaces that read a single ``StatusHealth``:
+    /// the menu-bar dot takes its worst-of-all, the popup groups it back into plates.
     ///
-    /// Merged at **render** time rather than kept as one stored value, because the two arrive on
+    /// Merged at **render** time rather than kept as one stored value, because they arrive on
     /// independent cadences. A stored merge would have to be rewritten by whichever poll landed last,
-    /// and the loser's checks would flicker out until its own next poll. `nil` only when neither
+    /// and the losers' checks would flicker out until their own next poll. `nil` only when no
     /// provider has ever polled.
+    ///
+    /// A fold rather than a switch over the combinations: `merging` already replaces a provider's
+    /// checks and sorts by display order, so it is associative here — and the switch would need a
+    /// case per subset, eight of them at three providers.
     private var renderedStatusHealth: StatusHealth? {
-        switch (lastStatusHealth, lastGitHubHealth) {
-        case let (.some(claude), .some(github)): return claude.merging(github)
-        case let (.some(claude), .none):         return claude
-        case let (.none, .some(github)):         return github
-        case (.none, .none):                     return nil
-        }
+        [lastStatusHealth, lastGitHubHealth, lastCodexHealth]
+            .compactMap { $0 }
+            .reduce(nil) { merged, next in merged?.merging(next) ?? next }
     }
 
     /// The GitHub provider's switch changed in Settings: poll **now** rather than at the next tick.
@@ -1657,6 +1684,183 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.reRenderForCurrentTime()
         }
+    }
+
+    // MARK: Codex status source (#503)
+
+    /// The Codex provider's switches changed in Settings: poll **now** rather than at the next tick.
+    private func codexMonitoringChanged() {
+        lastCodexSuccess = nil
+        codexBackoff = codexBackoff.reset()
+        pollCodexIfDue()
+    }
+
+    /// Codex's status heartbeat — the same shape as the other two, on its own `SignalHub`
+    /// subscription so no source contends for a signal.
+    private func startCodexLoop() {
+        let scheduler = LivePollScheduler(signals: signals.newStream(for: .codex))
+        codexLoopTask = Task { [weak self] in
+            // Poll **before** the first wait, for the reason GitHub's loop does: `waitForNextPoll`
+            // sleeps the whole interval up front, so starting with it would leave the plate empty for
+            // the five-minute politeness floor after every launch.
+            self?.pollCodexIfDue()
+            while !Task.isCancelled {
+                guard let self else { return }
+                let wait = self.codexPollInterval()
+                switch await scheduler.waitForNextPoll(interval: wait) {
+                case .interrupted(.sleep):
+                    await scheduler.waitWhileAsleep()
+                case .elapsed, .interrupted:
+                    break
+                }
+                guard !Task.isCancelled else { return }
+                self.pollCodexIfDue()
+            }
+        }
+    }
+
+    /// Codex's own cadence: its own hold, its own problem signal. `usageInterval` is `nil` — this
+    /// provider's status half has no usage poll to settle with.
+    private func codexPollInterval() -> TimeInterval {
+        StatusCadence.nextInterval(
+            backoff: codexBackoff,
+            usageInterval: nil,
+            hasProblem: lastCodexHealth?.worstProblem(of: .codex) != nil)
+    }
+
+    /// Fetch Codex's status when its own cadence says it is due — two requests, and only the first is
+    /// allowed to decide whether the plate renders.
+    ///
+    /// **Statuses come from `components.json`, incidents from the page's own frontend backend.** The
+    /// documented `/api/v2/incidents.json` reports `affected_components: null` on every incident
+    /// (measured), so it cannot say which service an incident touched; the proxy endpoint is the only
+    /// source that can. That endpoint is undocumented, so its failure **degrades** rather than
+    /// propagates: the statuses stand, the incident rows disappear, and `codexIncidentsFromProxy`
+    /// records which path was taken so Troubleshoot can say so.
+    private func pollCodexIfDue() {
+        let config = PersistedConfig.codexMonitoring
+        guard config.isMonitoringAnything else {
+            if lastCodexHealth != nil || !lastCodexIncidents.isEmpty {
+                lastCodexHealth = nil
+                lastCodexSuccess = nil
+                lastCodexIncidents = []
+                reRenderForCurrentTime()
+            }
+            return
+        }
+        guard StatusCadence.isDue(
+            lastSuccess: lastCodexSuccess, backoff: codexBackoff, usageInterval: nil,
+            hasProblem: lastCodexHealth?.worstProblem(of: .codex) != nil, now: Date()) else { return }
+
+        codexTask?.cancel()
+        let transport = statusTransport
+        let userAgent = "TokenPace/\(TokenPaceKit.version)"
+        codexTask = Task { [weak self] in
+            let health: StatusHealth
+            var succeeded = false
+            var rateLimited: TimeInterval??
+            var incidents: [VisibleIncident] = []
+            var fromProxy = false
+            var fetchedSummary: StatusSummary?
+            do {
+                let summary = try await StatusClient.fetch(
+                    transport: transport, endpoint: StatusHealth.codexEndpoint, userAgent: userAgent)
+                let names = CodexStatusMapping.componentNames(in: summary)
+
+                // The incident request, on its own. `try?` around it would swallow a 429 — the one
+                // failure the caller must act on — so it is caught by hand and re-surfaced below.
+                var feed: CodexIncidentFeed?
+                var incidentRateLimit: TimeInterval??
+                do {
+                    feed = try await CodexIncidentClient.fetch(
+                        transport: transport, userAgent: userAgent)
+                    fromProxy = true
+                } catch StatusFetchError.rateLimited(let retryAfter) {
+                    incidentRateLimit = .some(retryAfter)
+                } catch {
+                    AppLogger.network.notice(
+                        "codex incidents unavailable — statuses stand, incident rows drop")
+                }
+
+                let monitored = StatusHealth.monitoredCodexComponentNames(for: config)
+                let changedAt = feed.map {
+                    CodexStatusMapping.changedAt(in: $0, componentNames: names)
+                } ?? [:]
+                // Order of age sources: the incident feed's own `component_impacts.start_at`, then a
+                // reconstruction from the journal's `status` records, then nothing. `updated_at` is
+                // never one of them — on this page it is the same value on every component.
+                let reconstructed = self?.reconstructedCodexAges() ?? [:]
+                health = .fromCodex(summary, config: config) { name in
+                    changedAt[name] ?? reconstructed[name]
+                }
+                fetchedSummary = summary
+                if let feed {
+                    incidents = CodexStatusMapping.visibleIncidents(
+                        in: feed, componentNames: names, monitoredComponentNames: monitored,
+                        now: self?.currentDate() ?? Date(), maxAge: PersistedConfig.incidentMaxAge)
+                }
+                succeeded = true
+                // A 429 on the incident request holds the pair even though the components request
+                // returned 200: the page asked, and one page means one limiter.
+                if case let .some(retryAfter) = incidentRateLimit { rateLimited = .some(retryAfter) }
+            } catch StatusFetchError.rateLimited(let retryAfter) {
+                health = .unknownCodex(for: config)
+                rateLimited = .some(retryAfter)
+            } catch {
+                health = .unknownCodex(for: config)
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.lastCodexHealth = health
+            if succeeded {
+                self.lastCodexIncidents = incidents
+                // Which path the incidents came from, logged on every change. A success on the
+                // undocumented endpoint must never be silent about being undocumented, and the
+                // degraded run must be distinguishable from "there were no incidents".
+                if self.codexIncidentsFromProxy != fromProxy || self.lastCodexSuccess == nil {
+                    AppLogger.network.notice(
+                        "codex incidents source=\(fromProxy ? "proxy" : "unavailable", privacy: .public)")
+                }
+                self.codexIncidentsFromProxy = fromProxy
+                self.lastCodexSuccess = self.currentDate()
+                self.advanceEpisodeSubscription()
+                if self.codexBackoff.isHolding, rateLimited == nil {
+                    AppLogger.network.notice("codex status: 200 cleared the backoff hold")
+                    self.codexBackoff = self.codexBackoff.reset()
+                }
+                // Journal the poll, same live-only / enabled gates as Claude's. Not merely
+                // bookkeeping here: these lines **are** the fallback age source, so a Codex row's
+                // age exists only because this ran. The incident body is never written — half a
+                // megabyte per poll of history nobody reads back.
+                if let summary = fetchedSummary,
+                   PersistedConfig.journalEnabled, self.currentScenario == .realNetwork {
+                    let record = JournalRecord.status(
+                        from: summary, health: health, now: self.currentDate(), provider: .codex)
+                    let at = self.currentDate()
+                    Task { [usageJournal = self.usageJournal] in
+                        await usageJournal.appendStatus(record, at: at)
+                    }
+                }
+            }
+            if case let .some(retryAfter) = rateLimited {
+                // Both requests feed one hold; the longer `Retry-After` wins, since honouring the
+                // shorter would go back to a page that asked for more.
+                let candidate = self.codexBackoff.honoring(retryAfter: retryAfter)
+                if candidate.interval > self.codexBackoff.interval || !self.codexBackoff.isHolding {
+                    self.codexBackoff = candidate
+                }
+                AppLogger.network.notice(
+                    "codex status backoff holding for \(self.codexBackoff.interval, privacy: .public)s")
+            }
+            self.reRenderForCurrentTime()
+        }
+    }
+
+    /// Codex component ages recovered from the journal — the fallback when the incident feed has no
+    /// open impact for a component. Empty on a fresh install, and that is the honest answer: the row
+    /// then shows no age rather than one measured from when we started watching.
+    private func reconstructedCodexAges() -> [String: Date] {
+        guard let samples = try? UsageJournal.recentStatusSamples() else { return [:] }
+        return StatusAgeReconstruction.changedAt(from: samples, provider: .codex)
     }
 
     /// How long the status loop should wait before its next poll: this source's 429 hold if one is
@@ -2444,10 +2648,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // In the services-only mode the age shown is the **status** poll's, since that is the only
             // thing being fetched. A no-op in every other mode.
             .withStatusAge(lastStatusSuccess.map { max(0, now.timeIntervalSince($0)) })
-            .withGitHubStatusAge(lastGitHubSuccess.map { max(0, now.timeIntervalSince($0)) })  // separate cadence
-            .withGitHubIncidents(lastGitHubIncidents)
-            // Claude's plate gets Claude's incidents only; GitHub's ride `withGitHubIncidents` above.
-            // The concatenated `lastVisibleIncidents` is for the episode subscription and its
+            // Each satellite provider's own poll age — separate cadences, so one age cannot stand for
+            // another.
+            .withProviderStatusAge(.github, lastGitHubSuccess.map { max(0, now.timeIntervalSince($0)) })
+            .withProviderIncidents(.github, lastGitHubIncidents)
+            .withProviderStatusAge(.codex, lastCodexSuccess.map { max(0, now.timeIntervalSince($0)) })
+            .withProviderIncidents(.codex, lastCodexIncidents)
+            // Claude's plate gets Claude's incidents only; the others ride the calls above. The
+            // concatenated `lastVisibleIncidents` is for the episode subscription and its
             // notifications, where the provider does not change what the banner says.
             .withIncidents(lastClaudeIncidents)
             .withSubscription(currentSubscriptionState())

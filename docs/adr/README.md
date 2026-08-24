@@ -141,6 +141,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0122](0122-comments-are-read-every-session.md) | Comments are priced per read | accepted |
 | [0123](0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md) | One line per error run, and a wall-clock floor on signal-driven polls | accepted |
 | [0124](0124-journal-records-carry-their-provider.md) | Every journal record carries its provider, and error runs never merge across providers | accepted |
+| [0125](0125-codex-as-a-status-provider.md) | Codex as a status provider — statuses from the component feed, incidents from the page's own backend, and an age that is never invented | accepted |
 
 ## Maintaining this index
 

@@ -185,18 +185,19 @@ public struct PopupLayout: Sendable, Equatable {
     /// one line per component with a colour dot and a linked status word. Independent of `warning`:
     /// the usage poll and the status poll fail and succeed separately.
     public let serviceStatus: StatusHealth?
-    /// Age of the **GitHub** provider's last successful status poll, in seconds, or `nil` when it has
-    /// never succeeded or the provider is not monitored.
+    /// Age of each satellite provider's last successful status poll, in seconds. A provider is absent
+    /// when it has never succeeded or is not monitored.
     ///
-    /// Its own field rather than a reuse of ``lastUpdateAge``: GitHub polls on a cadence of its own,
-    /// so Claude's age says nothing about it.
-    public let githubStatusAge: TimeInterval?
-    /// The **GitHub** provider's visible incidents, rendered on its own plate under Option.
+    /// Keyed rather than folded into ``lastUpdateAge``: every provider polls on a cadence of its own,
+    /// so one age standing for all of them would be a quiet lie.
+    public let providerStatusAges: [ProviderID: TimeInterval]
+    /// Each satellite provider's visible incidents, rendered on that provider's own plate under
+    /// Option.
     ///
-    /// Separate from ``incidents``, which stays Claude's — one list would put a GitHub outage under
-    /// the Claude header, and the incident rows deliberately do not name the services they affect
-    /// (ADR-0071 §3), so they cannot self-correct that attribution.
-    public let githubIncidents: [VisibleIncident]
+    /// Separate from ``incidents``, which stays Claude's — one list would put another provider's
+    /// outage under the Claude header, and the incident rows deliberately do not name the services
+    /// they affect (ADR-0071 §3), so they cannot self-correct that attribution.
+    public let providerIncidents: [ProviderID: [VisibleIncident]]
     /// The "Extra usage" money-credits section, or `nil` when credits are inactive for this
     /// snapshot (`snapshot.spend == nil` or `!CreditsPacing.isActive`). A **separate** field from
     /// ``rows`` — a credits section is not a limit window (see ``CreditsRow``).
@@ -326,8 +327,8 @@ public struct PopupLayout: Sendable, Equatable {
         planLabel: String? = nil,
         monitoringMode: MonitoringMode = .usageAndServices,
         weeklyResetUnknown: Bool = false,
-        githubStatusAge: TimeInterval? = nil,
-        githubIncidents: [VisibleIncident] = []
+        providerStatusAges: [ProviderID: TimeInterval] = [:],
+        providerIncidents: [ProviderID: [VisibleIncident]] = [:]
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -349,8 +350,8 @@ public struct PopupLayout: Sendable, Equatable {
         self.subscription = subscription
         self.monitoringMode = monitoringMode
         self.weeklyResetUnknown = weeklyResetUnknown
-        self.githubStatusAge = githubStatusAge
-        self.githubIncidents = githubIncidents
+        self.providerStatusAges = providerStatusAges
+        self.providerIncidents = providerIncidents
     }
 
     /// A copy of this layout with **one** field replaced, everything else carried over. Every `with*`
@@ -361,8 +362,8 @@ public struct PopupLayout: Sendable, Equatable {
         incidents: [VisibleIncident]? = nil,
         subscription: EpisodeSubscriptionState?? = nil,
         planLabel: String?? = nil,
-        githubStatusAge: TimeInterval?? = nil,
-        githubIncidents: [VisibleIncident]? = nil
+        providerStatusAges: [ProviderID: TimeInterval]? = nil,
+        providerIncidents: [ProviderID: [VisibleIncident]]? = nil
     ) -> PopupLayout {
         PopupLayout(
             lastUpdateAge: lastUpdateAge ?? self.lastUpdateAge,
@@ -378,8 +379,8 @@ public struct PopupLayout: Sendable, Equatable {
             planLabel: planLabel ?? self.planLabel,
             monitoringMode: monitoringMode,
             weeklyResetUnknown: weeklyResetUnknown,
-            githubStatusAge: githubStatusAge ?? self.githubStatusAge,
-            githubIncidents: githubIncidents ?? self.githubIncidents)
+            providerStatusAges: providerStatusAges ?? self.providerStatusAges,
+            providerIncidents: providerIncidents ?? self.providerIncidents)
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged.
@@ -419,15 +420,28 @@ public struct PopupLayout: Sendable, Equatable {
         copy(planLabel: .some(planLabel))
     }
 
-    /// A copy carrying the GitHub status poll's age, grafted on like the plan label, since it comes
-    /// from the shell's own poll bookkeeping rather than from any usage snapshot.
-    public func withGitHubStatusAge(_ age: TimeInterval?) -> PopupLayout {
-        copy(githubStatusAge: .some(age.map { max(0, $0) }))
+    /// A copy carrying one satellite provider's status-poll age, grafted on like the plan label,
+    /// since it comes from the shell's own poll bookkeeping rather than from any usage snapshot. A
+    /// `nil` age removes the entry — the provider has nothing to report rather than an age of zero.
+    public func withProviderStatusAge(_ provider: ProviderID, _ age: TimeInterval?) -> PopupLayout {
+        var ages = providerStatusAges
+        ages[provider] = age.map { max(0, $0) }
+        return copy(providerStatusAges: ages)
     }
 
-    /// A copy carrying GitHub's visible incidents, grafted like Claude's.
-    public func withGitHubIncidents(_ incidents: [VisibleIncident]) -> PopupLayout {
-        copy(githubIncidents: incidents)
+    /// A copy carrying one satellite provider's visible incidents, grafted like Claude's.
+    public func withProviderIncidents(_ provider: ProviderID, _ incidents: [VisibleIncident]) -> PopupLayout {
+        var all = providerIncidents
+        all[provider] = incidents
+        return copy(providerIncidents: all)
+    }
+
+    /// One satellite provider's own poll age, or `nil` when it has none.
+    public func statusAge(of provider: ProviderID) -> TimeInterval? { providerStatusAges[provider] }
+
+    /// One satellite provider's visible incidents.
+    public func incidents(of provider: ProviderID) -> [VisibleIncident] {
+        providerIncidents[provider] ?? []
     }
 
     // MARK: make

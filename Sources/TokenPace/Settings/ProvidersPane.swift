@@ -26,20 +26,18 @@ struct ProvidersPane: View {
             // be the only section title on this page that adds nothing. The rows below name their
             // own providers; the sections that follow carry titles because they say something the
             // page name does not.
+            // Generated from `ProviderID.displayOrder` rather than hand-listed: a provider appears
+            // here, on its own page, and on its popup plate in one order, decided in one place. A
+            // hand-written row is the thing that gets forgotten when a provider is added, and a
+            // missing row is a feature nobody can reach.
             Section {
-                SettingsNavigationRow(
-                    title: "Claude",
-                    subtitle: model.claudeProviderSummary,
-                    badge: .claude,
-                    action: { model.drill(into: .providersClaude) })
-
-                // The second provider (#454) — the growth this page was shaped for. Status only: it
-                // has no usage half, so its page carries one section where Claude's carries two.
-                SettingsNavigationRow(
-                    title: "GitHub",
-                    subtitle: model.githubProviderSummary,
-                    badge: .github,
-                    action: { model.drill(into: .providersGitHub) })
+                ForEach(ProviderID.displayOrder, id: \.self) { provider in
+                    SettingsNavigationRow(
+                        title: provider.displayName,
+                        subtitle: model.providerSummary(provider),
+                        badge: .provider(provider),
+                        action: { model.drill(into: SettingsChildPage.page(for: provider)) })
+                }
             }
 
             // MARK: Polling — unlabelled on purpose

@@ -82,12 +82,24 @@ public enum ServiceID: Sendable, Equatable {
     /// why ``StatusHealth/pageURL(for:)`` exists: its rows link to `githubstatus.com`.
     case githubDevelopment
 
+    /// Codex's `Codex API` component — the endpoint the CLI, the extension and the web app all talk to.
+    case codexAPI
+    /// Codex's `CLI` component — the `codex` binary's own infrastructure.
+    case codexCLI
+    /// Codex's `VS Code extension` component.
+    case codexVSCode
+    /// Codex's `Codex Web` component — the cloud-task surface at `chatgpt.com/codex`.
+    case codexWeb
+    /// Codex's `Codex in ChatGPT Desktop` component.
+    case codexChatGPTDesktop
+
     /// Which provider this service belongs to — the popup groups its sections by this, and the
     /// journal tags its records with it.
     public var provider: ProviderID {
         switch self {
         case .claudeAPI, .claudeCode, .webDesktop: return .claude
         case .githubDevelopment:                   return .github
+        case .codexAPI, .codexCLI, .codexVSCode, .codexWeb, .codexChatGPTDesktop: return .codex
         }
     }
 }
@@ -108,14 +120,37 @@ public enum ServiceID: Sendable, Equatable {
 public enum ProviderID: String, Sendable, Equatable, Codable, CaseIterable {
     case claude
     case github
+    case codex
 
     /// The provider's name as the popup's section header shows it.
     public var displayName: String {
         switch self {
         case .claude: return "Claude"
         case .github: return "GitHub"
+        case .codex:  return "Codex"
         }
     }
+
+    /// Every provider in the order the UI presents them — plates down the popup, rows down the
+    /// Settings Providers list, checks inside a merged ``StatusHealth``.
+    ///
+    /// Sorted by ``displayName``, with Claude pinned first: it owns the usage bars, so its plate is
+    /// the popup's main stack and the others are satellite cards below it. The rest is alphabetical
+    /// because nothing else distinguishes them — a status-only provider has no claim to be second.
+    ///
+    /// **Not `allCases`.** That order is the case-declaration order, which is archive identity:
+    /// ``ProviderID``'s raw values are journal-stable and a case appended later must not be able to
+    /// reorder the screen. Routing every ordering site through this one property is what keeps
+    /// "where a provider is declared" and "where it is drawn" independent.
+    public static let displayOrder: [ProviderID] = {
+        let rest = ProviderID.allCases.filter { $0 != .claude }.sorted { $0.displayName < $1.displayName }
+        return [.claude] + rest
+    }()
+
+    /// Where this provider sits in ``displayOrder``. The comparison key for anything that sorts by
+    /// provider; force-unwrapped because `displayOrder` is built from `allCases` and so contains
+    /// every case by construction.
+    public var displayIndex: Int { ProviderID.displayOrder.firstIndex(of: self)! }
 }
 
 // MARK: - ResolvedComponent
@@ -313,12 +348,51 @@ public struct StatusHealth: Sendable, Equatable {
     /// property of the *provider*, not of the client.
     public static let githubEndpoint = URL(string: "https://www.githubstatus.com/api/v2/summary.json")!
 
+    /// Codex's five monitored components, verbatim against `components[].name` on
+    /// `status.openai.com`. One logical service each — unlike GitHub's five, these are genuinely
+    /// different surfaces, and "CLI red, Web green" is an action ("switch to the web one") rather
+    /// than noise.
+    ///
+    /// `Login` is monitored by **neither**, and cannot be: the feed carries it twice under two
+    /// different ids (positions 3 and 27, verified in a captured `components.json`), so an exact-name
+    /// match resolves to whichever copy the array happens to list first.
+    public static let codexAPIComponentName = "Codex API"
+    public static let codexCLIComponentName = "CLI"
+    public static let codexVSCodeComponentName = "VS Code extension"
+    public static let codexWebComponentName = "Codex Web"
+    public static let codexChatGPTDesktopComponentName = "Codex in ChatGPT Desktop"
+
+    /// OpenAI's status page — the link target for Codex rows.
+    public static let codexPageURL = URL(string: "https://status.openai.com")!
+
+    /// Codex's component feed. **`components.json`, not `summary.json`** — the summary is truncated
+    /// to `position` 0–24 and `CLI` sits at 29, so it can never appear there (measured: 25 components
+    /// against 34). The truncation is structural, not a transient omission.
+    public static let codexEndpoint =
+        URL(string: "https://status.openai.com/api/v2/components.json")!
+
+    /// Where Codex incidents come from: the status page's own frontend backend, the only source that
+    /// says **which components** an incident touched. `/api/v2/incidents.json` returns
+    /// `affected_components: null` on every incident (measured across all 25 it carries), so the
+    /// documented endpoint cannot attribute an incident to a service at all.
+    ///
+    /// Undocumented, and treated as such — see ``codexIncidentsFallbackEndpoint``.
+    public static let codexIncidentsEndpoint =
+        URL(string: "https://status.openai.com/proxy/status.openai.com/incidents")!
+
+    /// What Codex incidents degrade to when the undocumented endpoint fails or changes shape. It
+    /// carries no component attribution, so Codex incident rows simply vanish while the statuses —
+    /// which come from ``codexEndpoint``, a different request — keep rendering.
+    public static let codexIncidentsFallbackEndpoint =
+        URL(string: "https://status.openai.com/api/v2/incidents.json")!
+
     /// The status page a logical service belongs to. Per **provider**, not per app: the popup turns
     /// the status word into a link, and a GitHub row pointing at Anthropic's page would be a dead end.
     public static func pageURL(for id: ServiceID) -> URL {
         switch id {
         case .claudeAPI, .claudeCode, .webDesktop: return pageURL
         case .githubDevelopment:                   return githubPageURL
+        case .codexAPI, .codexCLI, .codexVSCode, .codexWeb, .codexChatGPTDesktop: return codexPageURL
         }
     }
 
@@ -410,6 +484,69 @@ public struct StatusHealth: Sendable, Equatable {
         return [ServiceCheck(id: .githubDevelopment, components: components)]
     }
 
+    // MARK: - Codex
+
+    /// Map Codex's component feed to its five logical services.
+    ///
+    /// **`components[].updated_at` is not read.** On `status.openai.com` it is the same value on
+    /// every component (measured: one distinct `updated_at` against 19 distinct `created_at` across
+    /// 34 components) — it tracks the page's last edit, not a status change. Passing it through would
+    /// render an age measured from an unrelated event, and `isRecentlyRecovered` would never fire.
+    ///
+    /// The age comes from `changedAt` instead, a per-component lookup the caller supplies from the
+    /// incident feed's `component_impacts[].start_at` or from the journal. `nil` is the honest answer
+    /// when neither has one — the row then shows no age rather than a fabricated one.
+    public static func fromCodex(
+        _ summary: StatusSummary,
+        config: CodexMonitoring,
+        changedAt: (String) -> Date? = { _ in nil }
+    ) -> StatusHealth {
+        StatusHealth(checks: codexChecks(for: config) { name in
+            guard let component = summary.components.first(where: { $0.name == name }) else {
+                return (.unknown, nil)
+            }
+            return (ServiceStatus(rawAPIValue: component.status), changedAt(name))
+        })
+    }
+
+    /// What the shell substitutes when a **Codex** status poll fails: its components grey, nothing
+    /// said about the other providers.
+    public static func unknownCodex(for config: CodexMonitoring) -> StatusHealth {
+        StatusHealth(checks: codexChecks(for: config) { _ in (.unknown, nil) })
+    }
+
+    /// Codex's monitored component names — the join key an incident is intersected against.
+    public static func monitoredCodexComponentNames(for config: CodexMonitoring) -> Set<String> {
+        Set(codexChecks(for: config) { _ in (.unknown, nil) }.flatMap(\.components).map(\.name))
+    }
+
+    /// The single source of truth for Codex's services — one component per service, so the mapping is
+    /// a table rather than a group.
+    private static func codexChecks(
+        for config: CodexMonitoring,
+        statusOf: (String) -> (status: ServiceStatus, changedAt: Date?)
+    ) -> [ServiceCheck] {
+        codexServices
+            .filter { config.isEnabled($0.id) }
+            .map { service in
+                let resolved = statusOf(service.component)
+                return ServiceCheck(id: service.id, components: [
+                    ResolvedComponent(
+                        name: service.component, status: resolved.status, changedAt: resolved.changedAt),
+                ])
+            }
+    }
+
+    /// Codex's service↔component table, in display order. `public` so the Settings page can generate
+    /// its switches from it instead of hand-listing five that must be kept in step with this.
+    public static let codexServices: [(id: ServiceID, component: String)] = [
+        (.codexAPI, codexAPIComponentName),
+        (.codexCLI, codexCLIComponentName),
+        (.codexVSCode, codexVSCodeComponentName),
+        (.codexWeb, codexWebComponentName),
+        (.codexChatGPTDesktop, codexChatGPTDesktopComponentName),
+    ]
+
     // MARK: - merging
 
     /// This health with `other`'s checks appended — how two providers, polled independently on two
@@ -422,11 +559,10 @@ public struct StatusHealth: Sendable, Equatable {
     public func merging(_ other: StatusHealth) -> StatusHealth {
         let replaced = Set(other.checks.map(\.id.provider))
         let kept = checks.filter { !replaced.contains($0.id.provider) }
-        // Provider order is display order: Claude first, then GitHub — the popup renders sections in
-        // the order the checks arrive, and a merge must not shuffle them by who polled last.
+        // The popup renders sections in the order the checks arrive, so the merge must not shuffle
+        // them by who polled last — `displayIndex` is the one place that order is decided.
         let merged = (kept + other.checks).sorted {
-            ProviderID.allCases.firstIndex(of: $0.id.provider)!
-                < ProviderID.allCases.firstIndex(of: $1.id.provider)!
+            $0.id.provider.displayIndex < $1.id.provider.displayIndex
         }
         return StatusHealth(checks: merged)
     }

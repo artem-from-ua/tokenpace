@@ -109,7 +109,10 @@ struct StatusDecodeTests {
     @Test func decodesComponentsAndIgnoresExtraKeys() throws {
         let summary = try StatusClient.decode(from: realSummaryJSON)
         #expect(summary.components.count == 4)
-        #expect(summary.components.contains(StatusComponent(name: "Claude Code", status: "operational")))
+        // By name and status, not whole-struct equality: the fixture also carries an `id`, which the
+        // decoder keeps for the id↔name join Codex's incident feed needs.
+        let code = try #require(summary.components.first { $0.name == "Claude Code" })
+        #expect(code.status == "operational")
     }
 
     @Test func malformedBodyThrowsDecode() {

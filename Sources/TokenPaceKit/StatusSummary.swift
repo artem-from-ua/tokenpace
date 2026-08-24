@@ -31,16 +31,23 @@ public struct StatusComponent: Sendable, Equatable, Decodable {
     /// the row then simply shows no age. Parsed by ``ResetClock/parse(_:)`` at the view seam (it
     /// already strips the fractional seconds Statuspage emits).
     public let updatedAt: String?
+    /// The component's own id, the join key between a feed of components and a feed of incidents
+    /// that names components by id rather than by name (Codex's, #503).
+    ///
+    /// Status *matching* is still by name everywhere — the single identity axis ADR-0013 §1 chose.
+    /// This is decoded only to resolve someone else's ids back into those names.
+    public let id: String?
 
     private enum CodingKeys: String, CodingKey {
-        case name, status
+        case name, status, id
         case updatedAt = "updated_at"
     }
 
-    public init(name: String, status: String, updatedAt: String? = nil) {
+    public init(name: String, status: String, updatedAt: String? = nil, id: String? = nil) {
         self.name = name
         self.status = status
         self.updatedAt = updatedAt
+        self.id = id
     }
 }
 

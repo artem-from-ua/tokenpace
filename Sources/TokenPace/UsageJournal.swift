@@ -241,6 +241,33 @@ actor UsageJournal {
         return String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
     }
 
+    // MARK: - Reading back
+
+    /// The `status` samples in the journal's two most recent months, oldest first — the source
+    /// ``StatusAgeReconstruction`` reads when a provider's feed cannot say when a component changed.
+    ///
+    /// Two months rather than the whole archive: the question is "when did the current status begin",
+    /// and an answer older than the retention window is not recoverable anyway. `static` and
+    /// synchronous because it touches only the file system and takes no actor state — the caller is
+    /// on the main actor and a hop would buy nothing.
+    static func recentStatusSamples() throws -> [StatusSample] {
+        let now = Date()
+        let months = [now.addingTimeInterval(-31 * 24 * 3600), now].map(Self.monthComponent)
+        let directory = Self.envOverrideFile?.deletingLastPathComponent() ?? Self.defaultDirectory
+        let suffix = Self.runningFromApplications ? "" : "-dev"
+        var samples: [StatusSample] = []
+        for month in Set(months).sorted() {
+            let url = Self.envOverrideFile
+                ?? directory.appendingPathComponent("usage-journal\(suffix)-\(month).jsonl")
+            guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            for record in JournalReader.parse(contents).records {
+                if case let .status(sample) = record { samples.append(sample) }
+            }
+            if Self.envOverrideFile != nil { break }
+        }
+        return samples
+    }
+
     // MARK: - Migration (#386)
 
     /// The suffix a pre-migration copy keeps. **Never deleted by the app** — see

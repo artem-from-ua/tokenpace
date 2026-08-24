@@ -55,6 +55,11 @@ enum ColorRole {
     /// The popup's GitHub wordmark: a light neutral that reads as the same mark on both materials.
     /// Not `.labelColor` (the header would stop reading as a brand mark), not black either.
     case githubBrandInk
+    /// Codex's mark (#503) — `#5871C0`, a mid-luminance indigo. One role for both surfaces, where
+    /// GitHub needs two: black needed a companion because it is unreadable on the dropdown's dark
+    /// material, and this sits near `claudeBrand`'s luminance, which reads on both. Verified with
+    /// Digital Color Meter in sRGB on the live dropdown in each theme, not from a screenshot.
+    case codexBrand
 
     // MARK: - Shipped defaults
 
@@ -86,6 +91,7 @@ enum ColorRole {
         case .calmWhite:     return .labelColor            // calm neutral — re-alpha'd by bright()
         case .claudeBrand:   return NSColor(srgbRed: 0xd9/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
         case .githubBrand:   return NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+        case .codexBrand:    return NSColor(srgbRed: 0x58/255, green: 0x71/255, blue: 0xC0/255, alpha: 1)
         // `#1F2328` — GitHub's own foreground ink. Fixed on light, near-white on dark.
         case .githubBrandInk:
             return NSColor(name: nil) { appearance in
