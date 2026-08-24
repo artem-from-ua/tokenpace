@@ -1005,7 +1005,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Best-effort: write out an error run still accumulating (ADR-0123). This handler is
         // synchronous and cannot await, so a run open at a hard kill is lost — acceptable, since a
         // run still open describes a failure the next launch will record again within one cadence.
-        Task { [usageJournal] in await usageJournal.flushOpenErrorRun() }
+        // All providers, not one: a per-provider flush here writes one run and drops the rest.
+        Task { [usageJournal] in await usageJournal.flushAllErrorRuns() }
         sleepWake?.stop()
         screenLock?.stop()
         network.stop()

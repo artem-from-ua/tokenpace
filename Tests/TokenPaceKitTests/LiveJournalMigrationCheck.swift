@@ -89,6 +89,8 @@ struct LiveJournalMigrationCheck {
             #expect(again.outcome.resetsRepaired == 0, "\(name): second pass repaired resets")
             #expect(again.outcome.statusTagged == 0, "\(name): second pass re-tagged status lines")
             #expect(again.outcome.errorsCollapsed == 0, "\(name): second pass re-collapsed errors")
+            #expect(again.outcome.errorTagged == 0, "\(name): second pass re-tagged error lines")
+            #expect(again.outcome.resumeTagged == 0, "\(name): second pass re-tagged resume markers")
             #expect(!again.outcome.changedAnything, "\(name): second pass reports a change")
 
             // The #456 invariant: after the pass, no stored `status` line relies on "absent means
@@ -106,6 +108,33 @@ struct LiveJournalMigrationCheck {
             #expect(untagged == 0, "\(name): \(untagged) status lines still carry no provider")
             #expect(statuses.allSatisfy { $0.provider == ProviderID.claude.rawValue },
                     "\(name): a status line carries an unexpected provider")
+
+            // The same invariant for the other three kinds (#502): after the pass, no stored line of
+            // any kind relies on "absent means Claude".
+            var staleOtherKinds = 0
+            var foreignProvider = 0
+            for line in migrated.split(separator: "\n") {
+                guard let data = line.data(using: .utf8),
+                      let record = try? JSONDecoder().decode(JournalRecord.self, from: data)
+                else { continue }
+                switch record {
+                case let .usage(s):
+                    if s.v < UsageSample.currentVersion { staleOtherKinds += 1 }
+                    if s.provider != ProviderID.claude.rawValue { foreignProvider += 1 }
+                case let .error(s):
+                    if s.v < ErrorSample.currentVersion { staleOtherKinds += 1 }
+                    if s.provider != ProviderID.claude.rawValue { foreignProvider += 1 }
+                case let .resume(m):
+                    if m.v < ResumeMarker.currentVersion { staleOtherKinds += 1 }
+                    if m.provider != ProviderID.claude.rawValue { foreignProvider += 1 }
+                case .status, .unknown:
+                    continue
+                }
+            }
+            #expect(staleOtherKinds == 0,
+                    "\(name): \(staleOtherKinds) usage/error/resume lines still carry no provider")
+            #expect(foreignProvider == 0,
+                    "\(name): \(foreignProvider) lines carry a provider other than Claude")
 
             let samples = migrated
                 .split(separator: "\n")
@@ -170,6 +199,8 @@ struct LiveJournalMigrationCheck {
                status samples   : \(statuses.count)
                rewritten        : \(outcome.migrated)
                status tagged    : \(outcome.statusTagged)
+               error tagged     : \(outcome.errorTagged)
+               resume tagged    : \(outcome.resumeTagged)
                resets repaired  : \(outcome.resetsRepaired)
                severities recomputed : \(outcome.severitiesRecomputed)\(matrix)
                out of order     : \(outcome.outOfOrder)

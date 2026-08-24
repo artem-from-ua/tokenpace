@@ -70,11 +70,13 @@ struct JournalRecordCodableTests {
         #expect(sample.provider == ProviderID.claude.rawValue)
     }
 
-    /// The two `v` counters are independent: `kind` decides which one a reader is looking at. Pinned
-    /// because they are both spelled `v` on the wire, which is the whole trap.
-    @Test func statusAndUsageVersionsAreSeparateCounters() {
+    /// The four `v` counters are independent: `kind` decides which one a reader is looking at. Pinned
+    /// because they are all spelled `v` on the wire, which is the whole trap.
+    @Test func everyKindVersionsItselfSeparately() {
         #expect(StatusSample.currentVersion == 2)
-        #expect(UsageSample.currentVersion == 4)
+        #expect(UsageSample.currentVersion == 5)
+        #expect(ErrorSample.currentVersion == 3)
+        #expect(ResumeMarker.currentVersion == 1)
     }
 
     @Test func errorRoundTripsHTTPAndCategory() throws {

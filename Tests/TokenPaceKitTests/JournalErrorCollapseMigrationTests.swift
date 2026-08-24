@@ -10,10 +10,15 @@ struct JournalErrorCollapseMigrationTests {
 
     private static func errorLine(
         t: String, code: String = "\"notSent\"", reason: String = "notSent",
-        detail: String? = "token expired"
+        detail: String? = "token expired", v: Int = 2
     ) -> String {
         let detailPart = detail.map { ",\"detail\":\"\($0)\"" } ?? ""
-        return #"{"kind":"error","t":"\#(t)","code":\#(code),"reason":"\#(reason)"\#(detailPart),"v":2}"#
+        return #"{"kind":"error","t":"\#(t)","code":\#(code),"reason":"\#(reason)"\#(detailPart),"v":\#(v)}"#
+    }
+
+    /// A lone failure at the current format — the shape that must survive a pass byte-for-byte.
+    private static func currentErrorLine(t: String) -> String {
+        #"{"kind":"error","t":"\#(t)","code":"notSent","reason":"notSent","detail":"token expired","v":\#(ErrorSample.currentVersion),"provider":"claude"}"#
     }
 
     private static func iso(_ offsetSeconds: Int) -> String {
@@ -98,14 +103,31 @@ struct JournalErrorCollapseMigrationTests {
         #expect(Self.decodeErrors(out).first?.n == 2)
     }
 
-    @Test func anIsolatedErrorIsNotCollapsed() {
+    @Test func anIsolatedErrorAtTheCurrentFormatIsNotRewritten() {
         // The common case: a lone failure must not gain `n:1,tEnd:t` noise, and its bytes must not
         // even be rewritten — a pass that changes what it cannot improve rewrites every journal.
-        let input = Self.errorLine(t: Self.iso(0))
+        let input = Self.currentErrorLine(t: Self.iso(0))
         let (out, _, outcome) = JournalMigration.migrate(contents: input)
         #expect(out == input)
         #expect(outcome.errorsCollapsed == 0)
+        #expect(outcome.errorTagged == 0)
         #expect(!outcome.changedAnything)
+    }
+
+    /// The byte-passthrough above is overridden exactly once, for a stale line: left in place it would
+    /// keep its untagged bytes forever, since nothing else revisits a run of one. Tagged, not
+    /// collapsed — there were never two attempts to fold.
+    @Test func anIsolatedStaleErrorIsTaggedRatherThanPassedThrough() {
+        let (out, _, outcome) = JournalMigration.migrate(contents: Self.errorLine(t: Self.iso(0)))
+        #expect(outcome.errorTagged == 1)
+        #expect(outcome.errorsCollapsed == 0)
+        #expect(outcome.changedAnything)
+
+        let sample = Self.decodeErrors(out).first
+        #expect(sample?.v == ErrorSample.currentVersion)
+        #expect(sample?.provider == ProviderID.claude.rawValue)
+        #expect(sample?.n == nil)                        // still one attempt, no collapse noise
+        #expect(sample?.detail == "token expired")       // and its facts carry across
     }
 
     @Test func theCollapseIsIdempotent() {

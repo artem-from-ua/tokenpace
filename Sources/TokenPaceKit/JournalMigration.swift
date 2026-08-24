@@ -54,11 +54,26 @@ import Foundation
 /// its inputs were the page's response at that instant, which is gone. The provider is the one fact
 /// that is knowable in retrospect, precisely because there was only ever one it could have been.
 ///
+/// ## Why `usage`, `error` and `resume` carry a provider too (#502)
+///
+/// Same argument as `status`, one ticket later and on the three kinds a second **usage** provider
+/// makes ambiguous. Two facts follow from it that a reader of the branches below would otherwise
+/// find surprising:
+///
+/// - **A stale `error` line must lose its byte-passthrough.** The collapse path deliberately reuses
+///   the original bytes for a run of one, so a file with nothing to fold is not rewritten. Left
+///   alone, an untagged run-of-one would stay untagged forever, so a line behind
+///   ``ErrorSample/currentVersion`` drops `openRunLine` and is re-encoded through
+///   ``ErrorRunCollapse/close(_:)``.
+/// - **`provider` is part of a run's identity**, so two providers failing identically never fold
+///   into one line carrying one of their names — the very merge this tag exists to prevent, one
+///   layer down.
+///
 /// ## What the migration must survive
 ///
-/// - **Lines that are not usage or status samples** (`error`, `resume`) pass through verbatim.
-///   `status` lines did too until #456; now they are rewritten when their format is behind, and pass
-///   through untouched once current.
+/// - **Every kind is rewritten while its own `v` is behind, and passes through untouched once
+///   current.** The four counters are independent, so a file can be entirely current on one kind and
+///   entirely stale on another.
 /// - **Unparseable lines** pass through verbatim too, and are counted. A corrupt tail from a crash
 ///   mid-append must not cost the whole file.
 /// - **Out-of-order timestamps.** Found in a real journal: one line at 11:03 sitting before one at
@@ -101,6 +116,13 @@ public enum JournalMigration {
         public let statusTagged: Int
         /// `error` lines folded into runs — the number of collapsed lines **written**.
         public let errorsCollapsed: Int
+        /// `error` lines rewritten to carry their ``ErrorSample/provider``.
+        ///
+        /// Its own counter beside ``errorsCollapsed``, which counts a different act: a stale line
+        /// with nothing adjacent to fold into is tagged without collapsing anything.
+        public let errorTagged: Int
+        /// `resume` markers rewritten to carry their ``ResumeMarker/provider``.
+        public let resumeTagged: Int
         /// Attempts folded away (`sum(n) - lines written`) — how much the file shrank.
         public let errorLinesRemoved: Int
         /// The **lowest** format version found among the lines this pass rewrote, or `nil` when it
@@ -124,6 +146,7 @@ public enum JournalMigration {
                     resetsRepaired: Int = 0, severitiesRecomputed: Int = 0,
                     statusTagged: Int = 0,
                     errorsCollapsed: Int = 0, errorLinesRemoved: Int = 0,
+                    errorTagged: Int = 0, resumeTagged: Int = 0,
                     migratedFromVersion: Int? = nil) {
             self.migrated = migrated
             self.passedThrough = passedThrough
@@ -134,23 +157,28 @@ public enum JournalMigration {
             self.statusTagged = statusTagged
             self.errorsCollapsed = errorsCollapsed
             self.errorLinesRemoved = errorLinesRemoved
+            self.errorTagged = errorTagged
+            self.resumeTagged = resumeTagged
             self.migratedFromVersion = migratedFromVersion
         }
 
         /// Whether the pass changed anything — `false` means the file is already current and the
         /// caller can skip the rewrite (and the backup) entirely.
         ///
-        /// Keyed on `migrated` **or** `statusTagged` — every counter that corresponds to a rewritten
-        /// line. `migrated` counts usage samples rewritten for any reason (a stale format, a stale
-        /// colour model, or both); `statusTagged` counts status lines relabelled with their provider
-        /// (#456).
+        /// Keyed on **every** counter that corresponds to a rewritten line. `migrated` counts usage
+        /// samples rewritten for any reason (a stale format, a stale colour model, or both);
+        /// `statusTagged`, `errorTagged` and `resumeTagged` count lines of the other three kinds
+        /// relabelled with their provider; `errorsCollapsed` counts runs folded.
         ///
-        /// The `||` is load-bearing rather than defensive. An August journal can hold thousands of
-        /// status lines and not a single stale usage line, and while this read `migrated > 0` such a
-        /// file computed a correct rewrite and was then silently declined by the shell — the pass would
-        /// have reported success and changed nothing on disk. **Any future counter that marks a
-        /// rewritten line must be added here too**, or it will fail the same way.
-        public var changedAnything: Bool { migrated > 0 || statusTagged > 0 || errorsCollapsed > 0 }
+        /// The `||` chain is load-bearing rather than defensive. A journal whose only stale lines are
+        /// `resume` markers is ordinary — a laptop that sleeps a lot with usage polling off — and a
+        /// counter missing here means the pass computes a correct rewrite, the shell silently declines
+        /// to write it, and the log reports success. **Any future counter that marks a rewritten line
+        /// must be added here too**, or it will fail the same way.
+        public var changedAnything: Bool {
+            migrated > 0 || statusTagged > 0 || errorsCollapsed > 0
+                || errorTagged > 0 || resumeTagged > 0
+        }
 
         /// A `.public`-safe one-liner for the migration log.
         public var logMessage: String {
@@ -161,6 +189,8 @@ public enum JournalMigration {
             if errorsCollapsed > 0 {
                 out += ", \(errorsCollapsed) error runs collapsed (\(errorLinesRemoved) lines folded)"
             }
+            if errorTagged > 0 { out += ", \(errorTagged) error lines tagged" }
+            if resumeTagged > 0 { out += ", \(resumeTagged) resume markers tagged" }
             if skipped > 0 { out += ", \(skipped) unparseable" }
             if outOfOrder > 0 { out += ", \(outOfOrder) out of order" }
             return out
@@ -201,6 +231,7 @@ public enum JournalMigration {
         var migrated = 0, passedThrough = 0, skipped = 0, outOfOrder = 0, resetsRepaired = 0
         var severitiesRecomputed = 0, statusTagged = 0
         var errorsCollapsed = 0, errorLinesRemoved = 0
+        var errorTagged = 0, resumeTagged = 0
         var out: [String] = []
         // The oldest generation this pass had to rewrite — what the file *was*, which is what its
         // backup should be named after (#401).
@@ -222,13 +253,18 @@ public enum JournalMigration {
         // untouched rather than re-encoded: a pass that rewrites what it cannot improve makes every
         // journal a changed file and every launch a rewrite.
         var openRunLine: String?
+        // Whether the open run's first line was behind ``ErrorSample/currentVersion``. It overrides the
+        // passthrough above exactly once: without it a stale run of one keeps its untagged bytes and
+        // stays untagged forever, since nothing else ever revisits it.
+        var openRunStale = false
         // Close the run and emit its line. Must be called at the top of **every** branch that appends
         // something else, and once after the loop — a missed call silently drops attempts.
         func flushRun() {
             guard let run = openRun else { return }
             openRun = nil
-            defer { openRunLine = nil }
-            guard run.count > 1 else {
+            let wasStale = openRunStale
+            defer { openRunLine = nil; openRunStale = false }
+            guard run.count > 1 || wasStale else {
                 if let line = openRunLine { out.append(line); passedThrough += 1 }
                 return
             }
@@ -239,8 +275,14 @@ public enum JournalMigration {
                 return
             }
             out.append(text)
-            errorsCollapsed += 1
-            errorLinesRemoved += run.count - 1
+            // A run of one only reaches here because its format was behind: it is a relabelling, and
+            // counting it as a collapse would claim attempts were folded that never existed.
+            if run.count > 1 {
+                errorsCollapsed += 1
+                errorLinesRemoved += run.count - 1
+            } else {
+                errorTagged += 1
+            }
         }
 
         for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -261,24 +303,57 @@ public enum JournalMigration {
                     passedThrough += 1
                     continue
                 }
+                let stale = sample.v < ErrorSample.currentVersion
                 // An already-collapsed line is finished work: pass its bytes through and let it end
-                // whatever run preceded it. Re-encoding it would make every launch rewrite the file.
+                // whatever run preceded it. Re-encoding it would make every launch rewrite the file —
+                // unless its format is behind, in which case it is re-encoded once for the tag.
                 guard sample.n == nil else {
                     flushRun()
-                    out.append(line)
-                    passedThrough += 1
+                    guard stale, let tagged = try? encoder.encode(JournalRecord.error(retagged(sample))),
+                          let text = String(data: tagged, encoding: .utf8) else {
+                        out.append(line)
+                        passedThrough += 1
+                        continue
+                    }
+                    out.append(text)
+                    errorTagged += 1
                     continue
                 }
                 switch ErrorRunCollapse.admit(openRun, sample: sample, at: at) {
                 case let .extend(run):
                     openRun = run
-                    if run.count == 1 { openRunLine = line }
+                    if run.count == 1 { openRunLine = line; openRunStale = stale }
                 case let .flush(closed, next):
                     openRun = closed
                     flushRun()
                     openRun = next
                     openRunLine = next.count == 1 ? line : nil
+                    openRunStale = next.count == 1 && stale
                 }
+                continue
+            }
+
+            // `resume` markers get the same relabelling as `status`: a marker predates the second usage
+            // provider entirely, so Claude is the only clock its gap can have come from.
+            if case let .resume(marker) = parsed {
+                flushRun()
+                guard marker.v < ResumeMarker.currentVersion else {
+                    out.append(line)                 // already tagged
+                    passedThrough += 1
+                    continue
+                }
+                let tagged = ResumeMarker(
+                    t: marker.t, gap: marker.gap,
+                    v: ResumeMarker.currentVersion,
+                    provider: ProviderID.claude.rawValue)
+                guard let encoded = try? encoder.encode(JournalRecord.resume(tagged)),
+                      let text = String(data: encoded, encoding: .utf8) else {
+                    out.append(line)                 // encoding failed: never lose the original
+                    skipped += 1
+                    continue
+                }
+                out.append(text)
+                resumeTagged += 1
                 continue
             }
 
@@ -404,6 +479,9 @@ public enum JournalMigration {
             let rewritten = UsageSample(
                 v: UsageSample.currentVersion,
                 sevV: UsageSample.currentColorVersion,
+                // Claude on a v4 line for the same reason the status backfill is knowable: it predates
+                // the second usage provider. A v5 line already carries its own and keeps it.
+                provider: sample.provider,
                 t: sample.t, ms: sample.ms, plan: sample.plan, tier: sample.tier,
                 h5: h5,
                 d7: d7,
@@ -430,7 +508,17 @@ public enum JournalMigration {
                         severitiesRecomputed: severitiesRecomputed,
                         statusTagged: statusTagged,
                         errorsCollapsed: errorsCollapsed, errorLinesRemoved: errorLinesRemoved,
+                        errorTagged: errorTagged, resumeTagged: resumeTagged,
                         migratedFromVersion: lowestVersion))
+    }
+
+    /// An already-collapsed `error` line at the current format, with everything else carried across.
+    /// Its `n`/`tEnd` are finished work — re-deriving them would need the attempts, which are gone.
+    private static func retagged(_ sample: ErrorSample) -> ErrorSample {
+        ErrorSample(
+            t: sample.t, code: sample.code, reason: sample.reason, detail: sample.detail,
+            retryAfter: sample.retryAfter, ms: sample.ms, n: sample.n, tEnd: sample.tEnd,
+            v: ErrorSample.currentVersion, provider: sample.provider)
     }
 
     // MARK: - Severity recomputation (#426)

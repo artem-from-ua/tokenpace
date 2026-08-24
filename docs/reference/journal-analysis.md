@@ -68,8 +68,15 @@ same amount of time.
 ## What a line contains
 
 One object per line, tagged with `kind`. For analytics the `usage` lines are the interesting ones;
-`status` and `resume` are described in [ADR-0067](../adr/0067-local-usage-journal.md), and `error`
-in the subsection below — it carries a trap worth reading before you count anything.
+the other three shapes get a subsection each below. Read the `error` one before you count anything —
+it carries a trap.
+
+> **Every count must filter by `provider` first.** Since
+> [ADR-0124](../adr/0124-journal-records-carry-their-provider.md) every line of every `kind` carries
+> `provider`, and archives were backfilled by the launch migration. An archive can hold more than one
+> provider's series in one file, and a count taken without the filter sums them — the result looks
+> entirely plausible, because nothing in an aggregate says it merged two series. Filter first, then
+> count; a comparison across providers is two filtered counts, never one unfiltered one.
 
 > **Never count `error` lines — sum `n ?? 1`.** Since
 > [ADR-0123](../adr/0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md) consecutive
@@ -90,7 +97,8 @@ in the subsection below — it carries a trap worth reading before you count any
 | `h5.sevRaw` | same | the verdict recorded at poll time — **only** if it differs from `sev`. A missing field means "identical", not "no data" |
 | `d7.*` | same | the 7-day window |
 | `scoped[]` | array | per-model limits (`name`, `pct`, `reset`, `timePct`, `sev`, `sevRaw`) |
-| `v` | Int | the version of the line **format** — for a `usage` line, **4** is current; absent reads as 1. Every `kind` has its own counter, so dispatch on `kind` before reading it (a `status` line's `v` is at 2 and means something else entirely) |
+| `v` | Int | the version of the line **format** — for a `usage` line, **5** is current; absent reads as 1. Every `kind` has its own counter, so dispatch on `kind` before reading it (a `status` line's `v` is at 2 and means something else entirely) |
+| `provider` | String | whose quota this line measures (`claude`). Written on every line since v5 and backfilled onto every archived one, so **never** infer it from absence |
 | `sevV` | Int | the generation of the **color model** that produced `sev` (1 is current); absent = older than the first named one |
 | `spend` | object | the spend limit, credits consumed, currency |
 | `plan` / `tier` | String | `max`/`pro`, the plan — needed to attribute the series |
@@ -128,7 +136,8 @@ One record per **run** of consecutive identical failures, not per attempt
 
 | Field | Type | What it is |
 |---|---|---|
-| `v` | Int | the version of the **`error`** line format (**2** is current); absent reads as 1 — a pre-collapse line, one attempt, no `detail` |
+| `v` | Int | the version of the **`error`** line format (**3** is current); absent reads as 1 — a pre-collapse line, one attempt, no `detail` |
+| `provider` | String | whose poll failed (`claude`). Written on every line since v3 and backfilled onto every archived one. Part of the run's identity, so two providers failing identically never merge into one line |
 | `t` / `tEnd` | ISO-8601 UTC | the **first** and **last** attempt of the run. `tEnd` is absent when the line is a single attempt; `tEnd − t` is the run's duration, never the spacing between attempts |
 | `n` | Int | how many attempts this line stands for; **absent means 1** |
 | `code` | Int **or** String | an HTTP status (`429`, `503`) when a response arrived, or a category (`notSent`/`timeout`/`dns`/`network`/`decode`/`nonHTTP`) when none did. A bare JSON number or string — a parser must accept both |
@@ -144,6 +153,25 @@ count of `notSent` causes over an old archive is not "mostly unknown" — it is 
 
 **Status lines are on a different cadence from usage lines** (ADR-0013) and carry no resume markers of
 their own, so never interleave the two series or read a gap in one as a gap in the other.
+
+### The resume line
+
+A marker written when a gap exceeded the expected cadence. What it means and how to use it is under
+["An observation gap is a first-class entity"](#an-observation-gap-is-a-first-class-entity); this is
+its shape.
+
+| Field | Type | What it is |
+|---|---|---|
+| `v` | Int | the version of the **`resume`** line format (**1** is current); absent reads as **0**, not 1 — the field never existed on this shape, so there is no generation "1" to claim |
+| `t` | ISO-8601 UTC | the first poll **after** the gap. The gap covers `[t − gap … t]` |
+| `gap` | Number | the gap length in seconds |
+| `provider` | String | whose observation stopped (`claude`). Written on every line since v1 and backfilled onto every archived one |
+
+**A marker belongs to one provider's series, and only that one.** Each provider's writer keeps its
+own gap clock, so a hole in one is not a hole in another — the other kept polling straight through it
+([ADR-0124](../adr/0124-journal-records-carry-their-provider.md)). Applying every marker in the file
+to every series paints holes over stretches that were observed, which is the same untruth as
+interpolating across a real one, in the opposite direction.
 
 **Take `sev` as given — but look at `sevV` first.** The ready-made value already accounts for the
 weekly-capacity gate ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)) and the ban on blue
@@ -295,6 +323,10 @@ break_here = (dt_s > CADENCE_IDLE_S * GAP_MULTIPLIER)   # spacing twice the idle
 
 The `resume` marker is **more authoritative** than spacing: it is the app's own decision, not our
 guess. It also carries the gap length, so its start is reconstructed as `t − gap_s`.
+
+**Both signs are per provider.** The marker names whose gap it is, and the spacing test must be run
+over one provider's lines — computed over a mixed file it measures the interleaving of two cadences,
+not a hole in either.
 
 Practical consequences:
 

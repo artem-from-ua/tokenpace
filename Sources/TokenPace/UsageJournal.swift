@@ -18,9 +18,9 @@ import TokenPaceKit
 /// under `/Applications`, so a dev build never pollutes the release journal; `-YYYY-MM` from the
 /// record's UTC timestamp for natural monthly rotation.
 ///
-/// An `actor` so its in-memory gap clock (`lastPollInstant`) and the open error run stay consistent
-/// across the detached
-/// tasks that call it; the file lock guards *cross-process* consistency, the actor guards *in-process*.
+/// An `actor` so its in-memory gap clocks (`lastPollInstant`) and open error runs stay consistent
+/// across the detached tasks that call it; the file lock guards *cross-process* consistency, the actor
+/// guards *in-process*.
 actor UsageJournal {
 
     private let directory: URL
@@ -32,21 +32,29 @@ actor UsageJournal {
     /// fed to a downstream reader without touching the real journal.
     private let overrideFile: URL?
 
-    /// The last instant a usage poll was **recorded**, whether or not a line was written for it.
+    /// Per provider, the last instant a usage poll was **recorded**, whether or not a line was written
+    /// for it.
     ///
     /// The distinction matters since consecutive identical failures collapse into one line: a
     /// suppressed write still means "we were looking", and the gap detector answers exactly that
     /// question. Stamping only on an actual write would make a long collapsed run look like an
     /// outage and emit a resume marker across time we spent polling hard.
     ///
+    /// Keyed by provider, not one shared clock: a shared one lets one provider's polling advance the
+    /// other's gap detector, so an outage on the quiet provider would leave **no** hole in the record
+    /// and read as continuous observation — the one flaw a written-down series cannot recover from.
+    ///
     /// In-memory only (resets on relaunch): after a relaunch the first poll legitimately emits a
     /// resume marker, the honest "we weren't looking while the app was down" signal.
-    private var lastPollInstant: Date?
+    private var lastPollInstant: [ProviderID: Date] = [:]
 
-    /// The error run being accumulated, if any — see ``ErrorRunCollapse``. In-memory only, and a hard
-    /// kill loses it: acceptable, because a run still open describes a failure that has not been
+    /// Per provider, the error run being accumulated — see ``ErrorRunCollapse``. In-memory only, and a
+    /// hard kill loses it: acceptable, because a run still open describes a failure that has not been
     /// fixed, and the next launch records it again within one cadence.
-    private var openErrorRun: ErrorRun?
+    ///
+    /// Keyed by provider for the same reason the identity tuple is: two providers failing identically
+    /// on one shared slot would fold into one line carrying one of their names.
+    private var openErrorRun: [ProviderID: ErrorRun] = [:]
 
     init(
         directory: URL = UsageJournal.defaultDirectory,
@@ -92,36 +100,51 @@ actor UsageJournal {
     ///   - record: The record to write (already built by a ``JournalRecord`` factory).
     ///   - at: The record's instant, for gap detection and month selection.
     ///   - expectedInterval: The cadence the caller expected since the last poll (for the gap marker).
-    func append(_ record: JournalRecord, at instant: Date, expectedInterval: TimeInterval) {
+    ///   - provider: whose poll this is. Selects the gap clock and the open-run slot, both per
+    ///     provider.
+    func append(
+        _ record: JournalRecord, at instant: Date, expectedInterval: TimeInterval,
+        provider: ProviderID = .claude
+    ) {
         // An error may be the same error repeating: accumulate it and write only when the run ends.
         // The gap clock advances either way — the poll happened.
         if case let .error(sample) = record {
-            switch ErrorRunCollapse.admit(openErrorRun, sample: sample, at: instant) {
+            switch ErrorRunCollapse.admit(openErrorRun[provider], sample: sample, at: instant) {
             case let .extend(run):
-                openErrorRun = run
+                openErrorRun[provider] = run
             case let .flush(closed, next):
                 writeClosedRun(closed)
-                openErrorRun = next
+                openErrorRun[provider] = next
             }
-            lastPollInstant = instant
+            lastPollInstant[provider] = instant
             return
         }
 
-        // Any other record ends the run: write it out first so the file keeps its order.
-        flushOpenErrorRun()
+        // Any other record ends **this provider's** run: write it out first so the file keeps its
+        // order. Another provider's run is a different failure and keeps accumulating.
+        flushOpenErrorRun(provider)
 
-        if let marker = JournalGap.marker(previous: lastPollInstant, now: instant, expectedInterval: expectedInterval) {
+        if let marker = JournalGap.marker(
+            previous: lastPollInstant[provider], now: instant,
+            expectedInterval: expectedInterval, provider: provider) {
             writeLine(.resume(marker), at: instant)
         }
         writeLine(record, at: instant)
-        lastPollInstant = instant
+        lastPollInstant[provider] = instant
     }
 
-    /// Write the accumulated run, if any. Called when a non-error record arrives and at termination.
-    func flushOpenErrorRun() {
-        guard let run = openErrorRun else { return }
+    /// Write one provider's accumulated run, if any. Called when a non-error record arrives for it.
+    func flushOpenErrorRun(_ provider: ProviderID = .claude) {
+        guard let run = openErrorRun.removeValue(forKey: provider) else { return }
         writeClosedRun(run)
-        openErrorRun = nil
+    }
+
+    /// Write **every** provider's accumulated run. What termination must call: a per-provider flush
+    /// there would write one run and silently drop the rest.
+    func flushAllErrorRuns() {
+        for provider in openErrorRun.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            flushOpenErrorRun(provider)
+        }
     }
 
     /// Serialise one closed run at the instant of its **first** attempt — where the failure began,

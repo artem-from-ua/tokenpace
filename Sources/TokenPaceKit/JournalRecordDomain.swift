@@ -11,13 +11,16 @@ extension JournalRecord {
     /// blocked/credits flags, `hasBrokenActiveReset`, and the blocking-reset choice.
     /// - Parameter weekly: the seven-day reconstruction for this poll (#386). Defaults to `nil` so
     ///   fixtures and tests that predate it keep compiling; live polls always pass it.
+    /// - Parameter provider: whose quota this poll read. Defaults to `.claude` so existing call sites
+    ///   read unchanged, matching ``status(from:health:now:provider:)``.
     public static func usage(
         from snapshot: UsageSnapshot,
         now: Date,
         durationMs: Int? = nil,
         plan: String? = nil,
         tier: String? = nil,
-        weekly: WeeklyUtilization? = nil
+        weekly: WeeklyUtilization? = nil,
+        provider: ProviderID = .claude
     ) -> JournalRecord {
         // The weekly gate, hoisted **out** of the `UsageSample(...)` literal below: `d7` is built at the
         // same expression level as `h5`, so the 7-day state has to be resolved before the literal or the
@@ -45,6 +48,7 @@ extension JournalRecord {
             onCredits: ExtraUsageOnset.isOnCredits(rendered))
 
         let sample = UsageSample(
+            provider: provider.rawValue,
             t: ResetClock.isoString(from: now),
             ms: durationMs,
             plan: plan,
@@ -113,7 +117,10 @@ extension JournalRecord {
     /// `failure` (the poll's `UsageHealth.reason`) is used **only** to refine the transport bucket into
     /// `timeout`/`dns`/`network` — it already collapsed the `URLError.Code` the raw diagnostic outcome
     /// does not carry. HTTP/decode categories come from the diagnostic status/outcome directly.
-    public static func error(diagnostics d: FetchDiagnostics, failure: FailureReason?, now: Date) -> JournalRecord {
+    public static func error(
+        diagnostics d: FetchDiagnostics, failure: FailureReason?, now: Date,
+        provider: ProviderID = .claude
+    ) -> JournalRecord {
         let (code, reason, detail) = errorCodeReasonAndDetail(d, failure: failure)
         return .error(ErrorSample(
             t: ResetClock.isoString(from: now),
@@ -121,7 +128,8 @@ extension JournalRecord {
             reason: reason,
             detail: detail,
             retryAfter: d.retryAfter,
-            ms: d.durationMs))
+            ms: d.durationMs,
+            provider: provider.rawValue))
     }
 
     // MARK: - Helpers

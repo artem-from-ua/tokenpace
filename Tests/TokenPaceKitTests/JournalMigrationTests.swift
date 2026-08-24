@@ -70,18 +70,20 @@ struct JournalMigrationTests {
         #expect(last.d7.utilSrc != nil)                  // and it says how it got there
     }
 
-    /// `resume` and `error` still pass through byte-identical. `status` used to be on this list and is
-    /// not any more (#456) — it is rewritten to carry its provider, so it is asserted separately in
-    /// `ProviderIDBackfillTests` below.
-    @Test func passesThroughOtherRecordKinds() {
+    /// Every kind at its current format passes through byte-identical. Nothing is exempt: `status`,
+    /// `error` and `resume` are each rewritten while their own `v` is behind, and each stops being
+    /// touched once it is current.
+    @Test func passesThroughRecordsAlreadyAtTheirCurrentFormat() {
         let input = [
-            #"{"kind":"resume","t":"2026-08-03T12:05:00Z","gap":900}"#,
-            #"{"kind":"error","t":"2026-08-03T12:10:00Z","code":429,"reason":"clientProblem"}"#,
+            #"{"kind":"resume","t":"2026-08-03T12:05:00Z","gap":900,"v":1,"provider":"claude"}"#,
+            #"{"kind":"error","t":"2026-08-03T12:10:00Z","code":429,"reason":"clientProblem","v":3,"provider":"claude"}"#,
         ].joined(separator: "\n")
 
         let (out, _, outcome) = JournalMigration.migrate(contents: input)
         #expect(outcome.migrated == 0)
         #expect(outcome.statusTagged == 0)
+        #expect(outcome.errorTagged == 0)
+        #expect(outcome.resumeTagged == 0)
         #expect(outcome.passedThrough == 2)
         #expect(out == input)                            // byte-identical
         #expect(!outcome.changedAnything)
@@ -633,7 +635,8 @@ struct ProviderIDBackfillTests {
         let (out, _, outcome) = JournalMigration.migrate(contents: input)
         #expect(out.split(separator: "\n", omittingEmptySubsequences: false).count == 4)
         #expect(outcome.statusTagged == 2)
-        #expect(outcome.passedThrough == 2)              // resume + error, untouched
+        #expect(outcome.resumeTagged == 1)
+        #expect(outcome.errorTagged == 1)
     }
 
     /// A torn status line is preserved exactly, like any other unparseable one — a relabelling pass
@@ -646,5 +649,145 @@ struct ProviderIDBackfillTests {
         #expect(outcome.skipped == 1)
         #expect(outcome.statusTagged == 1)
         #expect(out.hasSuffix(torn))
+    }
+}
+
+// MARK: - Provider backfill on usage, error and resume lines (#502)
+
+/// The other three kinds get the same tag `status` got, under three independent `v` counters. A
+/// relabelling for `error`/`resume`; for `usage` it rides the v4 → v5 rewrite `migrated` already
+/// counts, so it gains no counter of its own.
+@Suite("JournalMigration — usage/error/resume provider backfill")
+struct RecordProviderBackfillTests {
+
+    /// A v4 usage line: current on every axis except the provider it does not carry.
+    private static func v4Usage(t: String) -> String {
+        let h5 = #"{"util":10,"raw":10,"reset":"","timePct":0.5,"sev":"green"}"#
+        let d7 = #"{"util":20,"raw":20,"reset":"","timePct":0.5,"sev":"green"}"#
+        let credits = #"{"active":false,"showIcon":false,"onCredits":false}"#
+        return #"{"kind":"usage","v":4,"sevV":1,"t":"\#(t)","h5":\#(h5),"d7":\#(d7),"# +
+            #""scoped":[],"sessionIdle":false,"blocked":false,"credits":\#(credits),"brokenReset":false}"#
+    }
+
+    private static func v2Error(t: String) -> String {
+        #"{"kind":"error","t":"\#(t)","code":429,"reason":"clientProblem","v":2}"#
+    }
+
+    /// An untagged resume marker: no `v`, no `provider` — every one in the archive looks like this.
+    private static func untaggedResume(t: String, gap: Double = 900) -> String {
+        #"{"kind":"resume","t":"\#(t)","gap":\#(gap)}"#
+    }
+
+    private static func records(_ text: String) -> [JournalRecord] {
+        text.split(separator: "\n", omittingEmptySubsequences: false).compactMap { line in
+            guard let data = line.trimmingCharacters(in: .whitespaces).data(using: .utf8) else {
+                return nil
+            }
+            return try? JSONDecoder().decode(JournalRecord.self, from: data)
+        }
+    }
+
+    @Test func tagsAllThreeKindsAndSplitsTheCountersCorrectly() {
+        let input = [
+            Self.v4Usage(t: "2026-08-03T12:00:00Z"),
+            Self.v2Error(t: "2026-08-03T12:03:00Z"),
+            Self.untaggedResume(t: "2026-08-03T12:20:00Z"),
+        ].joined(separator: "\n")
+
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+        #expect(outcome.migrated == 1)                   // the usage tag rides the v4 → v5 rewrite
+        #expect(outcome.errorTagged == 1)
+        #expect(outcome.resumeTagged == 1)
+        #expect(outcome.migratedFromVersion == 4)        // …so the backup is named after v4
+
+        for record in Self.records(out) {
+            switch record {
+            case let .usage(s):
+                #expect(s.provider == ProviderID.claude.rawValue)
+                #expect(s.v == UsageSample.currentVersion)
+                #expect(s.sevV == UsageSample.currentColorVersion)   // the colour model did not move
+            case let .error(s):
+                #expect(s.provider == ProviderID.claude.rawValue)
+                #expect(s.v == ErrorSample.currentVersion)
+            case let .resume(m):
+                #expect(m.provider == ProviderID.claude.rawValue)
+                #expect(m.v == ResumeMarker.currentVersion)
+            case .status, .unknown:
+                Issue.record("unexpected record kind")
+            }
+        }
+    }
+
+    /// The trap the docblock on `changedAnything` warns about in bold. A journal whose **only** stale
+    /// lines are resume markers is ordinary — a laptop that sleeps a lot with usage polling off — and
+    /// without the counter the pass computes a correct rewrite, the shell declines to write it, and
+    /// the log reports success.
+    @Test func aResumeOnlyChangeIsDetectedAsChanged() {
+        let outcome = JournalMigration.migrate(
+            contents: Self.untaggedResume(t: "2026-08-03T12:20:00Z")).outcome
+        #expect(outcome.migrated == 0)
+        #expect(outcome.statusTagged == 0)
+        #expect(outcome.errorsCollapsed == 0)
+        #expect(outcome.resumeTagged == 1)
+        #expect(outcome.changedAnything)
+    }
+
+    @Test func theBackfillIsIdempotent() {
+        let input = [
+            Self.v4Usage(t: "2026-08-03T12:00:00Z"),
+            Self.v2Error(t: "2026-08-03T12:03:00Z"),
+            Self.untaggedResume(t: "2026-08-03T12:20:00Z"),
+        ].joined(separator: "\n")
+
+        let first = JournalMigration.migrate(contents: input)
+        let second = JournalMigration.migrate(contents: first.contents, state: first.state)
+        #expect(second.outcome.migrated == 0)
+        #expect(second.outcome.errorTagged == 0)
+        #expect(second.outcome.resumeTagged == 0)
+        #expect(!second.outcome.changedAnything)
+        #expect(second.contents == first.contents)       // byte for byte
+    }
+
+    /// Line count is the invariant a migration may never break, whatever else it changes.
+    @Test func lineCountSurvivesAMixedFile() {
+        let input = [
+            Self.v4Usage(t: "2026-08-03T12:00:00Z"),
+            #"{"kind":"status","t":"2026-08-03T12:01:00Z","svc":[],"worst":"operational"}"#,
+            Self.v2Error(t: "2026-08-03T12:03:00Z"),
+            Self.untaggedResume(t: "2026-08-03T12:20:00Z"),
+            Self.v4Usage(t: "2026-08-03T12:23:00Z"),
+        ].joined(separator: "\n")
+
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+        #expect(out.split(separator: "\n", omittingEmptySubsequences: false).count == 5)
+        #expect(outcome.migrated == 2)
+        #expect(outcome.statusTagged == 1)
+        #expect(outcome.errorTagged == 1)
+        #expect(outcome.resumeTagged == 1)
+        #expect(outcome.skipped == 0)
+    }
+
+    /// A torn line is preserved exactly, like any other unparseable one — a relabelling pass must not
+    /// be the thing that costs a file its corrupt tail.
+    @Test func anUnparseableLineSurvivesVerbatim() {
+        let torn = #"{"kind":"resume","t":"2026-08-03T12:20:00Z","ga"#
+        let input = [Self.untaggedResume(t: "2026-08-03T12:00:00Z"), torn].joined(separator: "\n")
+
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+        #expect(outcome.skipped == 1)
+        #expect(outcome.resumeTagged == 1)
+        #expect(out.hasSuffix(torn))
+    }
+
+    /// An absent `v` on a resume marker reads as **0**, not 1: the field never existed on this shape,
+    /// so there is no generation "1" to claim. That is what makes `v < currentVersion` the same
+    /// predicate for all four kinds.
+    @Test func resumeMarkerAbsentVersionDecodesAsZero() throws {
+        let data = Data(Self.untaggedResume(t: "2026-08-03T12:00:00Z").utf8)
+        let record = try JSONDecoder().decode(JournalRecord.self, from: data)
+        guard case let .resume(marker) = record else { Issue.record("expected .resume"); return }
+        #expect(marker.v == 0)
+        #expect(marker.provider == ProviderID.claude.rawValue)
+        #expect(marker.gap == 900)
     }
 }
