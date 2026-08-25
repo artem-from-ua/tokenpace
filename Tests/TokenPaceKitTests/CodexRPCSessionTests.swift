@@ -7,9 +7,13 @@ import Foundation
 /// A `codex app-server` stand-in: a shell script written to a temp directory and run as the binary.
 ///
 /// A script rather than a Swift helper because the transport spawns an executable path, and a test
-/// must not need `codex` installed, signed in, or on any particular plan. The silent scripts keep
-/// reading stdin so they stay alive instead of exiting on EOF — a live server that says nothing is
-/// exactly the state the transport has to survive.
+/// must not need `codex` installed, signed in, or on any particular plan.
+///
+/// A silent server goes quiet by parking on `while read -r line; do :; done`, which blocks on the
+/// still-open stdin — **never by `sleep`**. Probed: `sleep` would run as a separate grandchild that
+/// the transport's SIGKILL, aimed at the `sh` it spawned, does not reach, so it would outlive the
+/// run. The read loop leaves the script itself as the only process, and killing it leaves nothing
+/// behind.
 private struct FakeServer {
     let path: String
     private let directory: URL
@@ -94,7 +98,6 @@ struct CodexRPCSessionTests {
         read -r line
         echo '\(FakeServer.initializeReply)'
         while read -r line; do :; done
-        sleep 600
         """)
         defer { server.remove() }
 
@@ -113,7 +116,6 @@ struct CodexRPCSessionTests {
         read -r line
         printf '{"jsonrpc":"2.0","id":2,"result":{"rate'
         while read -r line; do :; done
-        sleep 600
         """)
         defer { server.remove() }
 
@@ -168,7 +170,6 @@ struct CodexRPCSessionTests {
         sleep 1.4
         echo '\(FakeServer.initializeReply)'
         while read -r line; do :; done
-        sleep 600
         """)
         defer { server.remove() }
 
