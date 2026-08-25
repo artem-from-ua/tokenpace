@@ -283,12 +283,12 @@ final class CodexRPCSession: @unchecked Sendable {
         guard process.isRunning else { return }
         try? stdin.fileHandleForWriting.close()
         process.terminate()
-        let pid = process.processIdentifier
-        // SIGTERM, then SIGKILL if it lingers — the escalation `ClaudeCLIRefresher` uses. Only ever
-        // aimed at the pid this object itself spawned.
-        Task.detached {
+        // SIGTERM, then SIGKILL if it lingers — the escalation `ClaudeCLIRefresher` uses. The
+        // `Process` is what gets asked, not a pid captured now: a bare pid says nothing about
+        // whether the child it named is still the one running by the time the grace elapses.
+        Task.detached { [process] in
             try? await Task.sleep(for: .seconds(CodexAppServer.killGrace))
-            kill(pid, SIGKILL)
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         }
     }
 
