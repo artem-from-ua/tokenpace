@@ -554,10 +554,12 @@ reason.** `account/rateLimits/read` answers a spotless window with a `resetsAt` 
 `now` plus the window's own length on every read — measured on a live Plus account, three reads
 across thirteen seconds returned `usedPercent 0` with the reset at `now + 604 800 s` each time, and
 the value itself advanced those same thirteen seconds. Drawn as an instant that is a 7-day countdown that
-slides forward and never ticks down. It is detected as `resetsAt − now ≈ windowDurationSeconds`
-within **±120 s** *and* nothing spent, and the row then carries the title, `ready to start`, a green
-knobless bar and no detail line at all — no `0%`, no reset, and specifically **not** `resetting…`,
-which would claim a reset is happening this second.
+slides forward and never ticks down. It is detected as `resetsAt − now` sitting between
+`windowDurationSeconds − 120 s` and twice `windowDurationSeconds` *and* nothing spent — the near edge
+tight (clock skew and round-trip budget only), the far edge loose (up to a week beyond the horizon
+for a 7-day window) because skew only ever pushes a reading further out, never closer. The row then
+carries the title, `ready to start`, a green knobless bar and no detail line at all — no `0%`, no
+reset, and specifically **not** `resetting…`, which would claim a reset is happening this second.
 
 The raw value stays observable: Troubleshoot's `Reported resets` line prints the epoch seconds the
 server sent, so the backend's behaviour can still be read off a surface even though no countdown

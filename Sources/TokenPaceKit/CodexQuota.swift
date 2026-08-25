@@ -265,7 +265,8 @@ public struct CodexQuotaWindow: Sendable, Equatable {
     }
 
     /// How far `resetsAt` may sit from `now + durationSeconds` and still read as "the window has not
-    /// started": **±120 s**.
+    /// started": **−120 s on the near edge, a full ``durationSeconds`` on the far edge** — see
+    /// ``hasNotStarted(now:)`` for why the two sides differ.
     ///
     /// The budget it has to cover is the gap between the server computing its own `now` and us
     /// reading ours — one `account/rateLimits/read` is a 0.44 s round trip (measured, codex-cli
