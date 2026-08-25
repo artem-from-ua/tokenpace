@@ -278,8 +278,11 @@ section.
   Code"). Until the threshold, the menu bar itself may still show the last known data with a timestamp.
 - The "last update + interval" service line helps the user understand how stale the data is and when the
   next attempt will happen.
-- **There are no macOS notifications** — the entire signal is in the menu bar + the popup (a deliberate
-  decision).
+- **Notifications are the exception, not a channel.** The signal lives in the menu bar and the popup;
+  a notification is justified only when the moment itself is the information and waiting for the user
+  to open the popup would lose it — "Back to work!" (#160), which fires when a blocked window has
+  reset. Anything a glance at the bar would answer stays out. The bar for a notification is higher
+  than for the popup, because it arrives on its own and interrupts.
 
 ### The Apple Watch complication (Phase 2)
 - Two mini rings: **5h** and **7d** utilization.
