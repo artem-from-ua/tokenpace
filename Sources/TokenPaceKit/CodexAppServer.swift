@@ -1,12 +1,11 @@
 import Foundation
-import TokenPaceKit
 
 // MARK: - CodexQuotaSource
 
 /// Where a Codex quota read comes from. The seam a stub replaces, so **no process is spawned under
 /// any stub** — a verification scenario must never depend on the maintainer having `codex` installed,
 /// signed in, and on a particular plan.
-protocol CodexQuotaSource: Sendable {
+public protocol CodexQuotaSource: Sendable {
     func read() async throws -> CodexQuotaSnapshot
     /// What the Troubleshoot window says about this source: the binary in use, the version, the last
     /// successful read. Never the account email, never `codexHome`, never a response body.
@@ -16,23 +15,31 @@ protocol CodexQuotaSource: Sendable {
 // MARK: - CodexQuotaDiagnostics
 
 /// The facts Troubleshoot shows about the Codex collector.
-struct CodexQuotaDiagnostics: Sendable, Equatable {
+public struct CodexQuotaDiagnostics: Sendable, Equatable {
     /// The raw `resetsAt` of every window the last successful read reported, in report order.
     ///
     /// Kept because a window that has not started draws **no** countdown, so this is the only surface
     /// left carrying what the server actually sent — and that value is the evidence for the
     /// not-started reading in the first place.
-    var lastResets: [Date?] = []
+    public var lastResets: [Date?] = []
     /// The executable actually used, or `nil` when none was found — the candidates are then listed
     /// instead, so "not found" names the paths that were tried rather than leaving the user guessing.
-    var binaryPath: String?
+    public var binaryPath: String?
     /// Parsed out of `initialize`'s `userAgent`. `nil` until the first handshake.
-    var version: String?
+    public var version: String?
     /// When the last read succeeded, and how long it took.
-    var lastSuccess: Date?
-    var lastLatency: TimeInterval?
+    public var lastSuccess: Date?
+    public var lastLatency: TimeInterval?
     /// The last failure, already reduced to a sentence.
-    var lastError: String?
+    public var lastError: String?
+
+    init(binaryPath: String? = nil, version: String? = nil) {
+        self.binaryPath = binaryPath
+        self.version = version
+    }
+
+    /// The empty diagnostics the app starts from, before any read.
+    public init() {}
 }
 
 // MARK: - CodexAppServer
@@ -51,11 +58,11 @@ struct CodexQuotaDiagnostics: Sendable, Equatable {
 /// between polls would therefore save about 6 % of one read, three minutes apart, in exchange for a
 /// permanent subprocess on the user's machine plus the sleep/wake and orphan handling that comes with
 /// owning one. The process is started for a read and gone before the function returns.
-actor CodexAppServer: CodexQuotaSource {
+public actor CodexAppServer: CodexQuotaSource {
 
     /// The app runs under launchd, whose PATH is minimal, so an explicit list beats a `$PATH` lookup —
     /// the same reason the `claude` and `gh` spawners carry one.
-    static let binaryCandidates = [
+    public static let binaryCandidates = [
         "/opt/homebrew/bin/codex",
         "/usr/local/bin/codex",
         "~/.local/bin/codex",
@@ -79,18 +86,18 @@ actor CodexAppServer: CodexQuotaSource {
 
     /// The method whose absence means "this Codex predates the feature". Named once so the detection
     /// and the error carry the same string.
-    static let rateLimitsMethod = "account/rateLimits/read"
+    public static let rateLimitsMethod = "account/rateLimits/read"
 
     private var diag = CodexQuotaDiagnostics()
     /// When set, no read is attempted before this instant.
     private var cooldownUntil: Date?
     private let now: @Sendable () -> Date
 
-    init(now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(now: @escaping @Sendable () -> Date = { Date() }) {
         self.now = now
     }
 
-    func diagnostics() -> CodexQuotaDiagnostics {
+    public func diagnostics() -> CodexQuotaDiagnostics {
         var d = diag
         if d.binaryPath == nil { d.binaryPath = Self.locateBinary() }
         return d
@@ -102,7 +109,7 @@ actor CodexAppServer: CodexQuotaSource {
     /// which a second attempt clears. Anything that survives two attempts is a condition a third would
     /// not fix either, so the collector stands down for ``cooldown`` rather than spawning again in
     /// three minutes.
-    func read() async throws -> CodexQuotaSnapshot {
+    public func read() async throws -> CodexQuotaSnapshot {
         if let until = cooldownUntil, now() < until { throw CodexQuotaError.processDied }
 
         do {
@@ -151,26 +158,8 @@ actor CodexAppServer: CodexQuotaSource {
         }
         diag.binaryPath = binary
         let started = now()
-        let clientVersion = TokenPaceKit.version
 
-        // **Off the actor, and off the main thread.** The session's pipe reads block the calling
-        // thread; run on the actor's executor they would stall it, and this app's actors are reached
-        // from `@MainActor`, so a blocked read freezes the UI for the length of the round trip.
-        // `Task.detached` puts the whole exchange on a background thread, and only its value comes
-        // back — the session itself never crosses the boundary.
-        let outcome = try await Task.detached(priority: .utility) {
-            () throws -> (version: String?, payload: Data) in
-            let session = try CodexRPCSession(binary: binary)
-            defer { session.shutDown() }
-            // The Codex version rides in `initialize`'s `userAgent`; there is no protocol version and
-            // no capability list to negotiate against. That is also why nothing runs `codex
-            // --version` — a second spawn to learn what the first already said.
-            let version = try session.handshake(
-                clientVersion: clientVersion, timeout: Self.timeout)
-            // `initialized` is deliberately not sent: probed, `account/*` answers without it.
-            let payload = try session.call(method: Self.rateLimitsMethod, timeout: Self.timeout)
-            return (version, payload)
-        }.value
+        let outcome = try await Self.exchange(binary: binary, timeout: Self.timeout)
 
         diag.version = outcome.version
         guard let decoded = try? JSONDecoder()
@@ -184,6 +173,30 @@ actor CodexAppServer: CodexQuotaSource {
         diag.lastError = nil
         cooldownUntil = nil
         return snapshot
+    }
+
+    /// One process, one `initialize`, one `account/rateLimits/read`, then the child is gone.
+    ///
+    /// **`shutDown()` runs even when the reads never finish.** The `defer` sits here, in the
+    /// structured parent, not inside the racing read — a read that times out is abandoned while this
+    /// frame still runs, so the child is always terminated. Putting the cleanup inside the read
+    /// leaked a `codex app-server` permanently whenever the server went silent.
+    ///
+    /// **One deadline for both calls.** `initialize` and the rate-limits read share the budget, so
+    /// `timeout` is what a read costs start to finish rather than per request.
+    static func exchange(binary: String, timeout: TimeInterval)
+        async throws -> (version: String?, payload: Data) {
+        let session = try CodexRPCSession(binary: binary)
+        defer { session.shutDown() }
+        let deadline = Date().addingTimeInterval(timeout)
+        // The Codex version rides in `initialize`'s `userAgent`; there is no protocol version and no
+        // capability list to negotiate against. That is also why nothing runs `codex --version` — a
+        // second spawn to learn what the first already said.
+        let version = try await session.handshake(
+            clientVersion: TokenPaceKit.version, before: deadline)
+        // `initialized` is deliberately not sent: probed, `account/*` answers without it.
+        let payload = try await session.call(method: rateLimitsMethod, before: deadline)
+        return (version, payload)
     }
 
     /// The version out of `TokenPace/0.148.0 (Mac OS 15.7.9; arm64) …` — the first slash-separated
@@ -214,8 +227,23 @@ final class CodexRPCSession: @unchecked Sendable {
     private let process = Process()
     private let stdin = Pipe()
     private let stdout = Pipe()
-    private var pending = Data()
     private var nextID = 1
+
+    /// Bytes the `readabilityHandler` has delivered and no line has claimed yet, plus whoever is
+    /// waiting on the next one. Both are touched from the handler's own queue and from the reading
+    /// task, so a lock guards them rather than the class being confined to one thread.
+    private let state = NSLock()
+    private var pending = Data()
+    private var sawEOF = false
+    private var waiter: (@Sendable (Result<Data, any Error>) -> Void)?
+
+    /// `NSLock.lock()` is unavailable from an `async` context, so every touch of the guarded state
+    /// goes through this synchronous window.
+    private func withState<T>(_ body: () -> T) -> T {
+        state.lock()
+        defer { state.unlock() }
+        return body()
+    }
 
     init(binary: String) throws {
         process.executableURL = URL(fileURLWithPath: binary)
@@ -225,14 +253,33 @@ final class CodexRPCSession: @unchecked Sendable {
         // stderr to /dev/null: it is the child's own diagnostics, it can name paths inside
         // `codexHome`, and nothing here reads it.
         process.standardError = FileHandle.nullDevice
+        // The handler is installed before run() so the first bytes cannot land unobserved. It reads
+        // on Foundation's own queue, never on the caller's thread — which is what keeps a silent
+        // server from parking a cooperative-pool thread forever.
+        stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            self?.absorb(handle.availableData)
+        }
         do {
             try process.run()
         } catch {
+            stdout.fileHandleForReading.readabilityHandler = nil
             throw CodexQuotaError.processDied
         }
     }
 
+    /// The pid of the child, for a test that has to prove it was reaped.
+    var processIdentifier: Int32 { process.processIdentifier }
+
     func shutDown() {
+        stdout.fileHandleForReading.readabilityHandler = nil
+        // A waiter still parked here is abandoned work from a timed-out read; failing it releases
+        // its continuation instead of leaking the task.
+        state.lock()
+        let parked = waiter
+        waiter = nil
+        state.unlock()
+        parked?(.failure(CodexQuotaError.timedOut))
+
         guard process.isRunning else { return }
         try? stdin.fileHandleForWriting.close()
         process.terminate()
@@ -245,14 +292,32 @@ final class CodexRPCSession: @unchecked Sendable {
         }
     }
 
-    /// Send one request and wait for **the response carrying its id**.
+    /// One chunk off the pipe: an empty one is EOF, anything else feeds whoever is waiting.
+    private func absorb(_ chunk: Data) {
+        state.lock()
+        if chunk.isEmpty {
+            sawEOF = true
+        } else {
+            pending.append(chunk)
+        }
+        let resume = waiter
+        waiter = nil
+        let eof = sawEOF
+        state.unlock()
+        guard let resume else { return }
+        resume(eof && chunk.isEmpty
+            ? .failure(CodexQuotaError.processDied) : .success(chunk))
+    }
+
+    /// Send one request and wait for **the response carrying its id**, or until `deadline`.
     ///
     /// **Matching by id is required, not defensive.** The server emits unsolicited notifications —
     /// `remoteControl/status/changed` arrives within milliseconds of `initialize`, before that
     /// method's own response — so a reader that took "the next line" would hand a notification back as
     /// a result. A line whose id is not the one awaited is **dropped silently**; logging it would let
     /// a chatty server fill the log with traffic no one asked for.
-    func call(method: String, params: [String: Any] = [:], timeout: TimeInterval) throws -> Data {
+    func call(method: String, params: [String: Any] = [:], before deadline: Date) async throws
+        -> Data {
         let id = nextID
         nextID += 1
         let request: [String: Any] = [
@@ -268,9 +333,8 @@ final class CodexRPCSession: @unchecked Sendable {
             throw CodexQuotaError.processDied
         }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            guard let object = try readLine(before: deadline) else { continue }
+        while true {
+            guard let object = try await nextObject(before: deadline) else { continue }
             guard let responseID = object["id"] as? Int, responseID == id else { continue }
             if let error = object["error"] as? [String: Any] {
                 let code = error["code"] as? Int ?? 0
@@ -288,16 +352,15 @@ final class CodexRPCSession: @unchecked Sendable {
             }
             return encoded
         }
-        throw CodexQuotaError.timedOut
     }
 
     /// `initialize`, returning the Codex version parsed out of the reply's `userAgent`.
-    func handshake(clientVersion: String, timeout: TimeInterval) throws -> String? {
-        let result = try call(
+    func handshake(clientVersion: String, before deadline: Date) async throws -> String? {
+        let result = try await call(
             method: "initialize",
             params: ["clientInfo": ["name": "TokenPace", "title": "TokenPace",
                                     "version": clientVersion]],
-            timeout: timeout)
+            before: deadline)
         struct Handshake: Decodable { let userAgent: String? }
         // `codexHome` is in this reply and is deliberately not decoded — it is a path into the user's
         // home directory and nothing here has a use for it.
@@ -305,25 +368,71 @@ final class CodexRPCSession: @unchecked Sendable {
         return decoded?.userAgent.flatMap(CodexAppServer.version(fromUserAgent:))
     }
 
-    /// One decoded JSON line, or `nil` when this poll of the pipe produced no complete line yet.
-    private func readLine(before deadline: Date) throws -> [String: Any]? {
-        while let newline = pending.firstIndex(of: 0x0A) {
-            let raw = pending[..<newline]
-            pending.removeSubrange(...newline)
-            if let object = try? JSONSerialization.jsonObject(with: raw) as? [String: Any] {
-                return object
-            }
-            // A line that is not JSON-RPC at all is dropped like an unmatched id — the server owns its
-            // stdout and may print something we do not model.
+    /// One decoded JSON line, or `nil` when the bytes that arrived did not complete one.
+    private func nextObject(before deadline: Date) async throws -> [String: Any]? {
+        let (line, eof) = withState { (takeLine(), sawEOF && pending.isEmpty) }
+        if let line {
+            // A line that is not JSON-RPC at all is dropped like an unmatched id — the server owns
+            // its stdout and may print something we do not model.
+            return try? JSONSerialization.jsonObject(with: line) as? [String: Any]
         }
-        guard Date() < deadline else { throw CodexQuotaError.timedOut }
-        let chunk = stdout.fileHandleForReading.availableData
-        guard !chunk.isEmpty else {
+        if eof {
             // EOF: the child closed stdout, which for this server means it is gone.
             throw CodexQuotaError.processDied
         }
-        pending.append(chunk)
+        try await waitForBytes(before: deadline)
         return nil
+    }
+
+    /// The next complete line out of ``pending``, newline consumed. Caller holds ``state``.
+    private func takeLine() -> Data? {
+        guard let newline = pending.firstIndex(of: 0x0A) else { return nil }
+        let raw = Data(pending[..<newline])
+        pending.removeSubrange(...newline)
+        return raw
+    }
+
+    /// Park until the handler delivers a chunk, the deadline passes, or the task is cancelled.
+    ///
+    /// The wait is a `Task.sleep` race rather than a blocking read, so it **is** a cancellation
+    /// point: a cancelled or timed-out read gives its thread back and lets the caller reach
+    /// `shutDown()`. A partial line — `…"result":{"rate` with no newline — therefore ends at the
+    /// deadline instead of parking forever.
+    private func waitForBytes(before deadline: Date) async throws {
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining > 0 else { throw CodexQuotaError.timedOut }
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { [self] in
+                _ = try await withTaskCancellationHandler {
+                    try await withCheckedThrowingContinuation { continuation in
+                        state.lock()
+                        // A chunk that landed between the check above and here would otherwise be
+                        // waited on a second time; the buffer is re-checked under the same lock the
+                        // handler takes.
+                        if !pending.isEmpty || sawEOF {
+                            state.unlock()
+                            continuation.resume(returning: Data())
+                            return
+                        }
+                        waiter = { continuation.resume(with: $0) }
+                        state.unlock()
+                    }
+                } onCancel: { [self] in
+                    state.lock()
+                    let parked = waiter
+                    waiter = nil
+                    state.unlock()
+                    parked?(.failure(CancellationError()))
+                }
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(remaining))
+                throw CodexQuotaError.timedOut
+            }
+            defer { group.cancelAll() }
+            // Whichever finishes first decides: bytes, or the shared deadline.
+            try await group.next()
+        }
     }
 }
 
@@ -332,9 +441,9 @@ final class CodexRPCSession: @unchecked Sendable {
 
 /// A canned ``CodexQuotaSource`` for the verification scenarios. **Spawns nothing** — a stub must
 /// render identically on a machine that has never installed `codex`.
-struct StubCodexQuotaSource: CodexQuotaSource {
+public struct StubCodexQuotaSource: CodexQuotaSource {
 
-    enum Outcome: Sendable {
+    public enum Outcome: Sendable {
         /// `(usedPercent, windowDurationSeconds)` per window, in report order.
         case windows([(Double, Int)])
         /// Windows that have not started: `usedPercent 0` and a reset the server recomputes as `now`
@@ -351,12 +460,12 @@ struct StubCodexQuotaSource: CodexQuotaSource {
     let outcome: Outcome
     let now: @Sendable () -> Date
 
-    init(_ outcome: Outcome, now: @escaping @Sendable () -> Date) {
+    public init(_ outcome: Outcome, now: @escaping @Sendable () -> Date) {
         self.outcome = outcome
         self.now = now
     }
 
-    func read() async throws -> CodexQuotaSnapshot {
+    public func read() async throws -> CodexQuotaSnapshot {
         switch outcome {
         case let .failure(error):
             throw error
@@ -395,7 +504,7 @@ struct StubCodexQuotaSource: CodexQuotaSource {
             rateLimitReachedType: reachedType)
     }
 
-    func diagnostics() async -> CodexQuotaDiagnostics {
+    public func diagnostics() async -> CodexQuotaDiagnostics {
         var d = CodexQuotaDiagnostics(binaryPath: "/opt/homebrew/bin/codex", version: "0.148.0")
         switch outcome {
         case .windows, .notStarted, .notStartedReached:
