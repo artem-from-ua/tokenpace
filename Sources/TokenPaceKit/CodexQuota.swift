@@ -158,7 +158,13 @@ public struct CodexRateLimitWindow: Sendable, Equatable, Decodable {
     /// "resetting…" fallback rather than a fabricated date.
     public var resetDate: Date? { resetsAt.map { Date(timeIntervalSince1970: $0) } }
 
-    public var durationSeconds: Int { windowDurationMins * 60 }
+    public var durationSeconds: Int { windowDurationMins.multipliedReportingOverflow(by: 60).partialValue }
+
+    /// Whether `windowDurationMins * 60` overflows `Int` — the same "malformed, not trustworthy"
+    /// signal the normalizer already uses for a non-positive `windowDurationMins`.
+    var hasOverflowingDuration: Bool {
+        windowDurationMins.multipliedReportingOverflow(by: 60).overflow
+    }
 }
 
 // MARK: - codexPlanLabel
@@ -333,7 +339,7 @@ public enum CodexQuotaNormalizer {
         guard let limits = result.rateLimits else { throw CodexQuotaError.notSignedIn }
         let windows = [limits.primary, limits.secondary]
             .compactMap { $0 }
-            .filter { $0.windowDurationMins > 0 }
+            .filter { $0.windowDurationMins > 0 && !$0.hasOverflowingDuration }
             .map {
                 CodexQuotaWindow(
                     utilization: min(100, max(0, $0.usedPercent)),

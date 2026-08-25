@@ -145,6 +145,19 @@ struct CodexQuotaTests {
         }
     }
 
+    /// `windowDurationMins * 60` overflows `Int` above `Int64.max / 60`. The normalizer treats that
+    /// the same as any other unusable window — filtered out rather than trapped.
+    @Test("a windowDurationMins that overflows durationSeconds reads as not-signed-in")
+    func overflowingDurationIsNotSignedIn() throws {
+        let decoded = try decode("""
+        {"rateLimits":{"primary":{"usedPercent":3,"windowDurationMins":9223372036854775807,
+        "resetsAt":1787500000},"secondary":null,"planType":"plus"}}
+        """)
+        #expect(throws: CodexQuotaError.notSignedIn) {
+            try CodexQuotaNormalizer.snapshot(from: decoded)
+        }
+    }
+
     // MARK: durations as data
 
     /// 10080 min is exactly 604 800 s, so it matches the seven-day case and gets 7 ticks — the right
