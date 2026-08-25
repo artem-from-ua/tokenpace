@@ -219,10 +219,11 @@ public actor CodexAppServer: CodexQuotaSource {
 
 /// One `codex app-server` process and the framing around its stdio.
 ///
-/// Not an actor: it is created, used and shut down inside a single ``CodexAppServer/attempt()``, so it
-/// is already confined to that one task. `@unchecked Sendable` for the same reason
-/// `ClaudeCLIRefresher.ProcessBox` is — `Process`'s `terminate()`/`isRunning`/`processIdentifier` are
-/// documented thread-safe and only one task drives this.
+/// Created, used and shut down inside a single ``CodexAppServer/exchange(binary:timeout:)``, so one
+/// task drives the requests — but the `readabilityHandler` delivers bytes on Foundation's own queue,
+/// so the buffer and the parked waiter are guarded by ``state``. `@unchecked Sendable` for the same
+/// reason `ClaudeCLIRefresher.ProcessBox` is: `Process`'s `terminate()`/`isRunning`/
+/// `processIdentifier` are documented thread-safe.
 final class CodexRPCSession: @unchecked Sendable {
     private let process = Process()
     private let stdin = Pipe()
