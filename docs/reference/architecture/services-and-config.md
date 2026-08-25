@@ -41,13 +41,24 @@ arrive.
 **Its own loop, its own everything** — the per-source shape
 [ADR-0119](../../adr/0119-status-polling-own-cadence-and-backoff.md) built, now occupied by its
 second tenant. GitHub has its own `LivePollScheduler` on its own `SignalHub.Subscriber` key, its own
-`PollingBackoff`, its own `lastGitHubSuccess` marker, its own in-flight task, and its own visible-
-incident list. Nothing is shared: a `429` from `githubstatus.com` holds only this source, an
+`PollingBackoff`, its own last-success marker, its own in-flight task, and its own visible-incident
+list — one `StatusSourceState` per source, so adding one declares a property rather than five.
+Nothing is shared: a `429` from `githubstatus.com` holds only this source, an
 unreachable GitHub greys only its own rows (`StatusHealth.unknownGitHub`), and a Claude incident
 cannot drag this poll to the 60-s problem floor against a third party's page — which is why
 `StatusCadence` is fed `worstProblem(of: .github)`, never the flattened `worstProblem`.
 `usageInterval` is always `nil` here (no usage poll to settle with — the case ADR-0119 made the
 parameter optional for), and the `User-Agent` is `TokenPace/<version>`, never `claude-code/<version>`.
+
+**One driver, three fetches.** The three sources run through `AppDelegate.pollStatusSource` and
+`startStatusSourceLoop` rather than three near-parallel copies. What is shared is the part a fourth
+source would otherwise re-derive and get subtly wrong: the disabled-source teardown, the `isDue`
+gate, cancelling a slow fetch instead of overlapping it, and the backoff arming rules. What stays
+per-source is the fetch itself — endpoint, `User-Agent`, config type and health constructor all feed
+one step and leave through one `StatusFetchOutcome`, so the fold costs a single closure rather than a
+parameter per difference. The cadence inputs stay arguments (`usageInterval`, `hasProblem`), which is
+what keeps each source's ADR-0119 behaviour its own, and each source keeps its own wording for the
+backoff log lines so a grep for one never returns another.
 
 **The loop polls once before its first wait.** `waitForNextPoll` sleeps the whole interval up front,
 so waiting first would leave the plate empty for the five-minute politeness floor after every launch
