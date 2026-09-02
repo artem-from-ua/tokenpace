@@ -145,6 +145,19 @@ struct CodexQuotaTests {
         }
     }
 
+    /// `windowDurationMins * 60` overflows `Int` above `Int64.max / 60`. The normalizer treats that
+    /// the same as any other unusable window — filtered out rather than trapped.
+    @Test("a windowDurationMins that overflows durationSeconds reads as not-signed-in")
+    func overflowingDurationIsNotSignedIn() throws {
+        let decoded = try decode("""
+        {"rateLimits":{"primary":{"usedPercent":3,"windowDurationMins":9223372036854775807,
+        "resetsAt":1787500000},"secondary":null,"planType":"plus"}}
+        """)
+        #expect(throws: CodexQuotaError.notSignedIn) {
+            try CodexQuotaNormalizer.snapshot(from: decoded)
+        }
+    }
+
     // MARK: durations as data
 
     /// 10080 min is exactly 604 800 s, so it matches the seven-day case and gets 7 ticks — the right
@@ -491,9 +504,9 @@ struct CodexQuotaTests {
         #expect(row.resetLine != nil)
     }
 
-    /// The tolerance is ±120 s and it is checked on **both** sides. A reset further out than one
-    /// window is not a window that has not started, and neither is one already ticking down — reading
-    /// either as such would suppress a countdown that is doing its job.
+    /// The near edge tolerates 120 s; the far edge tolerates a whole extra window. A reset further out
+    /// than that is not a window that has not started, and neither is one already ticking down —
+    /// reading either as such would suppress a countdown that is doing its job.
     @Test("the near edge is bounded to the second, the far side deliberately is not")
     func toleranceIsBounded() {
         let duration = 604_800

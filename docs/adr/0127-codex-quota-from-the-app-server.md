@@ -11,7 +11,7 @@ superseded_by: [0129]
 > detection always yields a drawable row. A window that has not started renders that way **only**
 > while the account's `spendControlReached`/`rateLimitReachedType` are clear; when either is raised
 > the payload contradicts itself, and **no row is drawn at all** — a warning block stands in its
-> place. **Everything else still stands in full**, D13 included: the ±120 s detection, the
+> place. **Everything else still stands in full**, D13 included: the asymmetric-bound detection, the
 > one-sample rule, why no anchor is reconstructed, and why the raw epoch stays in Troubleshoot.
 
 > The usage half of the provider [ADR-0125](0125-codex-as-a-status-provider.md) introduced, and the
@@ -205,13 +205,20 @@ reset fixed at `22:37:31Z`, an arbitrary wall-clock second rather than a grid bo
 what says the window is rolling** — it starts on the first spend after a reset and runs its own
 length from there.
 
-**The rule.** A window has not started when `resetsAt − now` is within **±120 s** of
-`durationSeconds` **and** `utilization == 0`.
+**The rule.** A window has not started when `resetsAt − now` is at least `durationSeconds − 120 s`
+and at most `durationSeconds * 2`, **and** `utilization == 0`.
 
-**±120 s**, because the budget is the gap between the server's `now` and ours — a 0.44 s round trip
-behind a spawn D10 may retry once, plus clock skew — while the ceiling is the 180 s poll interval.
-Under one interval, at most **one** poll of a genuinely anchored window can be misread, and that is
-the poll in which the window really has just opened, where both readings agree.
+**−120 s on the near edge**, because the budget is the gap between the server's `now` and ours — a
+0.44 s round trip behind a spawn D10 may retry once, plus clock skew — while the ceiling is the 180 s
+poll interval. Under one interval, at most **one** poll of a genuinely anchored window can be
+misread, and that is the poll in which the window really has just opened, where both readings agree.
+
+**The far edge is deliberately loose — up to a full `durationSeconds` beyond the horizon, i.e. twice
+the duration out.** A window that has not started can only ever report its full duration remaining,
+so a horizon *shorter* than that means time has already run off it — an anchored window. A horizon
+beyond it is the same not-started state read across a clock that disagrees with the server's, and
+skew only ever pushes a reading that way, never the other. For the 7-day window this accepts a
+reported reset up to 14 days out.
 
 **One sample, not a run of consecutive polls.** Requiring the shape to persist would render the
 sliding countdown for a full poll every time a window actually resets, and would need state that has
