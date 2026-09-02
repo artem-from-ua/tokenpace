@@ -24,49 +24,24 @@ struct LiveCodexQuotaCheck {
     /// One `initialize` + `account/rateLimits/read` exchange, returning the instant the request went
     /// out beside the `result` body. `now` is taken **before** the round trip, so the offset it
     /// yields is a lower bound on the reset's distance rather than a flattering one.
-    private static func read() throws -> (now: Date, data: Data)? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = ["app-server"]
-        let input = Pipe(), output = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        defer { if process.isRunning { process.terminate() } }
-
+    ///
+    /// The exchange is the production transport, not a copy of it: a second implementation here
+    /// reproduced the blocking read this check exists to exercise, and drifted from the framing
+    /// rules — matching by `id`, one shared deadline — that the real one carries.
+    private static func read() async throws -> (now: Date, data: Data)? {
         let now = Date()
-        input.fileHandleForWriting.write(Data("""
-        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"tokenpace-live-check","title":"tokenpace-live-check","version":"0.0.1"}}}
-        {"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":{}}
-
-        """.utf8))
-
-        // Matched by `id`, because `remoteControl/status/changed` is observed arriving between a
-        // request and its response — taking "the next line" hands back a notification.
-        var buffer = Data()
-        let deadline = Date().addingTimeInterval(20)
-        while Date() < deadline {
-            let chunk = output.fileHandleForReading.availableData
-            if chunk.isEmpty { break }
-            buffer.append(chunk)
-            for line in String(decoding: buffer, as: UTF8.self).split(separator: "\n") {
-                guard let data = line.data(using: .utf8),
-                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      object["id"] as? Int == 2, let result = object["result"] else { continue }
-                return (now, try JSONSerialization.data(withJSONObject: result))
-            }
-        }
-        return nil
+        let outcome = try await CodexAppServer.exchange(
+            binary: binary, timeout: CodexAppServer.timeout)
+        return (now, outcome.payload)
     }
 
     @Test("three live reads agree with the not-started rule")
-    func liveReadsAgreeWithTheRule() throws {
+    func liveReadsAgreeWithTheRule() async throws {
         var offsets: [TimeInterval] = []
         var resets: [Date] = []
 
         for attempt in 1...3 {
-            guard let (now, data) = try Self.read() else {
+            guard let (now, data) = try await Self.read() else {
                 Issue.record("read \(attempt) returned no result")
                 continue
             }
@@ -95,7 +70,7 @@ struct LiveCodexQuotaCheck {
                 }
                 if let reset = window.resetsAt { resets.append(reset) }
             }
-            if attempt < 3 { Thread.sleep(forTimeInterval: 6) }
+            if attempt < 3 { try await Task.sleep(for: .seconds(6)) }
         }
 
         // Whether the account is in the not-started state is not this check's to decide — it depends

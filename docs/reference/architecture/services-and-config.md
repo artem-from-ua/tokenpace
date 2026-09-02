@@ -158,9 +158,9 @@ Codex's quota comes from a local subprocess, not from `Codex API`.
 ## Codex quota — the collector (#504, ADR-0127)
 
 The usage half of the same provider, and the app's first subprocess run **for data**. `CodexAppServer`
-(app target, beside `ClaudeCLIRefresher` and `GHReleaseFetcher`, since there is no shell-IO module)
-runs `codex app-server` and speaks JSON-RPC over its stdio; the pure half — the wire model, the error
-taxonomy, the normalizer — is in the Kit, where the tests are.
+runs `codex app-server` and speaks JSON-RPC over its stdio; it sits in the Kit beside the pure half —
+the wire model, the error taxonomy, the normalizer — because the transport is where the hangs live and
+the app target has no test target of its own (#530).
 
 **One process per read, not one held open.** Measured on codex-cli 0.148.0: spawn through the
 `initialize` response is **0.03 s** while one `account/rateLimits/read` on a warm process is
