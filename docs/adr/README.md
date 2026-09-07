@@ -147,7 +147,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0128](0128-menu-bar-repeats-a-block-per-provider.md) | The menu bar repeats a block per provider, with the status dot pinned rightmost | accepted |
 | [0129](0129-ready-to-start-is-gated-on-the-account-reached-flags.md) | A Codex read that reports the limit reached at zero usage is malformed data, not a quota state | accepted |
 | [0130](0130-one-usage-record-with-a-windows-array.md) | One usage record with a windows array, so any provider fits | accepted |
-| [0131](0131-issue-label-and-title-taxonomy.md) | Issue labels and titles as prefixed axes | draft |
+| [0131](0131-issue-label-and-title-taxonomy.md) | Issue labels and titles as prefixed axes | accepted |
 
 ## Maintaining this index
 
