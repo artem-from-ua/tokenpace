@@ -67,11 +67,14 @@ Every issue carries `type:*` and `priority:*`, plus at least one `area:*` or `pr
 | `area:journal` | The usage journal as storage: JSONL writing, migrations, backups, archival, record shape. | |
 | `area:notifications` | System notifications and the awaiting-input detection that feeds them. | |
 | `area:dev-tools` | The `TOKENPACE_DEVTOOLS`-gated window, never shipped to end users. | |
+| `area:troubleshoot` | The Troubleshoot window: the raw payload, token timing, intervals, and manual refresh. | |
 | `area:updates` | In-app update checking and installation, as the user experiences it. | |
 | `area:auth` | Token acquisition and storage: Keychain, OAuth, the logged-out and expired states. | |
+| `area:branding` | The product's identity: the app name, its icon, and the visual identity around it. | |
 | `area:extra-usage` | Money credits: spend, extra usage, their bars and formatting. | |
 | `area:insights` | Any metric derived from journal history, whichever surface displays it. | |
 | `area:polling` | Fetch cadence, backoff, rate limiting, request validation. | |
+| `area:widgets` | Surfaces outside the menu bar: WidgetKit widgets, the lock screen, and the iOS and watchOS faces. | |
 | `area:service-status` | Provider service health: incidents, outages, and their history. | |
 
 ### `provider:*`
@@ -81,6 +84,7 @@ Every issue carries `type:*` and `priority:*`, plus at least one `area:*` or `pr
 | `provider:claude` | Claude Code and its usage API. | |
 | `provider:chatgpt` | The ChatGPT subscription limit, read through the Codex app-server. | |
 | `provider:github` | GitHub releases and GitHub service-status monitoring. | |
+| `provider:gemini` | Google Gemini, explored as a possible source of usage limits. | |
 
 `provider:chatgpt` names the subscription the limit actually belongs to, not the client that reports it. The code still says `Codex` — `CodexQuota`, `CodexAppServer` — and [#517](https://github.com/artem-from-ua/tokenpace/issues/517) tracks the rename. Until it lands, the label and the symbols disagree on purpose.
 
@@ -111,12 +115,15 @@ Kept as a label axis rather than migrated to milestones: the repository uses no 
 
 - **`area:menu-bar` vs `area:popup`** — the always-visible status item is `menu-bar`; content that appears only after a click is `popup`. An issue changing both takes the surface where the primary fix lands, which the title usually names first.
 - **`area:journal` vs `area:insights`** — `journal` is storage: writing, migrating, backing up, the record shape. `insights` is any metric computed from that history — burn rate, baselines, headroom in sessions — no matter which surface shows it. So [#241](https://github.com/artem-from-ua/tokenpace/issues/241) and [#539](https://github.com/artem-from-ua/tokenpace/issues/539) are `area:insights` although they read journal data and render in the bar.
+- **The journal keeps `area:journal` even when only a developer sees it** — recording, migrating, and the diagnostics that make a record readable are all `area:journal`, whether the file is the user's or a dev-build one. `area:infra` is for the repository and its tooling, not for the app's own data.
 - **`area:settings` vs `area:dev-tools`** — `dev-tools` is strictly the `TOKENPACE_DEVTOOLS`-gated window. Anything a real user can configure is `settings`, however developer-flavored it looks.
 - **`area:updates` vs `area:infra`** — if the user never sees it (GitHub Actions, release runbook, notarization tooling) it is `infra`. The in-app update check and installer are `updates`.
 - **When to attach `provider:*`** — only when the issue is about one specific provider. Architectural work that unifies behavior across providers carries `area:*` alone: [#507](https://github.com/artem-from-ua/tokenpace/issues/507), folding three poll loops into one driver, is `area:polling` with no provider label. A provider-specific defect keeps its provider even when it surfaces elsewhere, because the fix lands in provider-specific code.
 - **Documentation that disagrees with the code** — always `type:docs`. The code is the source of truth, so a doc that describes it wrongly is a documentation defect, whichever side ends up being edited.
 - **`type:feature` vs `type:refactor`** — `type:feature` only when a user can observe the change. Renames and internal restructuring are `type:refactor`.
 - **Catch-all guard** — repo housekeeping goes to `area:infra`, never to the nearest product-facing area. Without this rule, docs and CI issues quietly hollow out whichever product value they land on.
+- **A phase's own epic carries only its `phase:*`** — [#3](https://github.com/artem-from-ua/tokenpace/issues/3) is the whole of Phase 1, so no area describes it better than the phase already does. This is the one deliberate exception to the at-least-one rule, and it applies only to an epic that *is* a phase.
+- **An umbrella issue does not inherit its children's areas** — a ticket that exists to group others carries only what is common to all of them, usually one `provider:*` or a single `area:*`. The specific areas live on the children, where they can actually be filtered. [#501](https://github.com/artem-from-ua/tokenpace/issues/501) groups [#502](https://github.com/artem-from-ua/tokenpace/issues/502)–[#506](https://github.com/artem-from-ua/tokenpace/issues/506) and carries `provider:chatgpt` alone.
 - **Epics** — an epic carries no dedicated label. It is marked by an `[Epic]` prefix in its title and is otherwise classified by its own base type and area.
 
 ## Worked examples
@@ -148,6 +155,8 @@ Kept as a label axis rather than migrated to milestones: the repository uses no 
 **Exempt:** issues carrying a `by:*` label keep whatever title the automation produced.
 
 ## Legacy label mapping
+
+Applied on 2026-09-07 across all 210 issues; the old labels were deleted afterwards and none survives on GitHub. The table stays as the record of what became what.
 
 | Old label | Action | New label | Why |
 |---|---|---|---|

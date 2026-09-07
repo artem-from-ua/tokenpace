@@ -1,7 +1,7 @@
 ---
 status: draft
 date: 2026-09-07
-gate: promote to accepted once the taxonomy has been applied to the backlog — that is, once `gh label list` no longer contains `enhancement`, `ui`, `logic`, `infra`, or `phase-1`
+gate: met on 2026-09-07 — the taxonomy is applied to all 210 issues and `gh label list` no longer contains `enhancement`, `ui`, `logic`, `infra`, or `phase-1`. Promotion to accepted is the maintainer's call.
 ---
 
 # ADR-0131: Issue labels and titles as prefixed axes
@@ -24,7 +24,7 @@ One constraint shapes the answer: the repository uses **no milestones at all** (
 
 ## Decision
 
-Seven prefixed axes, colon-separated, 35 labels. The full dictionaries, colors, and rules live in [issue-labels.md](../issue-labels.md), which is the source of truth; this record holds the reasoning.
+Seven prefixed axes, colon-separated, 39 labels (35 at the outset; four more were added while applying it, see below). The full dictionaries, colors, and rules live in [issue-labels.md](../issue-labels.md), which is the source of truth; this record holds the reasoning.
 
 | Axis | Mandatory | Cardinality | What it answers |
 |---|---|---|---|
@@ -72,10 +72,18 @@ Plus: at least one of `area:` or `provider:` on every issue, and a soft limit of
 
 **Positive.** The backlog becomes queryable along the axes actually used when planning: what is urgent, what is open against a surface, what breaks for one provider. Mandatory `type:` and `priority:` end the 16% unlabeled rate. AI agents filing issues have a written dictionary instead of a habit, which is what kept `ui`/`logic`/`infra` drifting. The seven `type:` values that match Conventional Commits mean an issue title and its PR title carry the same signal.
 
-**Negative.** Every issue now needs at least three labels, where many needed none — a real cost on quick filings, and the reason `priority:medium` is an explicit default rather than a decision. That default is also the axis's main risk: if everything lands on medium, the axis stops meaning anything. `enhancement` is split per-issue across 104 issues, the most expensive part of the migration. `provider:chatgpt` deliberately disagrees with the `Codex*` symbols until [#517](https://github.com/artem-from-ua/tokenpace/issues/517) lands, which will read as an inconsistency to anyone who has not read this record. Thirteen `area:` values is near the upper end of what stays memorable, and four of them (`insights`, `polling`, `service-status`, `auth`) currently carry four to six issues each — small enough that they may not earn their place.
+**Negative.** Every issue now needs at least three labels, where many needed none — a real cost on quick filings, and the reason `priority:medium` is an explicit default rather than a decision. That default is also the axis's main risk: if everything lands on medium, the axis stops meaning anything. `enhancement` is split per-issue across 104 issues, the most expensive part of the migration. `provider:chatgpt` deliberately disagrees with the `Codex*` symbols until [#517](https://github.com/artem-from-ua/tokenpace/issues/517) lands, which will read as an inconsistency to anyone who has not read this record. The `area:` dictionary is at the upper end of what stays memorable, and its tail is thin: `branding`, `widgets`, `troubleshoot` and `service-status` carry a handful of issues each, small enough that they may not earn their place.
 
-TODO after applying to the backlog:
-- Color legibility on real multi-label issues — which shades blurred, if any, and whether grey-on-grey `type:` + `priority:low` proved to be the problem it looks like on paper.
-- Which `area:` values turned out to fit awkwardly, and the disambiguation rules added because of them. The `journal` versus `insights` boundary is the most likely to need one.
-- Whether `priority:medium` absorbed everything, and what that implies for keeping the axis.
-- Actual migration cost against the estimate, especially the `enhancement` split.
+## What applying it to the backlog showed
+
+The taxonomy was applied to all 210 issues on 2026-09-07, and the labels were rewritten together with every title. Four observations are worth more than the predictions above.
+
+**The dictionary was four values short, and the gaps were invisible from the issue titles alone.** Classification surfaced four surfaces with no home: `area:widgets` (the WidgetKit epic is neither the menu bar nor the popup), `area:branding` (the app's name and icon), `area:troubleshoot` (a window that is not Settings and not the `TOKENPACE_DEVTOOLS`-gated tools), and `provider:gemini` (a vendor explored but never supported). Each was added mid-pass. A pre-pass over the corpus mined topics by frequency, which is exactly why it missed them: the WidgetKit epic is one issue, and `branding` is two.
+
+**`priority:medium` did absorb most of the backlog, as feared — but not all of it.** The final split is 150 medium, 36 low, 21 high, 3 critical. The three criticals are real ([#530](https://github.com/artem-from-ua/tokenpace/issues/530) leaks processes, [#509](https://github.com/artem-from-ua/tokenpace/issues/509) deletes the live journal, [#492](https://github.com/artem-from-ua/tokenpace/issues/492) crashes on close), so the top of the scale carries signal. The medium bucket is inflated mostly by closed issues, where priority is retrospective and meaningless; whether it stays honest depends on open issues alone.
+
+**The `journal` versus `insights` boundary needed a rule, and so did three other cases.** The rules added during the pass are in the document: the journal keeps its area even when only a developer sees the record; an umbrella issue does not inherit its children's areas; and a phase's own epic carries only its `phase:*`. That last one is a deliberate exception to the at-least-one rule and applies to exactly one issue, [#3](https://github.com/artem-from-ua/tokenpace/issues/3).
+
+**Automated classification is reliable on the axes and unreliable on the bookkeeping.** Across twelve batches the classifier placed types, priorities and areas well — 9 of 210 issues needed a human decision. Its failures were clerical: it twice left a legacy label in `keep` instead of `remove`, once omitted the mandatory `type:` entirely, and once dropped a label the issue actually carried. All four were caught by validating each batch against the parsed document rather than trusting the classifier's own confidence, which is the practice worth keeping.
+
+Still open: color legibility on real multi-label issues, including whether grey `type:*` beside grey `priority:low` reads as a duplicate chip in the GitHub UI.
