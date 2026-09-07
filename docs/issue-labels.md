@@ -111,6 +111,12 @@ Kept as a label axis rather than migrated to milestones: the repository uses no 
 |---|---|---|
 | `by:kb-grooming` | Filed by the kb-grooming documentation automation. | |
 
+## Rule exceptions
+
+| Issue | Rule | Why |
+|---|---|---|
+| #3 | at-least-one | A phase's own epic carries only its `phase:*`; no area describes the whole of Phase 1 better than the phase does. |
+
 ## Disambiguation rules
 
 - **`area:menu-bar` vs `area:popup`** — the always-visible status item is `menu-bar`; content that appears only after a click is `popup`. An issue changing both takes the surface where the primary fix lands, which the title usually names first.
@@ -122,7 +128,7 @@ Kept as a label axis rather than migrated to milestones: the repository uses no 
 - **Documentation that disagrees with the code** — always `type:docs`. The code is the source of truth, so a doc that describes it wrongly is a documentation defect, whichever side ends up being edited.
 - **`type:feature` vs `type:refactor`** — `type:feature` only when a user can observe the change. Renames and internal restructuring are `type:refactor`.
 - **Catch-all guard** — repo housekeeping goes to `area:infra`, never to the nearest product-facing area. Without this rule, docs and CI issues quietly hollow out whichever product value they land on.
-- **A phase's own epic carries only its `phase:*`** — [#3](https://github.com/artem-from-ua/tokenpace/issues/3) is the whole of Phase 1, so no area describes it better than the phase already does. This is the one deliberate exception to the at-least-one rule, and it applies only to an epic that *is* a phase.
+- **A phase's own epic carries only its `phase:*`** — [#3](https://github.com/artem-from-ua/tokenpace/issues/3) is the whole of Phase 1, so no area describes it better than the phase already does. It applies only to an epic that *is* a phase; each such issue also needs a row in **Rule exceptions** above, or the drift check reports it forever.
 - **An umbrella issue does not inherit its children's areas** — a ticket that exists to group others carries only what is common to all of them, usually one `provider:*` or a single `area:*`. The specific areas live on the children, where they can actually be filtered. [#501](https://github.com/artem-from-ua/tokenpace/issues/501) groups [#502](https://github.com/artem-from-ua/tokenpace/issues/502)–[#506](https://github.com/artem-from-ua/tokenpace/issues/506) and carries `provider:chatgpt` alone.
 - **Epics** — an epic carries no dedicated label. It is marked by an `[Epic]` prefix in its title and is otherwise classified by its own base type and area.
 
@@ -191,6 +197,6 @@ GitHub silently re-creates built-in labels after some UI operations; the drift c
 | | |
 |---|---|
 | Config | `.claude-plugin/issue-conventions.json` |
-| Plugin | `issue-conventions` v0.2.4 |
+| Plugin | `issue-conventions` v0.3.1 |
 | Last synced with GitHub | 2026-09-07 |
 <!-- /issue-conventions:managed -->
