@@ -1,7 +1,6 @@
 ---
-status: draft
+status: accepted
 date: 2026-09-07
-gate: met on 2026-09-07 — the taxonomy is applied to all 210 issues and `gh label list` no longer contains `enhancement`, `ui`, `logic`, `infra`, or `phase-1`. Promotion to accepted is the maintainer's call.
 ---
 
 # ADR-0131: Issue labels and titles as prefixed axes
@@ -24,19 +23,7 @@ One constraint shapes the answer: the repository uses **no milestones at all** (
 
 ## Decision
 
-Seven prefixed axes, colon-separated, 39 labels (35 at the outset; four more were added while applying it, see below). The full dictionaries, colors, and rules live in [issue-labels.md](../issue-labels.md), which is the source of truth; this record holds the reasoning.
-
-| Axis | Mandatory | Cardinality | What it answers |
-|---|---|---|---|
-| `type:` | yes | exactly one | what kind of work this is |
-| `priority:` | yes | exactly one | how soon |
-| `area:` | no | zero or more | which part of the product |
-| `provider:` | no | zero or more | which provider, when it is provider-specific |
-| `phase:` | no | zero or more | which roadmap stage |
-| `reason:` | no | zero or more | why it was closed |
-| `by:` | no | zero or more | which automation filed it |
-
-Plus: at least one of `area:` or `provider:` on every issue, and a soft limit of five labels — past that an issue is usually doing too much.
+The axes, their dictionaries, the colors and every rule for applying them are defined in [issue-labels.md](../issue-labels.md). That document is the source of truth and the only place those facts live; this record says why the taxonomy has the shape it has, and nothing that can be checked by opening it.
 
 **The separator is a colon** because a slash URL-escapes to `%2F` in GitHub filter URLs, making `type/bug` unreadable in the place labels are used most.
 
@@ -44,11 +31,11 @@ Plus: at least one of `area:` or `provider:` on every issue, and a soft limit of
 
 **`provider:` is its own axis rather than values inside `area:`.** Provider-specific work lands on every surface at once — a ChatGPT quota bug is simultaneously about polling, the bar, and the journal — so folding providers into `area:` would force a choice between two orthogonal facts. `provider:chatgpt` names the subscription the limit belongs to rather than the client reporting it, deliberately disagreeing with the `Codex*` symbols in the code until [#517](https://github.com/artem-from-ua/tokenpace/issues/517) renames them.
 
-**One color per axis, because the prefix already carries identity.** The exception is `priority:`, a red→orange→lime→grey gradient, where color carries urgency rather than membership; `priority:critical` shares the exact red of `type:bug` so the two loudest signals look alike. No structural axis uses the red-orange range, which would dilute that signal.
+**Color carries the axis, not the value, because the prefix already carries identity.** The exception is `priority:`, where color carries urgency instead — there the loudest priority and the loudest type are deliberately the same red, and no other axis is allowed into that range, which would dilute the signal.
 
 **`phase:` stays a label axis** rather than migrating to milestones, given that no milestone exists to migrate into.
 
-**Title rules apply to new issues and existing ones are rewritten** to `<type>(<scope>): <subject>`, with `[Epic]` surviving as a title-only marker.
+**Titles follow the same vocabulary as the labels**, so an issue title and its PR title carry one signal rather than two. The rules apply to new issues, and the existing backlog was rewritten to match rather than left as a second convention.
 
 ## Alternatives considered
 
