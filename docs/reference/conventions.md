@@ -59,6 +59,10 @@ the bundle is not empty: `cp -R` of an empty directory succeeds and only breaks 
 - **Do not commit to `main` directly.** A PR against `main` (not stacked).
 - Commit messages are in English.
 
+### Issue labels and titles
+
+The label axes, their dictionaries, and the rules for the cases where two values look equally right live in [issue-labels.md](../issue-labels.md) — that document is the source of truth, not the labels on GitHub. Read it before creating, labeling, or retitling an issue.
+
 ### Git hooks
 
 The hooks live in `.githooks/` (committed to the repo). Enable them locally **once** after cloning:

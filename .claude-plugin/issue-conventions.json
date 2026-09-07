@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "taxonomyDocument": "docs/issue-labels.md",
+  "adr": "docs/adr/0131-issue-label-and-title-taxonomy.md",
+  "titleFormat": {
+    "enabled": true,
+    "rewriteExisting": true
+  },
+  "thresholds": {
+    "minIssues": 30
+  },
+  "models": {
+    "classifyNew": "sonnet",
+    "reclassify": "sonnet",
+    "batchClassify": "sonnet",
+    "driftCheck": "haiku"
+  },
+  "efforts": {
+    "classifyNew": "medium",
+    "reclassify": "medium",
+    "batchClassify": "medium",
+    "driftCheck": "low"
+  },
+  "batchSize": 18,
+  "review": {
+    "location": "ask"
+  }
+}
