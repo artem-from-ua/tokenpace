@@ -99,14 +99,16 @@ enum DropdownBarStylePreviewRenderer {
         let views = barViews(for: style)
 
         image.lockFocusFlipped(true)
-        // Baked under the **current** appearance, unlike the menu-bar specimen's fixed `.vibrantDark`
-        // (ADR-0097). Drawing happens inside the block so every semantic colour resolves against the
-        // appearance in force.
+        // Through `PopupBarView.withBarAppearance` — the same seam the live `draw(_:)` goes through, so
+        // the tile resolves its neutrals in the appearance the dropdown actually draws in. Baking the
+        // theme here directly is what let the two drift: the specimen picked the vibrant family while
+        // the NSMenu-hosted bar on macOS 27 got the flat one, and the marker ring came out inverted in
+        // the dropdown while the tile beside it looked right.
         //
-        // `appearance` is a parameter rather than always read from `NSApp` so a caller can bake a
-        // specific theme in one process. Assigning `NSApp.appearance` directly does *not* work — it
-        // doesn't take effect until the run loop turns.
-        (appearance ?? NSApp.effectiveAppearance).performAsCurrentDrawingAppearance {
+        // Only the light/dark side of `appearance` is used; the seam pins the family. It stays a
+        // parameter rather than always reading `NSApp` so a caller can bake a specific theme in one
+        // process — assigning `NSApp.appearance` does *not* work, it waits for the run loop to turn.
+        PopupBarView.withBarAppearance(matching: appearance ?? NSApp.effectiveAppearance) {
             // **The two tracks divide the tile into equal thirds.** The unit is the *track*, not the
             // view's frame or the marker: `PopupBarView.viewHeight` reserves space below for a ruler
             // this tile never draws, and the marker straddles the track unevenly — spacing by either

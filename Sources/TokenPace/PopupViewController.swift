@@ -397,7 +397,35 @@ final class PopupBarView: NSView {
     override var isFlipped: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Metrics.height) }
 
-    override func draw(_ dirtyRect: NSRect) { render(in: bounds) }
+    override func draw(_ dirtyRect: NSRect) {
+        Self.withBarAppearance(matching: effectiveAppearance) { render(in: bounds) }
+    }
+
+    /// Run `body` with the appearance every popup bar resolves its colours in — the **vibrant** variant
+    /// of `base`'s light/dark side.
+    ///
+    /// The bar's neutrals are the system `tertiaryLabelColor`/`quaternaryLabelColor`, and those mean
+    /// different things in the two appearance families: measured on macOS 27, `monochromeGrey` resolves
+    /// to `255,255,255 @0.173` under `darkAqua` but `51,51,51` opaque under `vibrantDark`. The marker's
+    /// ring is that grey blended into the marker colour, so the family decides whether the ring reads
+    /// lighter or darker than the strip it separates — the tone was calibrated against the vibrant one.
+    ///
+    /// Pinned rather than inherited because an `NSMenu`-hosted view is **not** reliably drawn in a
+    /// vibrant appearance: probed on macOS 27, `draw(_:)` runs with `currentDrawing` and
+    /// `effectiveAppearance` both `darkAqua`, where macOS 15 gave the vibrant one — which inverted the
+    /// ring relative to the theme. Only the light/dark side is taken from `base`, so the bar still
+    /// follows the system setting.
+    ///
+    /// The one seam both surfaces share: the live bar and the Settings specimen call it, so a tile
+    /// cannot advertise a tone the dropdown does not draw.
+    static func withBarAppearance(matching base: NSAppearance, _ body: () -> Void) {
+        let isDark = base.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        guard let vibrant = NSAppearance(named: isDark ? .vibrantDark : .vibrantLight) else {
+            body()
+            return
+        }
+        vibrant.performAsCurrentDrawingAppearance(body)
+    }
 
     /// Draw the whole bar into `rect`. Shared by ``draw(_:)`` and ``snapshotImage()``.
     ///
