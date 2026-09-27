@@ -4,25 +4,23 @@
 
 Your Claude Code subscription limits, concisely, in the macOS menu bar.
 
-TokenPace shows right in the menu bar whether you are **ahead of or behind** the even spending rate
-(*pacing*) in the **5-hour** and **7-day** limit windows — as two bars, without switching to the
-terminal. When work can no longer run (the limit is exhausted) or runs only for money, the bars give
-way to a **countdown to the reset** with a glyph that names the cause. Numbers and bars never appear
-together.
+Two bars say whether you are **ahead of or behind** the even spending rate (*pacing*) in the
+**5-hour** and **7-day** windows — so you can plan around the next reset instead of hitting "limit
+exhausted" mid-task. Red means you are spending faster than the window can afford; green means you
+are not. When work can no longer run, or runs only for money, the bars give way to a **countdown to
+the reset** and a glyph naming the cause.
 
-This is for people who work in Claude Code on a Mac and don't want to hit "limit exhausted" out of
-nowhere: you can see what is left in each window, so you can plan work around the next reset, notice
-in time that you are going too fast, and avoid breaking off a session mid-task. The bar's color tells
-you the pace at once: **red** when you are spending faster than the even rate (risking exhausting the
-window early), **green** when you are within the limits or procrastinating too much.
+The aim is a user-centric readout: hide the noise, and carry the most signal in the fewest visual
+devices. A mark earns its place only if you would do something differently on seeing it — which is
+why numbers and bars never appear together, why a healthy service says nothing at all, and why
+everything you would ask only once sits behind **⌥ Option**.
 
-Separately, TokenPace watches the **status of Claude's services** (Claude Code and Claude API) from
-the status.claude.com page: the popup shows each one's state as a colored dot, and when there is a
-problem the dot also appears in the menu bar, so it is clear that the slowdown or the errors are on
-Anthropic's side, not yours.
+TokenPace also watches the **status of Claude's services** from status.claude.com: a colored dot per
+service in the popup, and in the menu bar only when something is wrong — so a slowdown is visibly
+Anthropic's, not yours.
 
-The data source is Anthropic's official `GET /api/oauth/usage` endpoint; authorization uses the Claude
-Code OAuth token from the macOS Keychain. **The token never leaves the Mac.**
+Data comes from Anthropic's official `GET /api/oauth/usage`, authorized with the Claude Code OAuth
+token in the macOS Keychain. **The token never leaves the Mac.**
 
 > 🚧 Early development. Phase 1 is the menu bar app for macOS; iPhone widgets and an Apple Watch
 > complication come later.
