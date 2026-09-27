@@ -1,11 +1,18 @@
 ---
 status: accepted
 date: 2026-08-14
-supersedes: []
-superseded_by: []
+superseded_by: [0132]
 ---
 
 # ADR-0097: The bar style preview is rendered at runtime, not shipped as snapshots
+
+> **Partially superseded by [ADR-0132](0132-popup-bars-pin-the-vibrant-appearance-in-one-seam.md).**
+> Only §2's closing paragraph is superseded — "For the dropdown this will be different… The two
+> surfaces deliberately follow different rules". The dropdown bar and its specimens now resolve
+> through one seam that pins the vibrant family, because macOS 27 stopped handing an `NSMenu`-hosted
+> view a vibrant appearance and the two surfaces inverted apart. **The rest of §2 still stands in
+> full**: the menu-bar specimen keeps its hardcoded `.vibrantDark` for the reasons given there, and
+> drawing still happens inside `performAsCurrentDrawingAppearance`. §1, §3 and §4 are untouched.
 
 > **Postscript ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)) — decision
 > confirmed.** §1 ("the reference frame is fixed, not a mirror of settings") passed the test of a
