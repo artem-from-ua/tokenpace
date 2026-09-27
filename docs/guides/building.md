@@ -53,9 +53,9 @@ grep -rl "macro State()" "$(xcrun --sdk macosx --show-sdk-path)/System/Library/F
 
 A hit means that SDK requires the Xcode-only plugin. `scripts/build-app.sh` runs this check itself and picks the fallback SDK automatically, so the `.app` build needs no flags on any macOS version.
 
-### Open: the release build is broken on macOS 27
+### The release build: Swift 6.4 crashes at `-O`, so the script falls back to `-Osize`
 
-The SDK fallback fixes `swift build` and `swift test` (debug). **`-c release` still fails**, with the macro error gone but a driver failure in its place:
+A `-c release` build on Swift 6.4 reports this, with the macro error gone:
 
 ```
 error: unable to open dependencies file (….build/out/Intermediates.noindex/TokenPace.build/
@@ -63,9 +63,30 @@ error: unable to open dependencies file (….build/out/Intermediates.noindex/Tok
 error: SwiftDriver\ Compilation\ Requirements TokenPace normal arm64 … failed
 ```
 
-What is established: it is **not** caused by any source change — an unmodified checkout fails identically; it is not the `--triple` flag (it fails without it); it is not a stale cache (it fails after deleting `.build/out/Intermediates.noindex/TokenPace.build/Release`); and no macro error appears in the log, so the SDK fallback is doing its job. The failing compiler invocation carries `-save-temps` and a `-working-directory` one level **above** the package, which is the next thing to look at — it was not chased further.
+**That message names the symptom, not the cause.** `swift-frontend` *crashes*, and the driver then notices the side output it never got to write. The proof is in `~/Library/Logs/DiagnosticReports/swift-frontend-*.ips`, timestamped to the build:
 
-Consequence: `scripts/build-app.sh` cannot produce an `.app` on macOS 27, so the notarized release path needs either a machine on an older macOS or an Xcode install. `swift build` / `swift run` / `swift test` are unaffected, so ordinary development and UI verification work.
+```
+exception:   EXC_BAD_ACCESS (SIGKILL), KERN_INVALID_ADDRESS
+             … (possible pointer authentication failure)
+termination: PAC_EXCEPTION
+faulting:    swift::SILType::isTrivial(swift::SILFunction const&) const
+             SimplifyCFG::tryJumpThreading(swift::BranchInst*)
+             SimplifyCFG::run() → SILPassManager::runFunctionPasses
+             swift::runSILOptimizationPasses(swift::SILModule&)
+```
+
+So it is a bug in the SIL optimizer, not in this package or its configuration. `SimplifyCFG` is an optimization pass, which is why debug (`-Onone`) is unaffected and only release dies. **Installing Xcode does not help** — it ships the same `swift-frontend`. This is unrelated to the `@State` plugin problem above, where Xcode genuinely was the missing piece: the failing release invocation loads no plugins at all.
+
+Two workarounds were verified to build this package:
+
+| flag | result |
+|---|---|
+| `-Xswiftc -Osize` | builds |
+| `-Xswiftc -Xllvm -Xswiftc -sil-disable-pass=simplify-cfg` | builds |
+
+`build-app.sh` uses the first, and **only after `-O` has actually failed** — so a toolchain without the bug keeps shipping the faster binary, and nothing is gated on which macOS is running. `-Osize` is a first-class production mode rather than a diagnostic fallback ([swift.org](https://www.swift.org/blog/osize/): "-Osize is meant for most production code"); it inlines less aggressively, which is what steers the optimizer off the crashing path. The pass-disabling flag is narrower but turns off a pass the pipeline runs many times over, so it is recorded here and not used.
+
+No upstream report matching this signature was found on the Swift forums, the Apple developer forums or GitHub; the closest is [swiftlang/swift#92192](https://github.com/swiftlang/swift/issues/92192), the same `SimplifyCFG`/jump-threading area but a different platform and failure mode. No fixed version is known, so the fallback stays until one is.
 
 ## Building the `.app` bundle
 
@@ -74,7 +95,7 @@ Consequence: `scripts/build-app.sh` cannot produce an `.app` on macOS 27, so the
 open ./build/TokenPace.app # launch (no Dock icon — LSUIElement)
 ```
 
-> **On macOS 27 this currently fails** — the script picks the right SDK, but `-c release` itself is broken there. See [Open: the release build is broken on macOS 27](#open-the-release-build-is-broken-on-macos-27).
+> **No flags needed on any macOS version.** The script picks the SDK itself, and falls back to `-Osize` if the compiler crashes at `-O` — see [The release build](#the-release-build-swift-64-crashes-at--o-so-the-script-falls-back-to--osize). Expect the log to show a failed `-O` attempt followed by a retry on macOS 27; that is the fallback working, not a broken build.
 
 The script builds a **universal binary** (arm64 + x86_64), so the `.app` runs natively on both Apple
 Silicon and Intel Macs (SwiftPM has no single `--arch`, so each architecture is built separately via
