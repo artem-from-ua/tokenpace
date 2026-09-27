@@ -29,15 +29,17 @@ From the macOS 27 SDK on, `@State` is an **attached macro** rather than a proper
 Build against the newest SDK that still declares `@State` as a plain property wrapper — CLT keeps the previous one alongside the current:
 
 ```sh
-swift build --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
-swift run   --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+swift build
+swift run
 ```
 
-`swift test` needs the testing plugin passed explicitly on top of that — under the older SDK it is no longer found by default:
+**Prefer exporting `SDKROOT` over passing `--sdk`.** Every `swift` command in that shell picks it up, including the `swift build` the pre-commit hook runs — and the hook takes no flags from you, so on macOS 27 without the export `git commit` is blocked on a Swift change.
+
+`swift test` needs the testing plugin named explicitly on top of that, either way: under the older SDK it is no longer found by default.
 
 ```sh
-swift test --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk \
-  -Xswiftc -load-plugin-library \
+swift test -Xswiftc -load-plugin-library \
   -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib
 ```
 

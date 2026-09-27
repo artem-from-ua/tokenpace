@@ -796,6 +796,56 @@ enum StubScenario: String, CaseIterable {
         }
     }
 
+    /// Providers this scenario takes off the **status poll** entirely, standing in for the "Monitored
+    /// services" checkboxes without touching the stored setting.
+    ///
+    /// Different from ``menuBarHiddenProviders``, which only hides a menu-bar block: a provider named
+    /// here contributes no components, so `StatusHealth.monitors(_:)` is false for it and its popup
+    /// plate collapses — the state the maintainer has when he has never enabled it.
+    ///
+    /// Not done by writing `monitoredServices`: those defaults are the maintainer's own, and a stub
+    /// that edits them looks like a settings bug long after the run is over.
+    var statusHiddenProviders: Set<ProviderID> {
+        switch self {
+        // The README frame is about Claude, with GitHub beside it as the second provider. A Codex plate
+        // with nothing on it but a green header answers no question the frame is posing, and it is the
+        // one provider the maintainer's own build does not collect by default.
+        case .screenshot: return [.codex]
+        default:          return []
+        }
+    }
+
+    /// Awaiting-input sessions this scenario stages, or `nil` to leave the indicator to the watcher
+    /// (or to `TOKENPACE_AWAITING`).
+    ///
+    /// Carried by the scenario rather than assembled from `TOKENPACE_AWAITING*` because the README frame
+    /// has to be one command: the env stub addresses days and names positionally, so staging this shape
+    /// through it takes four variables that must agree with each other, and a frame nobody can reproduce
+    /// from memory is a frame that drifts.
+    ///
+    /// The env stub stays for arbitrary counts and urgency mixes — this is the shipped picture, not a
+    /// replacement for it.
+    var awaitingSessions: AwaitingSessions? {
+        switch self {
+        case .screenshot:
+            // Two projects, so the breakdown shows a heading with one row under it and a heading with
+            // two — the ⌥ list's own structure, which a single project would not exercise.
+            //
+            // All three `neutral` (20 days left): the frame's subject is the breakdown, and a red or
+            // orange hand would read as the thing to look at. Deletion urgency has its own stubs.
+            AwaitingSessions([
+                AwaitingSession(project: "/Users/dev/code/my-fancy-app", daysUntilDeletion: 20,
+                                name: "fix onboarding screen layout"),
+                AwaitingSession(project: "/Users/dev/code/my-claude-plugins", daysUntilDeletion: 20,
+                                name: "add mermaid support to diagram plugin"),
+                AwaitingSession(project: "/Users/dev/code/my-claude-plugins", daysUntilDeletion: 20,
+                                name: "troubleshoot broken plantuml links"),
+            ])
+        default:
+            nil
+        }
+    }
+
     // MARK: - Clock
 
     /// A **fixed** instant this scenario's canned data is anchored to, or `nil` to run off the wall

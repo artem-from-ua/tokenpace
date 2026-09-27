@@ -50,13 +50,20 @@ could not be found` — from that SDK on, SwiftUI's `@State` is an attached macr
 expands it ships only inside Xcode.app. Command Line Tools do not carry it. Build against the newest
 SDK that still declares `@State` as a plain property wrapper (CLT keeps the previous one):
 
+**Export `SDKROOT` once** and every `swift` command in that shell picks it up — including the
+`swift build` inside the pre-commit hook, which otherwise blocks the commit:
+
 ```sh
-SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
-swift build --sdk "$SDK"
-swift run   --sdk "$SDK"
-swift test  --sdk "$SDK" -Xswiftc -load-plugin-library \
+export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+swift build
+swift run
+swift test -Xswiftc -load-plugin-library \
   -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib
 ```
+
+`--sdk "$SDKROOT"` per command works too, but the hook runs its own `swift build` and takes no flags
+from you — so on macOS 27 the export is the form that lets `git commit` through. (`swift test` needs
+the testing plugin named explicitly either way: under the older SDK it is no longer found by default.)
 
 This does **not** change what the app runs on: the deployment target comes from `Package.swift`, so
 the binary keeps `minos 15.0` whichever SDK compiles it. `./scripts/build-app.sh` picks the SDK

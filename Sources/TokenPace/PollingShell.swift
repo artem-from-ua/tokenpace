@@ -979,12 +979,19 @@ actor StubUsageTransport: UsageTransport {
     /// it is what proves matching by exact name needs no filter.
     ///
     /// Every scenario that is not about GitHub returns all-operational, the same discipline the
-    /// Claude body follows: a dot nobody asked for leaks into every other verification frame.
+    /// Claude body follows: a dot nobody asked for leaks into every other verification frame. The one
+    /// exception is ``StubUsageTransport/DataMode/screenshot``, whose whole job is to show the popup
+    /// populated — it stages Actions in major outage with an incident to match.
     private func githubStatusBody() -> Data {
         let git = mode == .githubOutage ? "major_outage" : "operational"
         let api = mode == .githubOutage ? "degraded_performance" : "operational"
+        // `screenshot` puts **Actions** in major outage: the README frame needs one red service row to
+        // show what trouble looks like, and one component down beside eleven green ones is the shape the
+        // popup is built for — a whole-provider outage would say nothing about the row's own anatomy.
+        // Actions rather than Git Operations, whose outage the `githubOutage` frame already owns.
         let actions = (mode == .githubDegraded || mode == .githubClaudeDown
-            || mode == .allThreeProviders) ? "degraded_performance" : "operational"
+            || mode == .allThreeProviders) ? "degraded_performance"
+            : (mode == .screenshot ? "major_outage" : "operational")
         // Long-settled, well outside `PopupViewController.recoveryWindow`, so a healthy component
         // never renders as "just recovered" in a frame whose subject is something else.
         // Stamped against the **stub's** clock, not the wall clock. Most scenarios freeze time at a
@@ -1013,9 +1020,18 @@ actor StubUsageTransport: UsageTransport {
         // (#454). Shaped like the real feed: its own `components[]` naming the affected service, an
         // update with a body, and a shortlink the row links to.
         let incidents: String
-        if mode == .githubDegraded || mode == .githubOutage || mode == .githubClaudeDown {
+        if mode == .githubDegraded || mode == .githubOutage || mode == .githubClaudeDown
+            || mode == .screenshot {
             let affected = mode == .githubOutage ? "Git Operations" : "Actions"
-            let affectedStatus = mode == .githubOutage ? "major_outage" : "degraded_performance"
+            // `screenshot`'s Actions row is a major outage, so its incident has to say the same thing —
+            // an incident naming the component as merely degraded while the row reads red would be the
+            // contradictory pair `ui-state-truth.md` rules out.
+            let affectedStatus = (mode == .githubOutage || mode == .screenshot)
+                ? "major_outage" : "degraded_performance"
+            // The body reads as the outage the row shows, not as the degradation the other frames stage.
+            let body = mode == .screenshot
+                ? "Actions runs are failing to start. We have identified the cause and are deploying a fix."
+                : "We are investigating reports of degraded performance."
             let started = Self.isoString(now().addingTimeInterval(-40 * 60))
             incidents = """
             {"id":"gh1","name":"Incident with \(affected)","status":"investigating",\
@@ -1023,7 +1039,7 @@ actor StubUsageTransport: UsageTransport {
             "updated_at":"\(started)",\
             "components":[{"name":"\(affected)","status":"\(affectedStatus)"}],\
             "incident_updates":[{"id":"u1","status":"investigating",\
-            "body":"We are investigating reports of degraded performance.",\
+            "body":"\(body)",\
             "created_at":"\(started)"}]}
             """
         } else {
