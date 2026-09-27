@@ -7,6 +7,9 @@ Your Claude Code subscription limits, concisely, in the macOS menu bar.
 The pacing bars show whether you are **ahead of or behind** in the **5-hour** and **7-day** windows,
 so you can plan around the next reset instead of hitting "limit exhausted" mid-task.
 
+TokenPace also counts the agentic coding sessions **waiting on you**, so a run that stopped for a
+permission prompt or a question does not sit unnoticed.
+
 The aim is an interface that stays out of your way: the most signal in the fewest marks on screen,
 and no clutter to read past. A mark earns its place only if you would act differently on seeing it.
 What matters depends on how you work and on what your plan gives you, so the readout comes in
@@ -35,9 +38,6 @@ Every mark the app draws, explained in the app itself — **Settings → Legend*
    and unpack it (double-click).
 2. Drag **TokenPace.app** into the **Applications** folder.
 3. Launch it from **Launchpad** or Finder. There will be no Dock icon — the app lives in the menu bar.
-
-Runs on Apple Silicon and Intel (universal binary). **Launch-at-login** is enabled in `Settings…` and
-works for a copy launched from `/Applications`.
 
 ## Documentation
 
