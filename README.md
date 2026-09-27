@@ -27,17 +27,17 @@ Code OAuth token from the macOS Keychain. **The token never leaves the Mac.**
 > 🚧 Early development. Phase 1 is the menu bar app for macOS; iPhone widgets and an Apple Watch
 > complication come later.
 
-| <img src="docs/assets/dropdown-without-option.png" alt="The TokenPace dropdown at rest: the 5-hour and 7-day limits with colored pacing bars and time to reset, the extra-usage credits, and one red GitHub service row" width="300"> | <img src="docs/assets/dropdown-with-option.png" alt="The same dropdown with ⌥ Option held: the plan label and data age beside the brand title, the awaiting-input breakdown per project, per-model weekly limits, absolute reset times, and the incident behind the red service row" width="300"> |
-|:--:|:--:|
-| at rest | with **⌥ Option** held |
+<img src="docs/assets/dropdown-without-option.png" alt="The TokenPace dropdown at rest: the 5-hour and 7-day limits with colored pacing bars and time to reset, the extra-usage credits, and one red GitHub service row" width="300">
+<img src="docs/assets/dropdown-with-option.png" alt="The same dropdown with ⌥ Option held: the plan label and data age beside the brand title, the awaiting-input breakdown per project, per-model weekly limits, absolute reset times, and the incident behind the red service row" width="300">
+
+At rest, and with **⌥ Option** held.
 
 ## Legend
 
 Every mark the app draws, explained in the app itself — **Settings → Legend**. The same page, in full:
 
-| <img src="docs/assets/legend-colors-and-styles.png" alt="Legend, part one: what a bar's color says — far behind pace, on pace, ahead, well ahead, limit reached, no color — then the two menu-bar layouts, and the Balance and Pressure bar styles with their zero points" width="420"> | <img src="docs/assets/legend-progress-and-icons.png" alt="Legend, part two: the Progress bar style with its now-marker, tokens spent and hour ticks, then every icon — awaiting input, paused, extra usage, usage API error, no data, tracking off, reset countdown, and the service-status dot colors" width="420"> |
-|:--:|:--:|
-| colors, menu-bar layouts, Balance & Pressure | Progress, and every icon |
+<img src="docs/assets/legend-colors-and-styles.png" alt="Legend, part one: what a bar's color says — far behind pace, on pace, ahead, well ahead, limit reached, no color — then the two menu-bar layouts, and the Balance and Pressure bar styles with their zero points" width="420">
+<img src="docs/assets/legend-progress-and-icons.png" alt="Legend, part two: the Progress bar style with its now-marker, tokens spent and hour ticks, then every icon — awaiting input, paused, extra usage, usage API error, no data, tracking off, reset countdown, and the service-status dot colors" width="420">
 
 ## Installation
 
