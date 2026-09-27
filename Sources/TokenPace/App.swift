@@ -190,6 +190,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if awaitingCycleInterval != nil && !awaitingCycleOn { return nil }
             return stub.count >= 1 ? stub : nil
         }
+        // A scenario's own sessions, below `TOKENPACE_AWAITING` so the env stub can still override the
+        // frame it stages. Like `forcesCodexQuota`, it ignores the Settings switch: the scenario asserts
+        // its own precondition rather than asking for the feature to be turned on first.
+        if let staged = currentScenario.awaitingSessions {
+            return staged.count >= 1 ? staged : nil
+        }
         guard PersistedConfig.awaitingInputEnabled else { return nil }
         return awaitingInput.count >= 1 ? awaitingInput : nil
     }
@@ -1803,6 +1809,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// propagates: the statuses stand, the incident rows disappear, and `codexIncidentsFromProxy`
     /// records which path was taken so Troubleshoot can say so.
     private func pollCodexIfDue() {
+        // A scenario that takes Codex off the status poll wins over the stored flags: the frame has to
+        // look the same on a machine where the maintainer has them on. Checked before anything else so
+        // no request is built for a provider this frame does not show.
+        guard !currentScenario.statusHiddenProviders.contains(.codex) else { return }
         let config = PersistedConfig.codexMonitoring
         let transport = statusTransport
         let userAgent = "TokenPace/\(TokenPaceKit.version)"
@@ -2901,7 +2911,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// quota source of its own. A stub sets up what it is a scenario *for*, rather than rendering as
     /// Claude-only until the maintainer flips a switch first.
     private var collectsCodexQuota: Bool {
-        PersistedConfig.codexMonitoring.usageEnabled || currentScenario.forcesCodexQuota
+        // A scenario that hides the provider hides both halves: with the quota still collected, the
+        // plate the status side dropped would come straight back carrying bars.
+        if currentScenario.statusHiddenProviders.contains(.codex) { return false }
+        return PersistedConfig.codexMonitoring.usageEnabled || currentScenario.forcesCodexQuota
     }
 }
 
