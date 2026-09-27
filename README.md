@@ -15,6 +15,10 @@ devices. A mark earns its place only if you would do something differently on se
 why numbers and bars never appear together, why a healthy service says nothing at all, and why
 everything you would ask only once sits behind **⌥ Option**.
 
+No single readout fits everyone: what matters to you depends on how you work and on what your
+subscription gives you. So the same signal comes in several visual styles, and the widget shows what
+your plan actually has — pick what fits in **Settings**.
+
 TokenPace also watches the **status of Claude's services** from status.claude.com: a colored dot per
 service in the popup, and in the menu bar only when something is wrong — so a slowdown is visibly
 Anthropic's, not yours.
