@@ -7,10 +7,10 @@ Your Claude Code subscription limits, concisely, in the macOS menu bar.
 Two bars say whether you are **ahead of or behind** pace in the **5-hour** and **7-day** windows,
 so you can plan around the next reset instead of hitting "limit exhausted" mid-task.
 
-The aim is to hide the noise and carry the most signal in the fewest visual devices: a mark earns
-its place only if you would act differently on seeing it. What matters depends on how you work and
-on what your plan gives you, so the readout comes in several styles — pick what fits in
-**Settings**.
+The aim is an interface that stays out of your way: the most signal in the fewest marks on screen,
+and no clutter to read past. A mark earns its place only if you would act differently on seeing it.
+What matters depends on how you work and on what your plan gives you, so the readout comes in
+several styles — pick what fits in **Settings**.
 
 <img src="docs/assets/dropdown-without-option.png" alt="The TokenPace menu bar and dropdown at rest: the awaiting-input hand and its count, the 5-hour and 7-day limits with colored pacing bars, the Fable and Mythos weekly limits, paid extra usage, a red GitHub Actions row, and the hint to hold Option for more" width="300"> <img src="docs/assets/dropdown-with-option.png" alt="The same dropdown with ⌥ Option held: the plan label and data age beside the brand title, the awaiting sessions listed per project, each limit naming its bar style and spelling out “resets in” with exact amounts, the incident behind the red Actions row, and the Settings, Troubleshoot and Development tools items" width="300">
 
