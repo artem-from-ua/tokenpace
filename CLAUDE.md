@@ -66,10 +66,15 @@ from you — so on macOS 27 the export is the form that lets `git commit` throug
 the testing plugin named explicitly either way: under the older SDK it is no longer found by default.)
 
 This does **not** change what the app runs on: the deployment target comes from `Package.swift`, so
-the binary keeps `minos 15.0` whichever SDK compiles it. `./scripts/build-app.sh` picks the SDK
-itself and needs no flags — but **`-c release` is separately broken on macOS 27**, so the `.app`
-cannot be built there at all; the details and what has been ruled out are in
-[building.md](docs/guides/building.md#open-the-release-build-is-broken-on-macos-27).
+the binary keeps `minos 15.0` whichever SDK compiles it.
+
+`./scripts/build-app.sh` needs no flags on any macOS version — it picks the SDK itself, and on Swift
+6.4 it also retries with `-Osize` after `-O` fails, because the SIL optimizer **crashes**
+(`swift-frontend`, `SimplifyCFG::tryJumpThreading`; the `unable to open dependencies file` message is
+the symptom, not the cause). Xcode does not fix that one — it ships the same compiler. A failed `-O`
+followed by a retry in the log is the fallback working. Details, the crash trace and the second
+known workaround are in
+[building.md](docs/guides/building.md#the-release-build-swift-64-crashes-at--o-so-the-script-falls-back-to--osize).
 
 ## Logs — read them RIGHT (don't hammer the wrong ones)
 

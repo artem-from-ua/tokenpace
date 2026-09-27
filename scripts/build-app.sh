@@ -34,18 +34,52 @@ ARCHES=(arm64 x86_64)
 SLICES=()
 for arch in "${ARCHES[@]}"; do
     triple="${arch}-apple-macosx"
+    # Reset per arch: a fallback that one slice needed must not silently de-optimise the next one.
+    OPT_FLAGS=()
     echo "==> swift build -c release --triple ${triple} (this may take a while on first run)"
     # `${SDK_FLAGS[@]+"${SDK_FLAGS[@]}"}` rather than a plain `"${SDK_FLAGS[@]}"`: `/bin/bash` on macOS
     # is 3.2, where splatting an **empty** array raises `unbound variable` under `set -u` — measured,
     # and it would break the build on exactly the machines that need no SDK override. The `+` form
     # expands to nothing when the array is empty, and to every element, individually quoted, when not.
-    swift build --package-path "${ROOT}" -c release --triple "${triple}" \
-        ${SDK_FLAGS[@]+"${SDK_FLAGS[@]}"} 2>&1 \
-        | tee "/tmp/tokenpace-build-${arch}.log"
+    # `-O` first, and `-Osize` only if the compiler itself dies — so a toolchain that builds fine keeps
+    # shipping the faster binary, and nothing here depends on which macOS is running.
+    #
+    # Swift 6.4's SIL optimizer crashes on this package at `-O`: `swift-frontend` takes an
+    # EXC_BAD_ACCESS (a pointer-authentication failure) inside `SimplifyCFG::tryJumpThreading`, and the
+    # driver then reports it as `unable to open dependencies file (…-primary.d)` — the crash kills the
+    # frontend before it writes that side output, so the message names the symptom, not the cause. The
+    # crash report is in ~/Library/Logs/DiagnosticReports/swift-frontend-*.ips.
+    #
+    # `-Osize` is a first-class production mode, not a diagnostic fallback — swift.org: "-Osize is meant
+    # for most production code" — so a release built this way is one we can ship. It inlines less
+    # aggressively, which is what steers the optimizer off the crashing path.
+    if ! swift build --package-path "${ROOT}" -c release --triple "${triple}" \
+            ${SDK_FLAGS[@]+"${SDK_FLAGS[@]}"} 2>&1 \
+            | tee "/tmp/tokenpace-build-${arch}.log"; then
+        echo "==> -O failed; retrying ${arch} with -Osize (Swift 6.4 SimplifyCFG crash)"
+        OPT_FLAGS=(-Xswiftc -Osize)
+        swift build --package-path "${ROOT}" -c release --triple "${triple}" \
+            ${SDK_FLAGS[@]+"${SDK_FLAGS[@]}"} "${OPT_FLAGS[@]}" 2>&1 \
+            | tee "/tmp/tokenpace-build-${arch}.log"
+    fi
     slice_dir="$(swift build --package-path "${ROOT}" -c release --triple "${triple}" \
-        ${SDK_FLAGS[@]+"${SDK_FLAGS[@]}"} --show-bin-path)"
-    slice="${slice_dir}/${APP_NAME}"
-    [ -x "${slice}" ] || { echo "error: ${arch} binary not found at ${slice}" >&2; exit 1; }
+        ${SDK_FLAGS[@]+"${SDK_FLAGS[@]}"} ${OPT_FLAGS[@]+"${OPT_FLAGS[@]}"} --show-bin-path)"
+    built="${slice_dir}/${APP_NAME}"
+    [ -x "${built}" ] || { echo "error: ${arch} binary not found at ${built}" >&2; exit 1; }
+    # **Copy the slice out before the next arch overwrites it.** `--show-bin-path` returns the *same*
+    # `Products/Release` directory for every `--triple` on the xcbuild backend (measured on Swift 6.4),
+    # so collecting paths and merging at the end silently lipo'd the last arch with itself — `lipo: same
+    # architectures (x86_64) found` and no universal binary. Each slice gets its own filename here.
+    #
+    # Assert the slice really is the arch we asked for: with one shared output directory, a stale or
+    # mis-targeted binary is otherwise indistinguishable from a fresh one, and `lipo -create` would
+    # happily produce a bundle missing an architecture.
+    got="$(lipo -archs "${built}")"
+    [ "${got}" = "${arch}" ] \
+        || { echo "error: expected ${arch} at ${built}, found '${got}'" >&2; exit 1; }
+    slice="${OUT_DIR}/slice-${arch}"
+    mkdir -p "${OUT_DIR}"
+    cp "${built}" "${slice}"
     SLICES+=("${slice}")
 done
 
@@ -54,7 +88,14 @@ rm -rf "${APP}"
 mkdir -p "${MACOS_DIR}" "${RES_DIR}"
 # Merge the per-arch slices into one universal Mach-O.
 lipo -create "${SLICES[@]}" -output "${MACOS_DIR}/${APP_NAME}"
+rm -f "${SLICES[@]}"
 echo "==> lipo archs: $(lipo -archs "${MACOS_DIR}/${APP_NAME}")"
+# Assert the merge produced both, rather than trusting that it did: a bundle silently missing an arch
+# runs fine on the machine that built it and fails on the other kind.
+for arch in "${ARCHES[@]}"; do
+    lipo -archs "${MACOS_DIR}/${APP_NAME}" | tr ' ' '\n' | grep -qx "${arch}" \
+        || { echo "error: ${APP_NAME} is missing the ${arch} slice" >&2; exit 1; }
+done
 
 # No resource bundle to copy: the target ships no resources (the bar-style previews are rendered at
 # runtime). If that ever changes, the copy has to land in `Contents/Resources/` and happen BEFORE
