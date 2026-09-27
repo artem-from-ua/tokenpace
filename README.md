@@ -4,34 +4,29 @@
 
 Your Claude Code subscription limits, concisely, in the macOS menu bar.
 
-TokenPace shows right in the menu bar whether you are **ahead of or behind** the even spending rate
-(*pacing*) in the **5-hour** and **7-day** limit windows — as two bars, without switching to the
-terminal. When work can no longer run (the limit is exhausted) or runs only for money, the bars give
-way to a **countdown to the reset** with a glyph that names the cause. Numbers and bars never appear
-together: [how to read the menu bar](docs/reference/menu-bar-signals.md).
+The pacing bars show whether you are **ahead of or behind** in the **5-hour** and **7-day** windows,
+so you can plan around the next reset instead of hitting "limit exhausted" mid-task.
 
-This is for people who work in Claude Code on a Mac and don't want to hit "limit exhausted" out of
-nowhere: you can see what is left in each window, so you can plan work around the next reset, notice
-in time that you are going too fast, and avoid breaking off a session mid-task. The bar's color tells
-you the pace at once: **red** when you are spending faster than the even rate (risking exhausting the
-window early), **green** when you are within the limits or procrastinating too much.
+The aim is an interface that stays out of your way: the most signal in the fewest marks on screen,
+and no clutter to read past. A mark earns its place only if you would act differently on seeing it.
+What matters depends on how you work and on what your plan gives you, so the readout comes in
+several styles — pick what fits in **Settings**.
 
-Separately, TokenPace watches the **status of Claude's services** (Claude Code and Claude API) from
-the status.claude.com page: the popup shows each one's state as a colored dot, and when there is a
-problem the dot also appears in the menu bar, so it is clear that the slowdown or the errors are on
-Anthropic's side, not yours.
-
-The data source is Anthropic's official `GET /api/oauth/usage` endpoint; authorization uses the Claude
-Code OAuth token from the macOS Keychain. **The token never leaves the Mac.**
-
-> 🚧 Early development. Phase 1 is the menu bar app for macOS; iPhone widgets and an Apple Watch
-> complication come later.
+At rest, and with **⌥ Option** held:
 
 <img src="docs/assets/dropdown-without-option.png" alt="The TokenPace menu bar and dropdown at rest: the awaiting-input hand and its count, the 5-hour and 7-day limits with colored pacing bars, the Fable and Mythos weekly limits, paid extra usage, a red GitHub Actions row, and the hint to hold Option for more" width="300"> <img src="docs/assets/dropdown-with-option.png" alt="The same dropdown with ⌥ Option held: the plan label and data age beside the brand title, the awaiting sessions listed per project, each limit naming its bar style and spelling out “resets in” with exact amounts, the incident behind the red Actions row, and the Settings, Troubleshoot and Development tools items" width="300">
 
-At rest, and with **⌥ Option** held.
+TokenPace also counts the agentic coding sessions **waiting on you**, so a run that stopped for a
+permission prompt or a question does not sit unnoticed.
 
-## Legend
+It watches the **status of Claude's services** from status.claude.com too: a colored dot per
+service in the popup, and in the menu bar only when something is wrong — so a slowdown is visibly
+Anthropic's, not yours.
+
+Data comes from Anthropic's official `GET /api/oauth/usage`, authorized with the Claude Code OAuth
+token in the macOS Keychain. **The token never leaves the Mac.**
+
+## UI Legend
 
 Every mark the app draws, explained in the app itself — **Settings → Legend**. The same page, in full:
 
@@ -44,9 +39,6 @@ Every mark the app draws, explained in the app itself — **Settings → Legend*
 2. Drag **TokenPace.app** into the **Applications** folder.
 3. Launch it from **Launchpad** or Finder. There will be no Dock icon — the app lives in the menu bar.
 
-Runs on Apple Silicon and Intel (universal binary). **Launch-at-login** is enabled in `Settings…` and
-works for a copy launched from `/Applications`.
-
 ## Documentation
 
 - [docs/README.md](docs/README.md) — **the map of all documentation** (start here).
@@ -55,8 +47,3 @@ works for a copy launched from `/Applications`.
 - [docs/building.md](docs/guides/building.md) — building from source (for contributors).
 - [docs/conventions.md](docs/reference/conventions.md) — development conventions.
 - [docs/adr/](docs/adr/) — architecture decision records.
-
-## License
-
-**Closed for now.** The open-source question (and a possible license) is open; we'll settle it later.
-One of the arguments for opening the code is trust in how the token is handled.
