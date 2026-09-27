@@ -4,7 +4,7 @@
 
 Your Claude Code subscription limits, concisely, in the macOS menu bar.
 
-Two bars say whether you are **ahead of or behind** pace in the **5-hour** and **7-day** windows,
+The pacing bars show whether you are **ahead of or behind** in the **5-hour** and **7-day** windows,
 so you can plan around the next reset instead of hitting "limit exhausted" mid-task.
 
 The aim is an interface that stays out of your way: the most signal in the fewest marks on screen,
