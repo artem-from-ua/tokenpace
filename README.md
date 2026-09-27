@@ -7,26 +7,26 @@ Your Claude Code subscription limits, concisely, in the macOS menu bar.
 The pacing bars show whether you are **ahead of or behind** in the **5-hour** and **7-day** windows,
 so you can plan around the next reset instead of hitting "limit exhausted" mid-task.
 
-TokenPace also counts the agentic coding sessions **waiting on you**, so a run that stopped for a
-permission prompt or a question does not sit unnoticed.
-
 The aim is an interface that stays out of your way: the most signal in the fewest marks on screen,
 and no clutter to read past. A mark earns its place only if you would act differently on seeing it.
 What matters depends on how you work and on what your plan gives you, so the readout comes in
 several styles — pick what fits in **Settings**.
 
-At rest, and with **⌥ Option** held.
+At rest, and with **⌥ Option** held:
 
 <img src="docs/assets/dropdown-without-option.png" alt="The TokenPace menu bar and dropdown at rest: the awaiting-input hand and its count, the 5-hour and 7-day limits with colored pacing bars, the Fable and Mythos weekly limits, paid extra usage, a red GitHub Actions row, and the hint to hold Option for more" width="300"> <img src="docs/assets/dropdown-with-option.png" alt="The same dropdown with ⌥ Option held: the plan label and data age beside the brand title, the awaiting sessions listed per project, each limit naming its bar style and spelling out “resets in” with exact amounts, the incident behind the red Actions row, and the Settings, Troubleshoot and Development tools items" width="300">
 
-TokenPace also watches the **status of Claude's services** from status.claude.com: a colored dot per
+TokenPace also counts the agentic coding sessions **waiting on you**, so a run that stopped for a
+permission prompt or a question does not sit unnoticed.
+
+It watches the **status of Claude's services** from status.claude.com too: a colored dot per
 service in the popup, and in the menu bar only when something is wrong — so a slowdown is visibly
 Anthropic's, not yours.
 
 Data comes from Anthropic's official `GET /api/oauth/usage`, authorized with the Claude Code OAuth
 token in the macOS Keychain. **The token never leaves the Mac.**
 
-## Legend
+## UI Legend
 
 Every mark the app draws, explained in the app itself — **Settings → Legend**. The same page, in full:
 
