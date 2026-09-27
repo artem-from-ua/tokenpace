@@ -8,7 +8,7 @@ TokenPace shows right in the menu bar whether you are **ahead of or behind** the
 (*pacing*) in the **5-hour** and **7-day** limit windows — as two bars, without switching to the
 terminal. When work can no longer run (the limit is exhausted) or runs only for money, the bars give
 way to a **countdown to the reset** with a glyph that names the cause. Numbers and bars never appear
-together: [how to read the menu bar](docs/reference/menu-bar-signals.md).
+together.
 
 This is for people who work in Claude Code on a Mac and don't want to hit "limit exhausted" out of
 nowhere: you can see what is left in each window, so you can plan work around the next reset, notice
@@ -55,8 +55,3 @@ works for a copy launched from `/Applications`.
 - [docs/building.md](docs/guides/building.md) — building from source (for contributors).
 - [docs/conventions.md](docs/reference/conventions.md) — development conventions.
 - [docs/adr/](docs/adr/) — architecture decision records.
-
-## License
-
-**Closed for now.** The open-source question (and a possible license) is open; we'll settle it later.
-One of the arguments for opening the code is trust in how the token is handled.
