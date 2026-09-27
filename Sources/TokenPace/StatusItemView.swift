@@ -484,8 +484,8 @@ final class StatusItemView: NSView {
         return originX
     }
 
-    /// Whether the hand's **slot** is reserved — driven by the Appearance option alone, deliberately
-    /// ignoring whether anything is waiting right now.
+    /// Whether the hand's **slot** is reserved — by the Appearance option, which deliberately ignores
+    /// whether anything is waiting right now, or by a layout that carries a count of its own.
     ///
     /// The menu bar is right-aligned, so every width change shifts everything to its left, including
     /// other apps' status items. Of the five data-dependent addends in ``itemWidth(for:)`` the hand is
@@ -495,8 +495,15 @@ final class StatusItemView: NSView {
     ///
     /// ``isPreviewSpecimen`` opts out: a specimen renders one fixed frame, and this is the one width
     /// input that does not come from its `layout`.
+    ///
+    /// A layout that **carries** an awaiting count reserves the slot whatever the setting says. Without
+    /// that clause the setting alone decided, and a run whose count comes from somewhere other than the
+    /// user's own toggle — a stub scenario staging it, `TOKENPACE_AWAITING` — drew the hand into a slot
+    /// of zero width: the dropdown listed the sessions while the menu bar showed nothing, which reads as
+    /// the indicator being broken rather than switched off. The setting still reserves the slot on its
+    /// own, so the anti-jitter reservation it exists for is unchanged.
     private var reservesAwaitingSlot: Bool {
-        !isPreviewSpecimen && PersistedConfig.awaitingInputEnabled
+        !isPreviewSpecimen && (PersistedConfig.awaitingInputEnabled || layout?.awaitingInput != nil)
     }
 
     /// Whether this view is a **specimen** drawn for the Settings style picker rather than the live
