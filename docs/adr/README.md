@@ -113,7 +113,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0094](0094-provider-row-brand-badge.md) | The provider row gets a brand badge, the Providers chip becomes a puzzle piece | accepted |
 | [0095](0095-own-resource-bundle-lookup.md) | We look up the resource bundle ourselves, not through `Bundle.module` | accepted |
 | [0096](0096-zero-tick-on-pressure.md) | A zero tick on Pressure too — centered on the zero pill, dimmed | accepted |
-| [0097](0097-bar-style-preview-rendered-at-runtime.md) | The bar style preview is rendered at runtime, not shipped as snapshots | accepted |
+| [0097](0097-bar-style-preview-rendered-at-runtime.md) | The bar style preview is rendered at runtime, not shipped as snapshots | partially superseded → [0132](0132-popup-bars-pin-the-vibrant-appearance-in-one-seam.md) |
 | [0098](0098-ruler-split-identify-always-explain-on-option.md) | The bar ruler splits in two — identify always, explain under ⌥ | accepted |
 | [0099](0099-appearance-nests-its-two-surfaces.md) | `Appearance` is one pane again, and the two surfaces are its child pages | partially superseded → [0112](0112-appearance-presets-preview-apply-commits.md) |
 | [0100](0100-dropdown-style-tiles-and-retired-option-segment.md) | The dropdown picks a style by picture, and the `With ⌥ Option` segment goes away | partially superseded → [0104](0104-appearance-named-for-behaviour-on-three-layers.md) |
@@ -148,6 +148,8 @@ current design, because the reasoning is worth as much as the outcome.
 | [0129](0129-ready-to-start-is-gated-on-the-account-reached-flags.md) | A Codex read that reports the limit reached at zero usage is malformed data, not a quota state | accepted |
 | [0130](0130-one-usage-record-with-a-windows-array.md) | One usage record with a windows array, so any provider fits | accepted |
 | [0131](0131-issue-label-and-title-taxonomy.md) | Issue labels and titles as prefixed axes | accepted |
+| [0132](0132-popup-bars-pin-the-vibrant-appearance-in-one-seam.md) | Popup bars pin the vibrant appearance in one seam shared by the live bar and every specimen | accepted |
+| [0133](0133-release-falls-back-to-osize-only-after-the-compiler-crashes.md) | The release build falls back to `-Osize` only after `-O` has actually crashed the compiler | accepted |
 
 ## Maintaining this index
 
