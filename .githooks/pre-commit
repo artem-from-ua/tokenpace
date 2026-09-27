@@ -20,7 +20,14 @@ SWIFT_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.swift' 'Pac
 if [ -n "$SWIFT_STAGED" ] && [ "$TOKENPACE_SKIP_SWIFT_HOOK" != "1" ]; then
     if command -v swift >/dev/null 2>&1; then
         echo "Swift sources changed — running swift build…"
-        if ! swift build; then
+        # On macOS 27 a bare `swift build` fails on every SwiftUI `@State`: the macro's plugin ships
+        # only inside Xcode.app. The helper prints the `--sdk` override that avoids it, and nothing at
+        # all where the default SDK works — so this stays a plain `swift build` on macOS 15/26.
+        # Unquoted on purpose: the output is two words (or none), and quoting would pass an empty
+        # argument that `swift build` rejects.
+        SDK_FLAGS=$("$(git rev-parse --show-toplevel)/scripts/swift-sdk-flags.sh")
+        # shellcheck disable=SC2086
+        if ! swift build $SDK_FLAGS; then
             echo ""
             echo "Commit blocked: swift build failed."
             echo "  Bypass (WIP only): TOKENPACE_SKIP_SWIFT_HOOK=1 git commit …"

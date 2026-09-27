@@ -30,17 +30,39 @@ iPhone widgets and an Apple Watch complication.
 
 - **Swift 6.1+**, minimum target **macOS 15 Sequoia**.
 - Phase 1: **Swift Package Manager** + a build script (`.app` bundle, optional signing/notarization).
-  A full Xcode is not needed — `swift build` / `swift run` work with the Command Line Tools.
+  A full Xcode is not needed — but **on macOS 27 the commands below need an explicit `--sdk`**, see
+  below and [building.md](docs/guides/building.md#swiftui-macros-on-macos-27).
 - macOS UI: AppKit `NSStatusItem` with custom drawing (not `MenuBarExtra`).
 - Phase 2 (iOS/watchOS): an Xcode project gets added. See [ADR-0004](docs/adr/0004-build-system.md).
 
 ## Commands
+
+On macOS 15/26, or on any macOS with Xcode installed:
 
 ```sh
 swift build        # build
 swift test         # unit tests (PacingModel, time parsing/formatting, backoff)
 swift run          # run
 ```
+
+**On macOS 27 all three fail** with `external macro implementation type 'SwiftUIMacros.StateMacro'
+could not be found` — from that SDK on, SwiftUI's `@State` is an attached macro, and the plugin that
+expands it ships only inside Xcode.app. Command Line Tools do not carry it. Build against the newest
+SDK that still declares `@State` as a plain property wrapper (CLT keeps the previous one):
+
+```sh
+SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+swift build --sdk "$SDK"
+swift run   --sdk "$SDK"
+swift test  --sdk "$SDK" -Xswiftc -load-plugin-library \
+  -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib
+```
+
+This does **not** change what the app runs on: the deployment target comes from `Package.swift`, so
+the binary keeps `minos 15.0` whichever SDK compiles it. `./scripts/build-app.sh` picks the SDK
+itself and needs no flags — but **`-c release` is separately broken on macOS 27**, so the `.app`
+cannot be built there at all; the details and what has been ruled out are in
+[building.md](docs/guides/building.md#open-the-release-build-is-broken-on-macos-27).
 
 ## Logs — read them RIGHT (don't hammer the wrong ones)
 

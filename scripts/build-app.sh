@@ -18,6 +18,15 @@ PLIST_IN="${ROOT}/scripts/Info.plist.in"
 VERSION="$(tr -d ' \t\n\r' < "${ROOT}/VERSION")"
 BUILD="$(git -C "${ROOT}" rev-list --count HEAD 2>/dev/null || echo 1)"
 
+# The `--sdk` override macOS 27 needs (empty everywhere else) — see scripts/swift-sdk-flags.sh for
+# why. Shared with the pre-commit hook rather than reimplemented, so the two cannot disagree about
+# which SDK this machine builds with.
+#
+SDK_FLAGS=()
+while IFS= read -r flag; do
+    SDK_FLAGS+=("${flag}")
+done < <("${ROOT}/scripts/swift-sdk-flags.sh")
+
 # Build a universal binary (arm64 + x86_64) so the .app runs natively on both Apple Silicon and
 # Intel Macs. SwiftPM has no single --arch flag like Xcode, so each slice is built per-triple and
 # merged with `lipo`. Each `swift build` is a no-op once cached, so re-runs are cheap.
@@ -26,9 +35,15 @@ SLICES=()
 for arch in "${ARCHES[@]}"; do
     triple="${arch}-apple-macosx"
     echo "==> swift build -c release --triple ${triple} (this may take a while on first run)"
-    swift build --package-path "${ROOT}" -c release --triple "${triple}" 2>&1 \
+    # `${SDK_FLAGS[@]+"${SDK_FLAGS[@]}"}` rather than a plain `"${SDK_FLAGS[@]}"`: `/bin/bash` on macOS
+    # is 3.2, where splatting an **empty** array raises `unbound variable` under `set -u` — measured,
+    # and it would break the build on exactly the machines that need no SDK override. The `+` form
+    # expands to nothing when the array is empty, and to every element, individually quoted, when not.
+    swift build --package-path "${ROOT}" -c release --triple "${triple}" \
+        ${SDK_FLAGS[@]+"${SDK_FLAGS[@]}"} 2>&1 \
         | tee "/tmp/tokenpace-build-${arch}.log"
-    slice_dir="$(swift build --package-path "${ROOT}" -c release --triple "${triple}" --show-bin-path)"
+    slice_dir="$(swift build --package-path "${ROOT}" -c release --triple "${triple}" \
+        ${SDK_FLAGS[@]+"${SDK_FLAGS[@]}"} --show-bin-path)"
     slice="${slice_dir}/${APP_NAME}"
     [ -x "${slice}" ] || { echo "error: ${arch} binary not found at ${slice}" >&2; exit 1; }
     SLICES+=("${slice}")

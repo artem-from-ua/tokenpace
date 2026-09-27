@@ -104,11 +104,12 @@ enum LegendRenderer {
         let size = NSSize(width: width, height: PopupBarView.viewHeight + rulerDepth)
         let image = NSImage(size: size)
         image.lockFocusFlipped(true)
-        // Baked under the **current** theme's vibrant appearance, not a pinned one: the dropdown is a
-        // card that flips with the system. Passed explicitly since this view can be hosted under a
-        // forced appearance, where `NSApp`'s would be wrong — and assigning `NSApp.appearance`
-        // directly doesn't take effect until the run loop turns.
-        (appearance ?? NSApp.effectiveAppearance).performAsCurrentDrawingAppearance {
+        // Through `PopupBarView.withBarAppearance`, the seam the live bar draws through: the family is
+        // pinned vibrant there, and only the light/dark side comes from here — the dropdown is a card
+        // that flips with the system. Passed explicitly since this view can be hosted under a forced
+        // appearance, where `NSApp`'s would be wrong — and assigning `NSApp.appearance` directly
+        // doesn't take effect until the run loop turns.
+        PopupBarView.withBarAppearance(matching: appearance ?? NSApp.effectiveAppearance) {
             view.render(in: NSRect(origin: .zero, size: size))
         }
         image.unlockFocus()
