@@ -28,7 +28,7 @@ xcrun actool "${SRC}" --compile "${TMP}" --app-icon AppIcon \
     --include-all-app-icons --enable-on-demand-resources NO --development-region en \
     --output-partial-info-plist "${TMP}/partial.plist" \
     --errors --warnings --output-format human-readable-text \
-    2> >(grep -v '^dyld\[' >&2 || true)
+    2> >(grep -v '^dyld\[' >&2)
 
 for f in Assets.car AppIcon.icns; do
     [ -s "${TMP}/${f}" ] || { echo "error: actool produced no ${f}" >&2; exit 1; }

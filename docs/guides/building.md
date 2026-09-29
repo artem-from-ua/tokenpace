@@ -144,10 +144,11 @@ To change the icon:
 4. Check it in a built `.app` — `swift run` has no bundle, so it never shows the icon.
 
 To render an appearance without opening the GUI (the `--rendition` values include `Default`, `Dark`,
-`TintedLight`, `ClearDark`):
+`TintedLight`, `ClearDark`). `xcode-select -p` resolves whichever Xcode is selected, so the path holds
+for a renamed one (`Xcode-26.3.app`) too:
 
 ```sh
-"/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool" \
+"$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool" \
   design/app-icon/AppIcon.icon --export-image --output-file /tmp/icon.png \
   --platform macOS --rendition Default --width 512 --height 512 --scale 1
 ```
