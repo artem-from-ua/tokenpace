@@ -1,4 +1,4 @@
-# <img src="docs/assets/app-icon.png" alt="" width="36" height="36" align="top"> TokenPace
+# <img src="docs/assets/app-icon.png" alt="" width="36" height="36" align="top"> TokenPace app for macOS
 
 > 👀 *The most refined form of procrastination is watching your own limit.*
 
