@@ -1,4 +1,4 @@
-# TokenPace
+# <img src="docs/assets/app-icon.png" alt="" width="32" height="32" align="top"> TokenPace
 
 > 👀 *The most refined form of procrastination is watching your own limit.*
 
