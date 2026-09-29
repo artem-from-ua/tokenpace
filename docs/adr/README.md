@@ -150,6 +150,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0131](0131-issue-label-and-title-taxonomy.md) | Issue labels and titles as prefixed axes | accepted |
 | [0132](0132-popup-bars-pin-the-vibrant-appearance-in-one-seam.md) | Popup bars pin the vibrant appearance in one seam shared by the live bar and every specimen | accepted |
 | [0133](0133-release-falls-back-to-osize-only-after-the-compiler-crashes.md) | The release build falls back to `-Osize` only after `-O` has actually crashed the compiler | accepted |
+| [0134](0134-app-icon-from-a-committed-icon-composer-build.md) | The app icon ships as a committed `actool` build of an Icon Composer source, with Liquid Glass off | accepted |
 
 ## Maintaining this index
 

@@ -119,6 +119,8 @@ the menu-bar glyph — that one is drawn in code. `build-app.sh` copies two prec
 **Why both, and not just an `.icns`:** on macOS 26 an `.icns`-only icon renders smaller than native
 icons, and on a grey squircle unless its artwork matches the system shape exactly
 ([Michael Tsai](https://mjtsai.com/blog/2025/08/08/separate-icons-for-macos-tahoe-vs-earlier/)).
+The decision, the committed build and glass off are in
+[ADR-0134](../adr/0134-app-icon-from-a-committed-icon-composer-build.md).
 
 The source is `design/app-icon/AppIcon.icon`, an Icon Composer document: `icon.json` plus one
 1024×1024 SVG per layer in `Assets/` (tracks, pacing gaps, time markers), drawn full-bleed with no
