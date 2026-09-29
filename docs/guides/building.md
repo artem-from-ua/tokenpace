@@ -105,6 +105,54 @@ The app launches as an **accessory agent** with no Dock icon (`LSUIElement = tru
 in the menu bar, a click opens the popup with details, and at the bottom are `Settings…` (launch-at-login
 toggle, version, GitHub link) and `Quit TokenPace`.
 
+## The app icon
+
+The bundle icon (Finder, Spotlight, notifications, About, the Dock while a window is open) is not
+the menu-bar glyph — that one is drawn in code. `build-app.sh` copies two precompiled files into
+`Contents/Resources/`:
+
+| File | Read by | Contents |
+|---|---|---|
+| `Assets.car` | `CFBundleIconName` | the layered icon for macOS 26+ (light, dark, tinted, clear) plus flattened renditions, 16–1024 px, for macOS 15 |
+| `AppIcon.icns` | `CFBundleIconFile` | a compatibility fallback; `actool` keeps only 16–256 px in it, because the `.car` carries the rest |
+
+**Why both, and not just an `.icns`:** on macOS 26 an `.icns`-only icon renders smaller than native
+icons, and on a grey squircle unless its artwork matches the system shape exactly
+([Michael Tsai](https://mjtsai.com/blog/2025/08/08/separate-icons-for-macos-tahoe-vs-earlier/)).
+The decision, the committed build and glass off are in
+[ADR-0134](../adr/0134-app-icon-from-a-committed-icon-composer-build.md).
+
+The source is `design/app-icon/AppIcon.icon`, an Icon Composer document: `icon.json` plus one
+1024×1024 SVG per layer in `Assets/` (tracks, pacing gaps, time markers), drawn full-bleed with no
+mask, because the system applies the squircle. The background is a solid fill set in `icon.json`,
+not a layer. Liquid Glass is **off** on every layer, so the bars stay flat; the system still adds the
+rim and the edge shadow.
+
+To change the icon:
+
+1. Edit a layer SVG in any vector editor, keeping the 1024 canvas and the position, or open
+   `AppIcon.icon` in Icon Composer (bundled with Xcode 26+ under `Xcode.app/Contents/Applications/`)
+   to change fills, layer order or glass and preview every appearance.
+2. Recompile — this needs a **full Xcode 26+**, which is why the output is committed and the `.app`
+   build doesn't need it:
+   ```sh
+   ./scripts/build-app-icon.sh   # → design/app-icon/compiled/{Assets.car,AppIcon.icns}
+   ```
+3. Commit `design/app-icon/` together. **Only when the icon actually changed:** `Assets.car` is not
+   byte-reproducible (`actool` embeds per-run identifiers), so a re-run over an unchanged source still
+   produces a diff.
+4. Check it in a built `.app` — `swift run` has no bundle, so it never shows the icon.
+
+To render an appearance without opening the GUI (the `--rendition` values include `Default`, `Dark`,
+`TintedLight`, `ClearDark`). `xcode-select -p` resolves whichever Xcode is selected, so the path holds
+for a renamed one (`Xcode-26.3.app`) too:
+
+```sh
+"$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool" \
+  design/app-icon/AppIcon.icon --export-image --output-file /tmp/icon.png \
+  --platform macOS --rendition Default --width 512 --height 512 --scale 1
+```
+
 ## Signing and notarization
 
 `build-app.sh` automatically signs the bundle with a Developer ID identity (if one is available) using

@@ -1,0 +1,13 @@
+{
+  "fill" : {
+    "solid" : "srgb:0.08627,0.08627,0.09412,1.00000"
+  },
+  "groups" : [
+    { "layers" : [ { "glass" : false, "image-name" : "markers.svg", "name" : "markers" } ] },
+    { "layers" : [ { "glass" : false, "image-name" : "gaps.svg", "name" : "gaps" } ] },
+    { "layers" : [ { "glass" : false, "image-name" : "tracks.svg", "name" : "tracks" } ] }
+  ],
+  "supported-platforms" : {
+    "squares" : [ "macOS" ]
+  }
+}

@@ -97,11 +97,19 @@ for arch in "${ARCHES[@]}"; do
         || { echo "error: ${APP_NAME} is missing the ${arch} slice" >&2; exit 1; }
 done
 
-# No resource bundle to copy: the target ships no resources (the bar-style previews are rendered at
-# runtime). If that ever changes, the copy has to land in `Contents/Resources/` and happen BEFORE
-# codesign — a bundle added after signing breaks the seal — and it must be asserted non-empty, since
-# `cp -R` of an empty directory succeeds and fails only later, in the UI. See
-# docs/reference/conventions.md.
+# No SwiftPM resource bundle to copy: the target ships no resources. See docs/reference/conventions.md
+# before adding one.
+#
+# The app icon: Assets.car (CFBundleIconName — the layered icon on macOS 26+, flattened renditions on
+# 15) and AppIcon.icns (CFBundleIconFile). Compiled from design/app-icon/ by build-app-icon.sh and
+# committed, because compiling needs a full Xcode and this script must not. Copied BEFORE codesign (a
+# file added after signing breaks the seal) and asserted non-empty, since a missing icon fails only
+# later, as the generic app icon in Finder.
+ICON_DIR="${ROOT}/design/app-icon/compiled"
+for f in Assets.car AppIcon.icns; do
+    [ -s "${ICON_DIR}/${f}" ] || { echo "error: ${ICON_DIR}/${f} is missing or empty" >&2; exit 1; }
+    cp "${ICON_DIR}/${f}" "${RES_DIR}/"
+done
 
 # Info.plist with version/build substituted from template.
 sed -e "s/__VERSION__/${VERSION}/g" -e "s/__BUILD__/${BUILD}/g" \

@@ -21,11 +21,13 @@
 
 ### Resources (images and the like)
 
-**Right now the app has no resources at all.** The three PNG previews of the bar styles were the
+**Right now the app has no SwiftPM resources.** The three PNG previews of the bar styles were the
 only ones; they are drawn at runtime
 ([ADR-0097](../adr/0097-bar-style-preview-rendered-at-runtime.md)), so `Package.swift` has no
-`resources:` and `scripts/build-app.sh` copies nothing. The rule below stays — it is about the
-**next** resource, and this is the exact mine that blew up release 0.94.0.
+`resources:`. The only files in `Contents/Resources/` are the precompiled app icon, which no code
+reads — the system loads it through `Info.plist` — and which `scripts/build-app.sh` copies straight
+into the bundle ([building.md § The app icon](../guides/building.md#the-app-icon)). The rule below
+stays — it is about the **next** resource, and this is the exact mine that blew up release 0.94.0.
 
 **Before adding a resource, ask whether it can be drawn in code instead.** An image has no way to
 diverge from the code loudly: the bar style preview spent two releases showing a bar the app no
