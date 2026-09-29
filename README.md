@@ -12,7 +12,7 @@ and no clutter to read past. A mark earns its place only if you would act differ
 What matters depends on how you work and on what your plan gives you, so the readout comes in
 several styles — pick what fits in **Settings**.
 
-At rest, and with **⌥ Option** held:
+Screenshots at rest, and with **⌥ Option** held:
 
 <img src="docs/assets/dropdown-without-option.png" alt="The TokenPace menu bar and dropdown at rest: the awaiting-input hand and its count, the 5-hour and 7-day limits with colored pacing bars, the Fable and Mythos weekly limits, paid extra usage, a red GitHub Actions row, and the hint to hold Option for more" width="300"> <img src="docs/assets/dropdown-with-option.png" alt="The same dropdown with ⌥ Option held: the plan label and data age beside the brand title, the awaiting sessions listed per project, each limit naming its bar style and spelling out “resets in” with exact amounts, the incident behind the red Actions row, and the Settings, Troubleshoot and Development tools items" width="300">
 
