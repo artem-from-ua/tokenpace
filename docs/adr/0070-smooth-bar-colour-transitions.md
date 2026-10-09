@@ -1,10 +1,12 @@
 ---
 status: accepted
 date: 2026-08-04
-superseded_by: [0073]
+superseded_by: [0073, 0135]
 ---
 
 # ADR-0070: Smooth pacing-bar color transitions — the project's first animation
+
+> **Partially superseded by [ADR-0135](0135-colour-tweens-scoped-per-appearance-with-a-timer-watchdog.md).** Two points are replaced. In §6 a theme flip no longer snaps through `finishAll()`: tweens are kept per drawing appearance, and a real appearance change drops them. In §4 the timer's short life is now enforced by a watchdog rather than assumed. The rest still stands: the math in `TokenPaceKit`, identity keys, state outside the view, 30 fps in `.common` mode, interpolating the final tone, snapping on sleep/lock and on a stub change, cleanup by age, and the `color-cycle` stub.
 
 > **P.S. (2026-08-07).** Partially revisited by
 > [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md) in two places, the rest of the

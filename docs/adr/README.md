@@ -86,7 +86,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0067](0067-local-usage-journal.md) | Local usage journal (append-only JSONL) | partially superseded → [0123](0123-one-line-per-error-run-and-a-floor-on-signal-driven-polls.md) |
 | [0068](0068-credits-in-use-marker-anatomy.md) | Anatomy of the "credits in use" marker — a pill with a knocked-out currency glyph | partially superseded → [0114](0114-extra-usage-is-one-name.md) |
 | [0069](0069-settings-window-height-resizable.md) | The Settings window — height-resizable, vertical zoom, a validated persistent frame | accepted |
-| [0070](0070-smooth-bar-colour-transitions.md) | Smooth pacing-bar color transitions — the project's first animation | partially superseded → [0073](0073-awaiting-icon-reserved-slot-and-slide.md) |
+| [0070](0070-smooth-bar-colour-transitions.md) | Smooth pacing-bar color transitions — the project's first animation | partially superseded → [0073](0073-awaiting-icon-reserved-slot-and-slide.md), [0135](0135-colour-tweens-scoped-per-appearance-with-a-timer-watchdog.md) |
 | [0071](0071-incident-subscriptions.md) | status.claude.com incidents in the popup, and subscribing to their updates | accepted |
 | ~~[0072](0072-dropdown-section-visibility.md)~~ | ~~Three-state dropdown section visibility instead of boolean toggles~~ | superseded → [0087](0087-above-zero-section-visibility.md) |
 | [0073](0073-awaiting-icon-reserved-slot-and-slide.md) | A reserved slot for the awaiting-hand icon, and its slide from below — the first motion animation | accepted |
@@ -151,6 +151,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0132](0132-popup-bars-pin-the-vibrant-appearance-in-one-seam.md) | Popup bars pin the vibrant appearance in one seam shared by the live bar and every specimen | accepted |
 | [0133](0133-release-falls-back-to-osize-only-after-the-compiler-crashes.md) | The release build falls back to `-Osize` only after `-O` has actually crashed the compiler | accepted |
 | [0134](0134-app-icon-from-a-committed-icon-composer-build.md) | The app icon ships as a committed `actool` build of an Icon Composer source, with Liquid Glass off | accepted |
+| [0135](0135-colour-tweens-scoped-per-appearance-with-a-timer-watchdog.md) | Colour tweens are kept per drawing appearance, and a watchdog bounds the frame timer | draft |
 
 ## Maintaining this index
 
