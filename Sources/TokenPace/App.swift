@@ -16,6 +16,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// re-resolve its semantic colours on a theme flip by itself — this re-snapshots it when the bar
     /// flips light/dark.
     private var appearanceObservation: NSKeyValueObservation?
+    /// KVO on the app-wide appearance — the system theme, which the dropdown follows.
+    private var appAppearanceObservation: NSKeyValueObservation?
+    /// The appearance of this display's menu bar as last settled, to tell its own flips from the
+    /// transient ones AppKit applies while snapshotting the item for other displays.
+    private var mainBarAppearanceName: NSAppearance.Name?
+    private var mainBarAppearanceCheckPending = false
+    private var appearanceChangeCount = 0
+    private var appearanceChangeNames: Set<String> = []
+    private var appearanceSummarySince = Date()
+    private static let appearanceSummaryInterval: TimeInterval = 600
 
     /// The detail popup's content controller. Hosted inside a menu item so the popup gets the native
     /// menu-bar look — a rounded panel with **no arrow**, and the status button is highlighted while it
@@ -464,20 +474,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.colorAnimator = colorAnimator
         popupVC.colorAnimator = colorAnimator
         colorAnimator.onFrame = { [weak self] in self?.reRenderForCurrentTime() }
+        colorAnimator.onWatchdogTrip = { trip in
+            AppLogger.ui.error("""
+                animation: frame timer ran \(trip.ranFor, format: .fixed(precision: 1), privacy: .public) s \
+                without settling, stopped; transitions paused \(Int(trip.pause), privacy: .public) s \
+                (trip \(trip.number, privacy: .public), retargets \(trip.retargets, privacy: .public), \
+                last \(trip.lastRetargetedKey, privacy: .public), \
+                appearances \(trip.appearances.joined(separator: ","), privacy: .public), \
+                status item appearance changes \(trip.appearanceChanges, privacy: .public))
+                """)
+        }
         self.statusView = view
         self.statusItem = item
 
         // Hand the button a ready image. (Hosting the custom NSView as a button subview is unreliable —
         // the system button paints over it; see StatusItemView.snapshotImage.) The image is non-template,
-        // so it must be re-snapshotted on a theme flip — the KVO below does that.
+        // so it must be re-snapshotted whenever the button's appearance changes — the KVO below does that.
         refreshStatusImage()
+        mainBarAppearanceName = item.button?.effectiveAppearance.name
         appearanceObservation = item.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
             MainActor.assumeIsolated {
-                // A theme flip re-resolves every semantic colour, so the endpoints of any in-flight
-                // transition now describe *different* appearances — blending them would render a
-                // colour belonging to neither. Snap first, then re-snapshot (ADR-0070).
-                self?.colorAnimator.finishAll()
-                self?.refreshStatusImage()
+                guard let self else { return }
+                // AppKit snapshots the item for every other display's menu bar by setting that bar's
+                // appearance on the button and restoring it within the same call, so most of these
+                // fire in pairs for a snapshot alone. Re-render now — the image taken under the other
+                // appearance is what that display shows — and decide whether this display's bar really
+                // changed once AppKit has restored it.
+                self.noteStatusItemAppearanceChange()
+                self.refreshStatusImage()
+                self.scheduleMainBarAppearanceCheck()
+            }
+        }
+        // The system theme can flip without the menu bar's appearance changing (its lightness follows
+        // the wallpaper), while the dropdown follows the theme, so it needs its own observer.
+        appAppearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            MainActor.assumeIsolated {
+                self?.colorAnimator.dropColorScopes()
+                self?.reRenderForCurrentTime()
             }
         }
 
@@ -2878,23 +2911,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu-bar image
 
     /// Re-render the menu-bar image and resize the item to fit. Called at launch, on every poll (when the
-    /// *data* changes), and on a theme flip (via the `effectiveAppearance` KVO). The image is a single
+    /// *data* changes), and whenever the button's appearance changes (the `effectiveAppearance` KVO —
+    /// a theme flip, or AppKit snapshotting the item for another display's bar). The image is a single
     /// non-template `NSImage` drawn in the button's current appearance, so its semantic colours resolve to
-    /// the right light/dark value; the KVO re-snapshots it when the bar flips (non-template does not
-    /// re-resolve on its own).
+    /// the right light/dark value (non-template does not re-resolve on its own).
     private func refreshStatusImage() {
         guard let button = statusItem?.button, let view = statusView else { return }
         var image: NSImage?
         button.effectiveAppearance.performAsCurrentDrawingAppearance { image = view.snapshotImage() }
         guard let image else { return }
         button.image = image
-        statusItem?.length = image.size.width
+        // Only on a real change: every assignment is one more thing that can make AppKit refresh the
+        // other displays' copies of the item.
+        if statusItem?.length != image.size.width { statusItem?.length = image.size.width }
         // The widget is a flat bitmap: the `accessibilityDescription` strings handed to
         // `NSImage(systemSymbolName:)` are baked into it and never reach VoiceOver, so the label on the
         // button is the only thing spoken. It matters more with two providers than it did with one —
         // identity in the widget is positional, and position is exactly what a screen reader cannot
         // convey (ADR-0128).
         button.setAccessibilityLabel(view.layout?.spokenDescription)
+    }
+
+    /// Coalesced to one check per run-loop turn. By the time it runs AppKit has restored the button
+    /// after any replicant snapshot, so a name that still differs is this display's own bar flipping.
+    private func scheduleMainBarAppearanceCheck() {
+        guard !mainBarAppearanceCheckPending else { return }
+        mainBarAppearanceCheckPending = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.mainBarAppearanceCheckPending = false
+                guard let name = self.statusItem?.button?.effectiveAppearance.name,
+                      name != self.mainBarAppearanceName else { return }
+                self.mainBarAppearanceName = name
+                self.colorAnimator.dropColorScopes()
+                self.refreshStatusImage()
+            }
+        }
+    }
+
+    /// Feeds the watchdog's report, and logs a summary at most once per
+    /// ``appearanceSummaryInterval``: on a multi-display Mac these come from every image change, so a
+    /// per-event line would flood the log.
+    private func noteStatusItemAppearanceChange() {
+        colorAnimator.noteAppearanceChange()
+        appearanceChangeCount += 1
+        if let name = statusItem?.button?.effectiveAppearance.name {
+            appearanceChangeNames.insert(name.rawValue)
+        }
+        let now = Date()
+        let window = now.timeIntervalSince(appearanceSummarySince)
+        guard window >= Self.appearanceSummaryInterval else { return }
+        AppLogger.ui.notice("""
+            status item appearance changed \(self.appearanceChangeCount, privacy: .public) times \
+            over \(Int(window), privacy: .public) s \
+            (appearances \(self.appearanceChangeNames.sorted().joined(separator: ","), privacy: .public))
+            """)
+        appearanceChangeCount = 0
+        appearanceChangeNames = []
+        appearanceSummarySince = now
     }
 
     /// One menu-bar block per non-Claude provider that has usage bars to show right now.

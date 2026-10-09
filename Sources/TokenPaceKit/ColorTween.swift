@@ -238,10 +238,13 @@ public struct ColorTweenSet: Sendable, Equatable {
         tweens[key]?.value(at: now)
     }
 
+    /// The colour `key` is heading to, or `nil` if it has none yet.
+    public func target(of key: TweenKey) -> RGBA? {
+        tweens[key]?.to
+    }
+
     /// Snap every transition to its destination — used when interpolating would be wrong rather
-    /// than merely unnecessary: an appearance flip (the endpoints were resolved in a *different*
-    /// theme, so a blend between them is a colour that belongs to neither), a dev-tuner override
-    /// (the whole point is to see the exact colour), or sleep/lock (nothing is on screen to see it).
+    /// than merely unnecessary: sleep/lock (nothing is on screen to see it) or a runaway frame timer.
     public mutating func finishAll() {
         for (key, tween) in tweens {
             tweens[key] = ColorTween(from: tween.to, to: tween.to, startedAt: tween.startedAt,
@@ -275,4 +278,75 @@ public struct ColorTweenSet: Sendable, Equatable {
     /// Drop everything. Used when the data source changes wholesale (a stub switch), where carrying
     /// colours across would fade between two unrelated worlds.
     public mutating func removeAll() { tweens.removeAll() }
+
+    public var isEmpty: Bool { tweens.isEmpty }
+}
+
+// MARK: - AppearanceScopedTweens
+
+/// One ``ColorTweenSet`` per drawing appearance.
+///
+/// The same element is legitimately drawn in more than one appearance: AppKit snapshots the status
+/// item for every other display's menu bar by setting that bar's appearance on the button, and a
+/// light and a dark bar resolve one semantic colour to two different sRGB values. In one shared set
+/// each snapshot retargets the main display's tweens and the restore retargets them back, so the
+/// frame timer never settles (a spindump from a two-display Mac: ~45% CPU, indefinitely). Scoped by
+/// appearance name, each set only ever sees its own targets.
+public struct AppearanceScopedTweens: Sendable, Equatable {
+
+    private var scopes: [String: ColorTweenSet] = [:]
+
+    /// Retargets since the last ``resetDiagnostics()`` — a healthy fade retargets each key once, a
+    /// fight between two writers does it every frame.
+    public private(set) var retargetCount = 0
+    public private(set) var lastRetargetedKey: TweenKey?
+
+    public init() {}
+
+    /// The appearance names that currently hold tweens.
+    public var appearances: [String] { scopes.keys.sorted() }
+
+    public func isAnimating(at now: Date) -> Bool {
+        scopes.values.contains { $0.isAnimating(at: now) }
+    }
+
+    /// ``ColorTweenSet/update(_:target:at:duration:)`` within `appearance`'s own set.
+    @discardableResult
+    public mutating func update(_ key: TweenKey, appearance: String, target: RGBA, at now: Date,
+                                duration: TimeInterval = ColorTween.defaultDuration) -> RGBA {
+        var set = scopes[appearance] ?? ColorTweenSet()
+        if let previous = set.target(of: key), previous != target {
+            retargetCount += 1
+            lastRetargetedKey = key
+        }
+        let value = set.update(key, target: target, at: now, duration: duration)
+        scopes[appearance] = set
+        return value
+    }
+
+    public func value(_ key: TweenKey, appearance: String, at now: Date) -> RGBA? {
+        scopes[appearance]?.value(key, at: now)
+    }
+
+    /// Prunes every set, and drops a set once nothing in it is drawn any more.
+    public mutating func pruneStale(at now: Date, staleAfter: TimeInterval = 45) {
+        for name in scopes.keys {
+            scopes[name]?.pruneStale(at: now, staleAfter: staleAfter)
+        }
+        scopes = scopes.filter { !$0.value.isEmpty }
+    }
+
+    public mutating func finishAll() {
+        for name in scopes.keys { scopes[name]?.finishAll() }
+    }
+
+    /// Forget every set: the next draw of each element adopts its colour outright. Used on a real
+    /// appearance change, where a set kept from the old theme would fade from a colour recorded
+    /// before the flip if the theme flips back within the stale window.
+    public mutating func removeAll() { scopes.removeAll() }
+
+    public mutating func resetDiagnostics() {
+        retargetCount = 0
+        lastRetargetedKey = nil
+    }
 }

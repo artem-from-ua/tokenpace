@@ -293,3 +293,84 @@ struct ColorTweenSetTests {
         #expect(!set.isAnimating(at: t0))
     }
 }
+
+// MARK: - AppearanceScopedTweens
+
+@Suite("AppearanceScopedTweens")
+struct AppearanceScopedTweensTests {
+
+    private let barKey = TweenKey.bar(surface: .menuBar, row: "5h", part: .fill)
+    private let dark = "NSAppearanceNameDarkAqua"
+    private let light = "NSAppearanceNameAqua"
+
+    /// The status-item replicant pattern: one element drawn alternately in two appearances, each
+    /// resolving the same colour to a different value. Neither appearance may retarget the other,
+    /// or the frame timer never settles.
+    @Test func alternatingAppearancesNeverAnimate() {
+        var tweens = AppearanceScopedTweens()
+        for frame in 0..<10 {
+            let now = t0.addingTimeInterval(Double(frame) / 30)
+            tweens.update(barKey, appearance: dark, target: red, at: now)
+            tweens.update(barKey, appearance: light, target: blue, at: now)
+            #expect(!tweens.isAnimating(at: now))
+        }
+        #expect(tweens.retargetCount == 0)
+        #expect(tweens.appearances == [light, dark].sorted())
+    }
+
+    /// Within one appearance a changed target still fades, and is counted once.
+    @Test func changeWithinAppearanceFades() {
+        var tweens = AppearanceScopedTweens()
+        tweens.update(barKey, appearance: dark, target: red, at: t0)
+        let atSwitch = tweens.update(barKey, appearance: dark, target: blue, at: t0)
+        #expect(atSwitch == red)
+        #expect(tweens.isAnimating(at: t0))
+        #expect(tweens.retargetCount == 1)
+        #expect(tweens.lastRetargetedKey == barKey)
+        #expect(!tweens.isAnimating(at: t0.addingTimeInterval(ColorTween.defaultDuration)))
+    }
+
+    /// After a real appearance change the old target is forgotten: a returning appearance adopts its
+    /// colour outright instead of fading from one recorded before the flip.
+    @Test func removeAllMakesNextUpdateAdopt() {
+        var tweens = AppearanceScopedTweens()
+        tweens.update(barKey, appearance: dark, target: red, at: t0)
+        tweens.removeAll()
+        let shown = tweens.update(barKey, appearance: dark, target: blue, at: t0)
+        #expect(shown == blue)
+        #expect(!tweens.isAnimating(at: t0))
+        #expect(tweens.retargetCount == 0)
+    }
+
+    /// A set nobody draws into any more is dropped whole; the active one is kept.
+    @Test func pruneDropsIdleAppearance() {
+        var tweens = AppearanceScopedTweens()
+        tweens.update(barKey, appearance: dark, target: red, at: t0)
+        let later = t0.addingTimeInterval(60)
+        tweens.update(barKey, appearance: light, target: red, at: later)
+        tweens.pruneStale(at: later)
+        #expect(tweens.appearances == [light])
+    }
+
+    @Test func finishAllSettlesEveryAppearance() {
+        var tweens = AppearanceScopedTweens()
+        tweens.update(barKey, appearance: dark, target: red, at: t0)
+        tweens.update(barKey, appearance: light, target: red, at: t0)
+        tweens.update(barKey, appearance: dark, target: blue, at: t0)
+        tweens.update(barKey, appearance: light, target: green, at: t0)
+        #expect(tweens.isAnimating(at: t0))
+        tweens.finishAll()
+        #expect(!tweens.isAnimating(at: t0))
+        #expect(tweens.value(barKey, appearance: dark, at: t0) == blue)
+        #expect(tweens.value(barKey, appearance: light, at: t0) == green)
+    }
+
+    @Test func resetDiagnosticsClearsCounters() {
+        var tweens = AppearanceScopedTweens()
+        tweens.update(barKey, appearance: dark, target: red, at: t0)
+        tweens.update(barKey, appearance: dark, target: blue, at: t0)
+        tweens.resetDiagnostics()
+        #expect(tweens.retargetCount == 0)
+        #expect(tweens.lastRetargetedKey == nil)
+    }
+}
