@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// KVO on the button's `effectiveAppearance`. The menu-bar image is **non-template**, so it does not
     /// re-resolve its semantic colours on a theme flip by itself — this re-snapshots it when the bar
-    /// flips light/dark.
+    /// flips light/dark, and while AppKit snapshots the item for another display's bar.
     private var appearanceObservation: NSKeyValueObservation?
     /// KVO on the app-wide appearance — the system theme, which the dropdown follows.
     private var appAppearanceObservation: NSKeyValueObservation?

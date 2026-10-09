@@ -15,7 +15,7 @@ unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../../Sources/
   - `network` — Usage/Status API requests, HTTP result codes, decode failures, snapshot synthesis.
   - `keychain` — Keychain reads via the `security` CLI (exit status, ADR-0019), token-expiry checks, delegated token refresh (ADR-0017).
   - `lifecycle` — app launch, launch-at-login, sleep/wake, network up/down, polling-interval changes.
-  - `ui` — menu-bar rendering diagnostics (defined, currently unused).
+  - `ui` — menu-bar rendering diagnostics: the colour-transition watchdog, the status item's appearance-change summary, the Appearance pane.
   - `archive` — session-log archiver: sync start/finish, file/byte counts, failures (ADR-0030). File paths only at `.debug` (they contain project names).
   - `journal` — usage journal (ADR-0067) and the dev status-payload JSONL (ADR-0071 §10): append-write failures, fixture generation. Percentages only, never a token.
 
@@ -87,6 +87,8 @@ In the tables below, `<…>` marks an interpolated value.
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | 261 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
+| — | `ui` | `.error` | `animation: frame timer ran <s> s without settling, stopped; transitions paused <s> s (trip <n>, retargets <n>, last <key>, appearances <names>, status item appearance changes <n>)` | `ColorAnimator.onWatchdogTrip` — the colour-transition frame timer ran past 5 s, so the watchdog stopped it and paused transitions (60 s, doubling per trip up to 1 h; ADR-0135). `.error` rather than `.notice` on purpose: it is a broken invariant, and it must be persisted so it can be collected afterwards with `log show` from a machine the maintainer cannot reproduce on. The backoff caps it at about one line per hour |
+| — | `ui` | `.notice` | `status item appearance changed <n> times over <s> s (appearances <names>)` | the status button's `effectiveAppearance` KVO, summarised at most once per 10 minutes (emitted on the first change after the window has passed). On a multi-display Mac AppKit changes it twice per snapshot of the item for another display's bar, so idle traffic is about two per menu-bar render; thousands in one window mean the replicant loop of [#554](https://github.com/artem-from-ua/tokenpace/issues/554) is live |
 | 313 | `lifecycle` | `.notice` | `manual refresh requested (Troubleshoot)` | `forceRefresh()` — user clicked "Refresh now" in Troubleshoot; a `.manualRefresh` signal is sent and the status poll is marked due (ADR-0020) |
 | — | `lifecycle` | `.notice` | `dev: stub scenario → <id>` | `switchScenario(_:)` — the dev-tools live stub selector picked a new data source (`<id>` = the `TOKENPACE_STUB` value, `real` for the live network); the polling engine is rebuilt and an immediate poll forced. Dev-only (`devToolsEnabled` defaults key, ADR-0053) |
 | — | `lifecycle` | `.notice` | `dev: unknown TOKENPACE_STUB "<value>" — running the frozen screenshot stub instead of the real network. Available: <ids>` | `applicationDidFinishLaunching` — `TOKENPACE_STUB` was set to something the registry doesn't know, so the run fell back to the frozen `screenshot` frame. `<ids>` is built from `StubScenario.allCases`. Silent when the variable is absent or valid |
@@ -455,16 +457,16 @@ One log line per interval change. The format is built by
 
 | Category | Calls | Files |
 |----------|-------|-------|
-| `network` | 31 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `PollingEngine` (4), `UsageSnapshot` (3), `UpdateInstaller` (3), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
-| `keychain` | 12 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
-| `lifecycle` | 118 | `App` (48), `SettingsModel` (27), `UpdateInstaller` (13), `PollingShell` (7), `PersistedConfig` (6), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `SettingsWindowController` (2), `PollingEngine` (2), `ShellEnvironment` (1), `IncidentNotificationDelegate` (1) |
-| `ui` | 1 | `AppearancePane` (1) |
+| `network` | 43 | `App` (8), `GitHubReleaseClient` (6), `StatusClient` (6), `UsageClient` (6), `CodexIncidentClient` (4), `PollingEngine` (4), `UsageSnapshot` (4), `UpdateInstaller` (3), `GHReleaseFetcher` (1), `GitHubRelease` (1) |
+| `keychain` | 10 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
+| `lifecycle` | 125 | `App` (49), `SettingsModel` (33), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `PersistedConfig` (6), `AwaitingInputWatcher` (5), `PollingEngine` (2), `SettingsWindowController` (2), `IncidentNotificationDelegate` (1), `ShellEnvironment` (1) |
+| `ui` | 3 | `App` (2), `AppearancePanes` (1) |
 | `archive` | 7 | `App` (5), `LogArchiver` (2) |
 | `journal` | 18 | `UsageJournal` (10), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 
-**Total: 188 log statements** — `.error` ×50, `.notice` ×120, `.info` ×13, `.debug` ×5.
+**Total: 206 log statements** — `.error` ×55, `.notice` ×135, `.info` ×13, `.debug` ×3.
 
-> Regenerate with: `grep -rho 'AppLogger\.[a-z]*\.' Sources/ | sort | uniq -c`. The per-file column
+> Regenerate with: `grep -rho 'AppLogger\.[a-z]*\.' Sources/ --exclude=AppLogger.swift | sort | uniq -c` (the facade's doc comment holds usage examples that are not statements). The per-file column
 > is a straight readout of that command, not arithmetic on a previous count — recounting by delta has
 > repeatedly drifted from the source.
 
