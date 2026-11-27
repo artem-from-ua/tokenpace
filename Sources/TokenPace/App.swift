@@ -136,6 +136,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// empty until the next poll or 30 s age tick.
     private var lastPopupLayout: PopupLayout?
 
+    // MARK: Weekly comparison
+
+    /// Past 7-day windows read back from the journal. Reloaded hourly: the history only grows by the
+    /// current week, which the live snapshot already covers.
+    private var weeklyHistory: [WeeklyComparison.Week] = []
+    private var weeklyHistoryLoadedAt: Date?
+    private var weeklyHistoryLoadInFlight = false
+
+    private func loadWeeklyHistoryIfDue() {
+        let now = Date()
+        guard !weeklyHistoryLoadInFlight,
+              weeklyHistoryLoadedAt.map({ now.timeIntervalSince($0) >= 3_600 }) ?? true else { return }
+        weeklyHistoryLoadInFlight = true
+        Task { [weak self] in
+            let weeks = await Task.detached(priority: .utility) {
+                WeeklyComparison.weeks(from: UsageJournal.recentWeeklyPoints())
+            }.value
+            guard let self else { return }
+            self.weeklyHistoryLoadInFlight = false
+            self.weeklyHistoryLoadedAt = Date()
+            self.weeklyHistory = weeks
+            if let last = self.lastOutput { self.render(last, at: self.currentDate()) }
+        }
+    }
+
+    /// The ⌥ lines under the 7-day row, or none when the window has no reset to place "now" in.
+    private func weeklyComparisonLines(_ snapshot: UsageSnapshot?, now: Date) -> [String] {
+        guard let snapshot, let reset = ResetClock.parse(snapshot.sevenDay.resetsAt) else { return [] }
+        let summary = WeeklyComparison.summary(
+            weeks: weeklyHistory, currentReset: reset,
+            currentTimePct: PacingModel.elapsedFraction(resetsAt: reset, now: now, window: .sevenDay))
+        return [WeeklyComparison.lastWeekLine(summary), WeeklyComparison.recentLine(summary)]
+            .compactMap { $0 }
+    }
+
     // MARK: Awaiting-input indicator (ADR-0066)
 
     /// Watches `~/.claude/sessions` + `jobs` for sessions awaiting user input, or `nil` while the
@@ -1282,6 +1317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detectBackToWorkEdge(output)
         detectExtraUsageEdge(output)
         lastOutput = output
+        loadWeeklyHistoryIfDue()
         render(output, at: currentDate())
         // Re-arm the optimistic-reset timer against this poll's `resets_at`. A successful poll fully
         // overwrites any prior optimistic overlay; a 429/error poll carries the stale last-known
@@ -2892,7 +2928,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .withSubscription(currentSubscriptionState())
             // Graft the brand-coloured plan label ("Max (5x)") from the Keychain rate-limit tier — a
             // plan mark, not a secret. `nil` (no tier / unreadable creds) draws just "Claude".
-            .withPlanLabel(claudePlanLabel(rateLimitTier: output.diagnostics?.token?.rateLimitTier)))
+            .withPlanLabel(claudePlanLabel(rateLimitTier: output.diagnostics?.token?.rateLimitTier,
+                                           subscriptionType: output.diagnostics?.token?.subscriptionType))
+            .withWeeklyComparison(weeklyComparisonLines(snapshot, now: now)))
     }
 
     /// Set the popup model **and** resize the hosted view to fit. A menu item's hosted view must

@@ -2769,7 +2769,21 @@ final class PopupViewController: NSViewController {
             // so it needs the normal inter-section gap; the credits block then owns the tight-to-separator
             // bottom instead.
             let isLastLimitRow = index == lastVisibleRowIndex
-            addBar(row, isLast: isLastLimitRow && !showCredits)
+            let rowIsLast = isLastLimitRow && !showCredits
+            // Past weeks from the journal, on the ⌥ layer: a retrospective answers a question the
+            // user asks now and then, so it does not take permanent height. Under the bar, so the row's
+            // figures stay next to their bar.
+            let comparisonLines = optionHeld && index == Self.sevenDayRowIndex
+                ? layout.weeklyComparisonLines : []
+            let bar = addBar(row, isLast: rowIsLast && comparisonLines.isEmpty)
+            if let bar, !comparisonLines.isEmpty {
+                stack.setCustomSpacing(Metrics.rowSpacing, after: bar)
+                var lastLine: NSView = bar
+                for line in comparisonLines {
+                    lastLine = addLabel(line, font: .systemFont(ofSize: Metrics.textSize), secondary: true)
+                }
+                if !rowIsLast { stack.setCustomSpacing(Metrics.limitSpacing, after: lastLine) }
+            }
         }
 
         // The "Extra usage" (money-credits) section (#145), rendered below the limit windows when

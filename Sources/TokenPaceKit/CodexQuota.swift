@@ -166,7 +166,7 @@ public struct CodexRateLimitWindow: Sendable, Equatable, Decodable {
 /// The plan word for the plate header: `"plus"` → `"Plus"`.
 ///
 /// Title-cases whatever arrives rather than whitelisting known plans, unlike
-/// ``claudePlanLabel(rateLimitTier:)``. The two answer different questions. Anthropic's tier is an
+/// ``claudePlanLabel(rateLimitTier:subscriptionType:)``. The two answer different questions. Anthropic's tier is an
 /// opaque identifier (`default_claude_max_5x`) that must be *decoded* into a plan name, and third-party
 /// clients disagree on what some of them mean — so a guess there renders a wrong plan in brand
 /// colour. `planType` is already the plan name; an unrecognised one is a plan we have not seen, not a

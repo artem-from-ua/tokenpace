@@ -292,10 +292,9 @@ distinguished by weight, not color).
 
 - **Source.** Not the usage API, but the OAuth payload in the Keychain: the `rateLimitTier` field
   (e.g. `default_claude_max_5x`) on `TokenCredentials` → `TokenDiagnostics` →
-  `output.diagnostics?.token?.rateLimitTier`. Not a secret — just a plan marker.
-  `subscriptionType` (`"max"`) **is not used**: it's redundant — the plan family's name and its
-  multiplier are already in `rateLimitTier`.
-- **Mapping** — `claudePlanLabel(rateLimitTier:)` (`TokenPaceKit`, pure). This is a **whitelist,
+  `output.diagnostics?.token?.rateLimitTier`, with `subscriptionType` (`"pro"`, `"max"`) from the
+  same payload as a fallback. Not a secret — just a plan marker.
+- **Mapping** — `claudePlanLabel(rateLimitTier:subscriptionType:)` (`TokenPaceKit`, pure). This is a **whitelist,
   not best-effort**: there's no public tier table, and third-party clients contradict each other
   (`default_claude_ai` → "Pro" in some, "Free" in others), so we recognize **only** confident
   forms and return `nil` for everything else — otherwise a guess would render in the brand color,
@@ -303,12 +302,38 @@ distinguished by weight, not color).
   - `default_claude_max_<N>x` → `Max (<N>x)` (pattern: `5x`/`20x`/a future `50x`; the multiplier in
     parentheses with a lowercase `x` — that's how Anthropic names these plans);
   - `default_claude_pro` → `Pro`;
-  - anything else (`default`, `default_claude_ai`, unknown, absent) → `nil`.
+  - anything else (`default`, `default_claude_ai`, unknown, absent) → the `subscriptionType`
+    fallback: `pro` → `Pro`, `max` → `Max` (no multiplier — only the tier carries it), anything
+    else → `nil`. The tier wins whenever it resolves. A Pro account was observed with tier
+    `default_claude_ai` and `subscriptionType: "pro"`, which is why the ambiguous tier is not the
+    last word.
 - **Render.** `nil` → just "Claude", **without** the `･` separator. A non-empty label is grafted
   onto the layout via `PopupLayout.withPlanLabel(_:)` in `render()` — outside the usage `make`,
   the same pattern as `withAwaitingInput` (a source outside the usage snapshot).
   `PopupViewController.brandTitleLabel(plan:)` assembles a single attributed label (a shared
   baseline). Both header branches (plain / with the awaiting indicator) use the same label.
+
+## Week-over-week lines under the 7-day row
+
+While ⌥ is held, the 7-day row gets up to two lines under its bar — `last week by now 16% · ended at
+52%` and `past 4 weeks ended 52–85% · avg 75%`
+([ADR-0136](../../adr/0136-week-over-week-from-the-journal-on-the-option-layer.md)).
+
+- **Source.** The usage journal, read back — not the live snapshot. `UsageJournal.recentWeeklyPoints()`
+  reads the current and previous two monthly files (`usage-journal-<yyyy-MM>.jsonl`; `-dev` for a dev
+  build unless `TOKENPACE_HISTORY_FROM_RELEASE=1`) and keeps Claude's `d7` readings with a parseable
+  reset.
+- **Cadence.** `AppDelegate.loadWeeklyHistoryIfDue()` runs on each successful poll, but reloads at most
+  hourly, off the main actor: history grows only by the current week, which the snapshot already
+  covers. A completed load re-renders the popup.
+- **Model** — `WeeklyComparison` (`TokenPaceKit`, pure). Readings group into windows by reset rounded
+  to the hour (the same reset arrives in spellings a second apart). A window's final value is its
+  **peak**, not its last reading, because the counter can roll back; it counts as complete only if a
+  reading landed at ≥ 98.5% of its time. "Last week by now" needs a reading within 0.02 of the window
+  (≈3 h) of the current point; the recent line uses up to four complete weeks and needs at least two.
+- **Render.** `PopupLayout.withWeeklyComparison(_:)` grafts the lines on in `render()` (withheld when
+  the layout has no limit rows); `PopupViewController` draws them under the 7-day bar, on the ⌥ layer
+  only.
 
 ## Insights pipeline (#238)
 

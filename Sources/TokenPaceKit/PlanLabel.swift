@@ -14,11 +14,22 @@ import Foundation
 /// - `default_claude_max_<N>x` → `"Max (<N>x)"` (a pattern, so a future `max_50x` still resolves) —
 ///   Anthropic's own naming for these plans, with the multiplier parenthesised and its lowercase `x`.
 /// - `default_claude_pro`      → `"Pro"`.
-/// - anything else (`default`, `default_claude_ai`, unknown shapes, `nil`, empty) → `nil`.
+/// - anything else (`default`, `default_claude_ai`, unknown shapes, `nil`, empty) → the fallback below.
 ///
-/// `subscriptionType` (e.g. `"max"`) is intentionally **not** used: it is redundant with the tier —
-/// the tier already carries the plan family *and* the multiplier.
-public func claudePlanLabel(rateLimitTier: String?) -> String? {
+/// The tier wins when it resolves, since it alone carries the multiplier. When it does not,
+/// `subscriptionType` settles the family: a Pro account was observed with tier `default_claude_ai`
+/// and `subscriptionType: "pro"` (2026-11-13), so the ambiguous tier is not the last word. The same
+/// whitelist discipline applies — `pro` → `"Pro"`, `max` → `"Max"`, anything else → `nil`.
+public func claudePlanLabel(rateLimitTier: String?, subscriptionType: String? = nil) -> String? {
+    if let label = tierPlanLabel(rateLimitTier) { return label }
+    switch subscriptionType {
+    case "pro": return "Pro"
+    case "max": return "Max"
+    default:    return nil
+    }
+}
+
+private func tierPlanLabel(_ rateLimitTier: String?) -> String? {
     guard let tier = rateLimitTier, !tier.isEmpty else { return nil }
     if tier == "default_claude_pro" { return "Pro" }
     // `default_claude_max_<digits>x` → "Max (<digits>x)". Anchored, digits-only multiplier so we match

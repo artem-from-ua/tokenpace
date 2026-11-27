@@ -281,9 +281,13 @@ public struct PopupLayout: Sendable, Equatable {
 
     /// The short plan label shown in brand colour right after "Claude" in the header (e.g. "Max (5x)"),
     /// or `nil` to draw just "Claude". Derived from the Keychain `rateLimitTier` via
-    /// ``claudePlanLabel(rateLimitTier:)`` — comes from the OAuth payload, not the usage snapshot, so
+    /// ``claudePlanLabel(rateLimitTier:subscriptionType:)`` — comes from the OAuth payload, not the usage snapshot, so
     /// the shell grafts it on via ``withPlanLabel(_:)`` rather than threading it through `make`.
     public let planLabel: String?
+
+    /// This week set against past weeks from the journal (``WeeklyComparison``), one string per line,
+    /// drawn under the 7-day row while ⌥ is held. Empty when the journal has nothing comparable.
+    public let weeklyComparisonLines: [String]
 
     /// The status-page incidents worth showing, already filtered by ``IncidentVisibility``. Empty on
     /// every ordinary frame. Arrives on the status poll's own cadence rather than with the usage
@@ -340,6 +344,7 @@ public struct PopupLayout: Sendable, Equatable {
         incidents: [VisibleIncident] = [],
         subscription: EpisodeSubscriptionState? = nil,
         planLabel: String? = nil,
+        weeklyComparisonLines: [String] = [],
         monitoringMode: MonitoringMode = .usageAndServices,
         weeklyResetUnknown: Bool = false,
         providerStatusAges: [ProviderID: TimeInterval] = [:],
@@ -364,6 +369,7 @@ public struct PopupLayout: Sendable, Equatable {
         self.creditsIsAboveZero = creditsIsAboveZero
         self.awaitingInput = awaitingInput
         self.planLabel = planLabel
+        self.weeklyComparisonLines = weeklyComparisonLines
         self.incidents = incidents
         self.subscription = subscription
         self.monitoringMode = monitoringMode
@@ -383,6 +389,7 @@ public struct PopupLayout: Sendable, Equatable {
         incidents: [VisibleIncident]? = nil,
         subscription: EpisodeSubscriptionState?? = nil,
         planLabel: String?? = nil,
+        weeklyComparisonLines: [String]? = nil,
         providerStatusAges: [ProviderID: TimeInterval]? = nil,
         providerIncidents: [ProviderID: [VisibleIncident]]? = nil,
         providerQuotaRows: [ProviderID: [LimitRow]]? = nil,
@@ -401,6 +408,7 @@ public struct PopupLayout: Sendable, Equatable {
             incidents: incidents ?? self.incidents,
             subscription: subscription ?? self.subscription,
             planLabel: planLabel ?? self.planLabel,
+            weeklyComparisonLines: weeklyComparisonLines ?? self.weeklyComparisonLines,
             monitoringMode: monitoringMode,
             weeklyResetUnknown: weeklyResetUnknown,
             providerStatusAges: providerStatusAges ?? self.providerStatusAges,
@@ -445,6 +453,11 @@ public struct PopupLayout: Sendable, Equatable {
     /// not the usage snapshot — doesn't have to thread through `make`.
     public func withPlanLabel(_ planLabel: String?) -> PopupLayout {
         copy(planLabel: .some(planLabel))
+    }
+
+    /// A copy with the week-over-week lines grafted on; withheld when no limit rows are drawn.
+    public func withWeeklyComparison(_ lines: [String]) -> PopupLayout {
+        copy(weeklyComparisonLines: rows.isEmpty ? [] : lines)
     }
 
     /// A copy carrying one satellite provider's status-poll age, grafted on like the plan label,

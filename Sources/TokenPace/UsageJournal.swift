@@ -268,6 +268,28 @@ actor UsageJournal {
         return samples
     }
 
+    /// The 7-day readings from the journal's last few months, for ``WeeklyComparison``. Four complete
+    /// weeks plus last week need at most two calendar months; three covers a month boundary.
+    ///
+    /// `TOKENPACE_HISTORY_FROM_RELEASE=1` makes a dev build read the release journal (read-only), so the
+    /// comparison can be checked against real history. Verification only.
+    static func recentWeeklyPoints(now: Date = Date()) -> [WeeklyComparison.Point] {
+        let months = (0..<3).map { now.addingTimeInterval(-Double($0) * 31 * 24 * 3600) }.map(Self.monthComponent)
+        let directory = Self.envOverrideFile?.deletingLastPathComponent() ?? Self.defaultDirectory
+        let readRelease = Self.runningFromApplications
+            || ProcessInfo.processInfo.environment["TOKENPACE_HISTORY_FROM_RELEASE"] == "1"
+        let suffix = readRelease ? "" : "-dev"
+        var points: [WeeklyComparison.Point] = []
+        for month in Set(months).sorted() {
+            let url = Self.envOverrideFile
+                ?? directory.appendingPathComponent("usage-journal\(suffix)-\(month).jsonl")
+            guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            points += WeeklyComparison.points(from: JournalReader.parse(contents).records)
+            if Self.envOverrideFile != nil { break }
+        }
+        return points
+    }
+
     // MARK: - Migration (#386)
 
     /// The suffix a pre-migration copy keeps. **Never deleted by the app** — see

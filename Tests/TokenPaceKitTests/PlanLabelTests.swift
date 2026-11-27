@@ -42,4 +42,18 @@ struct PlanLabelTests {
     func unrecognisedYieldsNil(_ tier: String?) {
         #expect(claudePlanLabel(rateLimitTier: tier) == nil)
     }
+
+    @Test func ambiguousTierFallsBackToSubscriptionType() {
+        #expect(claudePlanLabel(rateLimitTier: "default_claude_ai", subscriptionType: "pro") == "Pro")
+        #expect(claudePlanLabel(rateLimitTier: nil, subscriptionType: "max") == "Max")
+    }
+
+    @Test func recognisedTierWinsOverSubscriptionType() {
+        #expect(claudePlanLabel(rateLimitTier: "default_claude_max_20x", subscriptionType: "max") == "Max (20x)")
+    }
+
+    @Test func unknownSubscriptionTypeStaysNil() {
+        #expect(claudePlanLabel(rateLimitTier: "default_claude_ai", subscriptionType: "free") == nil)
+        #expect(claudePlanLabel(rateLimitTier: "default_claude_ai", subscriptionType: "") == nil)
+    }
 }
