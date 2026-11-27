@@ -374,6 +374,34 @@ Checks:
 The product rationale (why the signal exists and why there are three layers of silence) is in
 [users-and-goals.md](../reference/users-and-goals.md#the-stand-by--for-green-line-what-it-adds-and-why-it-is-almost-always-silent).
 
+### Week-over-week lines under ⌥ (the 7-day bar)
+
+While ⌥ is held, up to two lines appear **under** the 7-day bar, in the same `dimmedLabel` tone as the
+details line:
+
+```
+last week by now 16% · ended at 52%
+past 4 weeks ended 52–85% · avg 75%
+```
+
+They come from the usage journal (`WeeklyComparison`, [ADR-0136](../adr/0136-week-over-week-from-the-journal-on-the-option-layer.md)),
+so a stub has no history to show: **check on real data**. A dev build reads the `-dev` journal, which
+rarely holds full weeks; `TOKENPACE_HISTORY_FROM_RELEASE=1` makes it read the release journal instead
+(read-only — the dev build still writes only to its own file):
+
+```sh
+TOKENPACE_STUB=real TOKENPACE_HISTORY_FROM_RELEASE=1 swift run & echo $! > /tmp/tp-dev.pid
+```
+
+Checks:
+- Hold ⌥: the lines sit **below** the 7-day bar, not between the details line and the bar — the row
+  still reads header, figures, bar. Release ⌥ — the lines go and the height comes back.
+- They never appear on any other row, Codex's 7-day row included.
+- Each half drops out on its own: `last week by now` needs a reading within ≈3 h of the same point of
+  last week's window, `ended at` needs last week seen at its reset. With neither, the first line is
+  absent. The second line needs at least two complete weeks.
+- **Popup height**: as with the stand-by line, the bottom edge must not clip when ⌥ toggles.
+
 ### The limit details line: words under ⌥ Option
 
 The line under each limit's heading ("how much is eaten ↔ when it comes back") carries **bare numbers**
@@ -430,13 +458,16 @@ Checks:
 
 To the right of "Claude" (in the brand color) the plan name is drawn: `Claude ･ Max (5x)` — "Claude" and the
 `･` separator are bold, the plan name is not, and all of it is terracotta (`claudeBrand`). The source is the Keychain's
-`rateLimitTier` via `claudePlanLabel(rateLimitTier:)` (whitelist: `default_claude_max_<N>x`→`Max (<N>x)`, `default_claude_pro`→`Pro`,
-everything else→nothing). An unknown/missing tier → just "Claude" **without** the separator.
+`rateLimitTier` via `claudePlanLabel(rateLimitTier:subscriptionType:)` (whitelist: `default_claude_max_<N>x`→`Max (<N>x)`,
+`default_claude_pro`→`Pro`). A tier that resolves to nothing falls back to `subscriptionType`: `pro`→`Pro`, `max`→`Max`,
+everything else→nothing. Both unknown/missing → just "Claude" **without** the separator.
 
 - **On a stub:** any `TOKENPACE_STUB=…` (`StubTokenProvider` returns `default_claude_max_20x`) → the header
   shows `Claude ･ Max (20x)`. 20x is deliberate (rather than the usual local 5x), so that you can see the label is data-driven.
 - **On real data (`swift run` with no stub):** shows your actual plan from the Keychain (e.g. `Claude ･ Max (5x)`).
-- **Fallback:** if the Keychain's `rateLimitTier` is unknown/missing — it must be just "Claude", with no dot.
+- **Pro account:** its tier is `default_claude_ai`, which resolves to nothing, so the label comes from
+  `subscriptionType: "pro"` → `Claude ･ Pro`. Verified live on a Pro account (2026-11-27).
+- **Fallback:** if neither `rateLimitTier` nor `subscriptionType` is recognized — it must be just "Claude", with no dot.
 
 ### The "Back to work!" notification (#160, ADR-0039; the signal — #161, [ADR-0113](../adr/0113-back-to-work-tracks-the-subscription-quota.md))
 

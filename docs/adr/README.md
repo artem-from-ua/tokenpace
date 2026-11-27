@@ -152,6 +152,7 @@ current design, because the reasoning is worth as much as the outcome.
 | [0133](0133-release-falls-back-to-osize-only-after-the-compiler-crashes.md) | The release build falls back to `-Osize` only after `-O` has actually crashed the compiler | accepted |
 | [0134](0134-app-icon-from-a-committed-icon-composer-build.md) | The app icon ships as a committed `actool` build of an Icon Composer source, with Liquid Glass off | accepted |
 | [0135](0135-colour-tweens-scoped-per-appearance-with-a-timer-watchdog.md) | Colour tweens are kept per drawing appearance, and a watchdog bounds the frame timer | draft |
+| [0136](0136-week-over-week-from-the-journal-on-the-option-layer.md) | Week-over-week comparison comes from the journal and sits under the 7-day bar on the ⌥ layer | accepted |
 
 ## Maintaining this index
 
