@@ -2892,7 +2892,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .withSubscription(currentSubscriptionState())
             // Graft the brand-coloured plan label ("Max (5x)") from the Keychain rate-limit tier — a
             // plan mark, not a secret. `nil` (no tier / unreadable creds) draws just "Claude".
-            .withPlanLabel(claudePlanLabel(rateLimitTier: output.diagnostics?.token?.rateLimitTier)))
+            .withPlanLabel(claudePlanLabel(rateLimitTier: output.diagnostics?.token?.rateLimitTier,
+                                           subscriptionType: output.diagnostics?.token?.subscriptionType)))
     }
 
     /// Set the popup model **and** resize the hosted view to fit. A menu item's hosted view must

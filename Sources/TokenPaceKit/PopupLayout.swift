@@ -281,7 +281,7 @@ public struct PopupLayout: Sendable, Equatable {
 
     /// The short plan label shown in brand colour right after "Claude" in the header (e.g. "Max (5x)"),
     /// or `nil` to draw just "Claude". Derived from the Keychain `rateLimitTier` via
-    /// ``claudePlanLabel(rateLimitTier:)`` — comes from the OAuth payload, not the usage snapshot, so
+    /// ``claudePlanLabel(rateLimitTier:subscriptionType:)`` — comes from the OAuth payload, not the usage snapshot, so
     /// the shell grafts it on via ``withPlanLabel(_:)`` rather than threading it through `make`.
     public let planLabel: String?
 
